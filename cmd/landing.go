@@ -366,38 +366,8 @@ func (m landingModel) View() string {
 
 	var sb strings.Builder
 
-	// Logo definition
-	logoLines := []string{
-		" ____                 _             ",
-		"|  _ \\ _   _ ___  ___| |_ ___ _ __  ",
-		"| | | | | | / __|/ __| __/ _ \\ '__| ",
-		"| |_| | |_| \\__ \\ (__| ||  __/ |    ",
-		"|____/ \\__,_|___/\\___|\\__\\___|_|    ",
-	}
-
-	asciiStyle := lipgloss.NewStyle().Foreground(colorMint)
-	urlStyle := lipgloss.NewStyle().Foreground(colorSkyBlue).Bold(true)
-	taglineStyle := lipgloss.NewStyle().Foreground(colorLimeGreen)
-	mutedStyle := lipgloss.NewStyle().Foreground(colorDimGray)
-
-	// Responsive header rendering
-	if m.width > 0 && m.width < 80 {
-		for _, line := range logoLines {
-			sb.WriteString("  " + asciiStyle.Render(strings.TrimSpace(line)) + "\n")
-		}
-		sb.WriteString("\n")
-		sb.WriteString("  " + urlStyle.Render("https://github.com/Nur-Adnan/Duster") + "\n")
-		sb.WriteString("  " + taglineStyle.Render("Deep clean and optimize your Windows PC.") + "\n")
-	} else {
-		sb.WriteString("\n")
-		sb.WriteString("  " + asciiStyle.Render(logoLines[0]) + "  " + urlStyle.Render("https://github.com/Nur-Adnan/Duster") + "\n")
-		sb.WriteString("  " + asciiStyle.Render(logoLines[1]) + "  " + taglineStyle.Render("Deep clean and optimize your Windows PC.") + "\n")
-		sb.WriteString("  " + asciiStyle.Render(logoLines[2]) + "  " + mutedStyle.Render("Windows Core OS Native DLL Utilities Engine") + "\n")
-		sb.WriteString("  " + asciiStyle.Render(logoLines[3]) + "  " + mutedStyle.Render("Type 1-9 to launch, Arrow keys to navigate") + "\n")
-		sb.WriteString("  " + asciiStyle.Render(logoLines[4]) + "  " + mutedStyle.Render("Built with Go 1.25.x & Win32 APIs") + "\n")
-	}
-
-	sb.WriteString("\n")
+	// Render the high-fidelity responsive header matching the screenshot
+	sb.WriteString(RenderHeader(m.width, "duster"))
 
 	// Dynamic update notification
 	currentVer := AppVersion
