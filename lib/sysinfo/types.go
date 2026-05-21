@@ -8,9 +8,11 @@ type DiskInfo struct {
 }
 
 type ProcessInfo struct {
-	Name string
-	PID  int32
-	CPU  float64
+	Name   string
+	PID    int32
+	CPU    float64
+	Memory float64
+	Status string
 }
 
 type SystemStats struct {

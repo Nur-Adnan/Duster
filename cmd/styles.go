@@ -18,16 +18,17 @@ import (
 // ─────────────────────────────────────────────
 
 var (
-	colorDimGray   = lipgloss.Color("#4A4A5A")
-	colorSlate     = lipgloss.Color("#2D2D3D")
+	colorDimGray   = lipgloss.Color("#333333") // subtle dark gray separators/empty ticks
+	colorSlate     = lipgloss.Color("#1A1A24")
 	colorWhite     = lipgloss.Color("#E8E8F0")
-	colorMint      = lipgloss.Color("#00D4AA") // primary accent — teal/mint
-	colorAmber     = lipgloss.Color("#FFB347") // warning
-	colorCoral     = lipgloss.Color("#FF6B6B") // danger/error
-	colorGold      = lipgloss.Color("#FFD700") // highlight
-	colorSkyBlue   = lipgloss.Color("#87CEEB") // secondary accent
-	colorLimeGreen = lipgloss.Color("#7FFF00") // success
-	colorSilver    = lipgloss.Color("#A0A0B0") // muted text
+	colorMint      = lipgloss.Color("#00FF66") // neon green primary
+	colorAmber     = lipgloss.Color("#FFCC00") // yellow metrics
+	colorCoral     = lipgloss.Color("#FF4D4D") // danger/error
+	colorGold      = lipgloss.Color("#FFCC00") // highlight/yellow
+	colorSkyBlue   = lipgloss.Color("#00D4FF") // cyan secondary
+	colorLimeGreen = lipgloss.Color("#00FF66") // neon green success
+	colorSilver    = lipgloss.Color("#A0A0B0") // muted white labels
+	colorBlue      = lipgloss.Color("#00A3FF") // blue process status
 )
 
 // ─────────────────────────────────────────────
@@ -37,18 +38,18 @@ var (
 var (
 	styleLabel    = lipgloss.NewStyle().Foreground(colorSilver)
 	styleValue    = lipgloss.NewStyle().Foreground(colorWhite).Bold(true)
-	styleAccent   = lipgloss.NewStyle().Foreground(colorMint).Bold(true)
+	styleAccent   = lipgloss.NewStyle().Foreground(colorSkyBlue).Bold(true)
 	styleSuccess  = lipgloss.NewStyle().Foreground(colorLimeGreen).Bold(true)
 	styleWarning  = lipgloss.NewStyle().Foreground(colorAmber).Bold(true)
 	styleDanger   = lipgloss.NewStyle().Foreground(colorCoral).Bold(true)
 	styleMuted    = lipgloss.NewStyle().Foreground(colorDimGray)
 	styleDivider  = lipgloss.NewStyle().Foreground(colorDimGray)
-	styleSelected = lipgloss.NewStyle().Foreground(colorMint).Bold(true)
-	styleHeader   = lipgloss.NewStyle().Foreground(colorWhite).Bold(true)
+	styleSelected = lipgloss.NewStyle().Foreground(colorSkyBlue).Bold(true)
+	styleHeader   = lipgloss.NewStyle().Foreground(colorSkyBlue).Bold(true)
 	styleSub      = lipgloss.NewStyle().Foreground(colorSilver)
 	styleNumber   = lipgloss.NewStyle().Foreground(colorDimGray)
 	styleAge      = lipgloss.NewStyle().Foreground(colorAmber)
-	styleTitle    = lipgloss.NewStyle().Foreground(colorMint).Bold(true)
+	styleTitle    = lipgloss.NewStyle().Foreground(colorSkyBlue).Bold(true)
 
 	// Re-exported aliases used by older commands to avoid renaming every ref
 	boldWhite        = lipgloss.NewStyle().Foreground(colorWhite).Bold(true)
@@ -60,12 +61,12 @@ var (
 	footerStyle      = lipgloss.NewStyle().Foreground(colorDimGray).PaddingTop(1).PaddingLeft(2)
 	dirStyle         = lipgloss.NewStyle().Foreground(colorSkyBlue)
 	fileStyle        = lipgloss.NewStyle().Foreground(colorSilver)
-	selectedStyle    = lipgloss.NewStyle().Foreground(colorMint).Bold(true)
+	selectedStyle    = lipgloss.NewStyle().Foreground(colorSkyBlue).Bold(true)
 )
 
 // ─────────────────────────────────────────────
 // progressBar — compact ASCII progress bar
-// Renders: [████████░░░░]
+// Renders exactly like the screenshot: [██████████----------]
 // ─────────────────────────────────────────────
 
 func progressBar(percent float64, width int) string {
@@ -81,18 +82,14 @@ func progressBar(percent float64, width int) string {
 	}
 	empty := width - filled
 
-	var filledStyle lipgloss.Style
-	switch {
-	case percent >= 85:
-		filledStyle = lipgloss.NewStyle().Foreground(colorCoral)
-	case percent >= 60:
-		filledStyle = lipgloss.NewStyle().Foreground(colorAmber)
-	default:
-		filledStyle = lipgloss.NewStyle().Foreground(colorMint)
-	}
+	filledStyle := lipgloss.NewStyle().Foreground(colorMint)
+	emptyStyle := lipgloss.NewStyle().Foreground(colorDimGray)
+	bracketStyle := lipgloss.NewStyle().Foreground(colorSkyBlue)
 
-	return filledStyle.Render(strings.Repeat("█", filled)) +
-		styleMuted.Render(strings.Repeat("░", empty))
+	return bracketStyle.Render("[") +
+		filledStyle.Render(strings.Repeat("█", filled)) +
+		emptyStyle.Render(strings.Repeat("-", empty)) +
+		bracketStyle.Render("]")
 }
 
 // MiniBar — 5-dot mini I/O sparkline (▪▪▪▪□ disk read/write indicator)
@@ -105,7 +102,7 @@ func miniBar(value, maxValue float64, width int) string {
 		filled = width
 	}
 	empty := width - filled
-	return styleAccent.Render(strings.Repeat("▪", filled)) +
+	return styleSuccess.Render(strings.Repeat("▪", filled)) +
 		styleMuted.Render(strings.Repeat("□", empty))
 }
 

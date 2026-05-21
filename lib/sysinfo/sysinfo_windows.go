@@ -367,9 +367,11 @@ func getTopProcesses() []ProcessInfo {
 	}
 
 	type procVal struct {
-		name string
-		pid  int32
-		cpu  float64
+		name   string
+		pid    int32
+		cpu    float64
+		memory float64
+		status string
 	}
 	var vals []procVal
 	seenPIDs := make(map[int32]bool)
@@ -394,6 +396,11 @@ func getTopProcesses() []ProcessInfo {
 		name, err := p.Name()
 		if err != nil {
 			continue
+		}
+
+		memPercent, err := p.MemoryPercent()
+		if err != nil {
+			memPercent = 0
 		}
 
 		procCacheMutex.Lock()
@@ -426,10 +433,18 @@ func getTopProcesses() []ProcessInfo {
 		}
 
 		if cpuPercent > 0.01 {
+			status := "Idle"
+			if cpuPercent > 5.0 {
+				status = "Running"
+			} else if cpuPercent > 0.5 {
+				status = "Active"
+			}
 			vals = append(vals, procVal{
-				name: name,
-				pid:  pid,
-				cpu:  cpuPercent,
+				name:   name,
+				pid:    pid,
+				cpu:    cpuPercent,
+				memory: float64(memPercent),
+				status: status,
 			})
 		}
 	}
@@ -456,9 +471,11 @@ func getTopProcesses() []ProcessInfo {
 
 	for i := 0; i < limit; i++ {
 		results = append(results, ProcessInfo{
-			Name: vals[i].name,
-			PID:  vals[i].pid,
-			CPU:  vals[i].cpu,
+			Name:   vals[i].name,
+			PID:    vals[i].pid,
+			CPU:    vals[i].cpu,
+			Memory: vals[i].memory,
+			Status: vals[i].status,
 		})
 	}
 

@@ -25,15 +25,16 @@ import (
 
 var (
 	colorBlack      = lipgloss.Color("#000000")
-	colorNeonGreen  = lipgloss.Color("#7FFF00") // Lime/Neon Green
-	colorMagenta    = lipgloss.Color("#FF00FF") // Magenta section titles
+	colorNeonGreen  = lipgloss.Color("#00FF66") // Neon Green
+	colorMagenta    = lipgloss.Color("#00D4FF") // Cyan (section titles / accents)
 	colorMutedWhite = lipgloss.Color("#E8E8F0") // Muted White text
-	colorCyanAccent = lipgloss.Color("#00FFFF") // Muted Cyan highlights
-	colorMutedGray  = lipgloss.Color("#4A4A5A") // Dim Gray
+	colorCyanAccent = lipgloss.Color("#FFCC00") // Yellow (highlights / metrics)
+	colorMutedGray  = lipgloss.Color("#333333") // Subtle Dark Gray
+	colorBlueStatus = lipgloss.Color("#00A3FF") // Status blue
 
 	styleTuiTitle        = lipgloss.NewStyle().Foreground(colorMagenta).Bold(true)
 	styleTuiAdmin        = lipgloss.NewStyle().Foreground(colorNeonGreen).Bold(true)
-	styleTuiSysInfo      = lipgloss.NewStyle().Foreground(colorCyanAccent)
+	styleTuiSysInfo      = lipgloss.NewStyle().Foreground(colorMutedWhite)
 	styleTuiWhite        = lipgloss.NewStyle().Foreground(colorMutedWhite)
 	styleTuiMuted        = lipgloss.NewStyle().Foreground(colorMutedGray)
 	styleTuiGreenVal     = lipgloss.NewStyle().Foreground(colorNeonGreen)
