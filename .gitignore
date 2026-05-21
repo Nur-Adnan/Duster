@@ -93,6 +93,8 @@ journal/
 !/CONTRIBUTING.md
 !/SECURITY.md
 !/CHANGELOG.md
+!/CODE_OF_CONDUCT.md
+!/.github/**/*.md
 !/docs/*.md
 !/docs/**/*.md
 duster
