@@ -95,3 +95,4 @@ journal/
 !/CHANGELOG.md
 !/docs/*.md
 !/docs/**/*.md
+duster
