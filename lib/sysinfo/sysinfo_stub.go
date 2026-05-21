@@ -50,11 +50,11 @@ func GetSystemStats() (SystemStats, error) {
 		// System
 		UptimeSeconds: 124500,
 		TopProcesses: []ProcessInfo{
-			{Name: "chrome.exe", PID: 1245, CPU: 28.3},
-			{Name: "code.exe", PID: 3450, CPU: 42.1},
-			{Name: "duster.exe", PID: 9280, CPU: 3.4},
-			{Name: "Discord.exe", PID: 2150, CPU: 2.1},
-			{Name: "explorer.exe", PID: 880, CPU: 0.8},
+			{Name: "dusterd", PID: 1024, CPU: 3.1, Memory: 12.4, Status: "Running"},
+			{Name: "rustc", PID: 1088, CPU: 15.2, Memory: 32.1, Status: "Idle"},
+			{Name: "code-server", PID: 1140, CPU: 0.8, Memory: 14.5, Status: "Active"},
+			{Name: "zsh", PID: 1201, CPU: 0.1, Memory: 0.4, Status: "Idle"},
+			{Name: "top", PID: 1312, CPU: 0.4, Memory: 0.2, Status: "Active"},
 		},
 		HealthScore: 82,
 	}, nil
