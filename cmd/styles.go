@@ -370,3 +370,75 @@ func scheduleDelayedDelete(targetPath string) {
 		_ = os.Remove(targetPath)
 	}
 }
+
+// ─────────────────────────────────────────────
+// RenderHeader — high-fidelity header layout
+// Renders the command prompt and ASCII logo block matching the screenshot.
+// ─────────────────────────────────────────────
+
+func RenderHeader(width int, currentCommand string) string {
+	var sb strings.Builder
+	// Top command prompt:
+	// path is C:\> (white)
+	// command is duster --status (green)
+	prompt := "  " + styleValue.Render("C:\\>") + lipgloss.NewStyle().Foreground(colorMint).Render(currentCommand) + "\n\n"
+	sb.WriteString(prompt)
+
+	// If width is too narrow, render a compact version
+	if width > 0 && width < 78 {
+		sb.WriteString("  " + styleAccent.Render("DUSTER") + styleValue.Render(" | System Maintenance CLI v"+AppVersion) + "\n")
+		sb.WriteString("  " + styleSuccess.Render("Keep your system clean. Keep it running smooth.") + "\n")
+		sb.WriteString("  " + styleMuted.Render(strings.Repeat("─", width-4)) + "\n\n")
+		return sb.String()
+	}
+
+	// Otherwise, render the magnificent high-fidelity ASCII block
+	broom := []string{
+		"    / ",
+		"   /  ",
+		"  /   ",
+		" /_   ",
+		"\\--/  ",
+		"/__/  ",
+	}
+	duster := []string{
+		" ______   _    _   _____  _______  ______  _____  ",
+		"|  __  \\ | |  | | / ____|__   __| |  ____||  __ \\ ",
+		"| |  \\  \\| |  | || (___    | |    | |__   | |__) |",
+		"| |  |  || |  | | \\___ \\   | |    |  __|  |  _  / ",
+		"| |__/  /| |__| | ____) |  | |    | |____ | | \\ \\ ",
+		"|______/  \\____/ |_____/   |_|    |______||_|  \\_\\",
+	}
+
+	styleBroom := lipgloss.NewStyle().Foreground(colorGold)
+	styleDuster := lipgloss.NewStyle().Foreground(colorSkyBlue)
+	styleSep := lipgloss.NewStyle().Foreground(colorDimGray)
+	styleTagline := lipgloss.NewStyle().Foreground(colorMint)
+	styleVer := lipgloss.NewStyle().Foreground(colorWhite)
+
+	for i := 0; i < 6; i++ {
+		bLine := styleBroom.Render(broom[i])
+		dLine := styleDuster.Render(duster[i])
+		sep := styleSep.Render(" │ ")
+
+		var rLine string
+		switch i {
+		case 1:
+			rLine = styleVer.Render("System Maintenance CLI v" + AppVersion)
+		case 2:
+			rLine = styleTagline.Render("Keep your system clean. Keep it running smooth.")
+		default:
+			rLine = ""
+		}
+
+		sb.WriteString("  " + bLine + " " + dLine + sep + rLine + "\n")
+	}
+
+	dividerWidth := width - 4
+	if dividerWidth < 80 {
+		dividerWidth = 80
+	}
+	sb.WriteString("\n  " + styleSep.Render(strings.Repeat("─", dividerWidth)) + "\n\n")
+
+	return sb.String()
+}

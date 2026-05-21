@@ -131,13 +131,8 @@ func (m statusModel) View() string {
 	s := m.stats
 	var doc strings.Builder
 
-	// 1. Top command prompt line
-	doc.WriteString("\n")
-	doc.WriteString("  " + styleValue.Render("C:\\>") + styleAccent.Render("duster --status") + "\n\n")
-
-	// 2. Brand header line
-	doc.WriteString("  " + styleAccent.Render("DUSTER") + styleValue.Render(" | System Maintenance CLI v"+AppVersion) + "\n")
-	doc.WriteString("  " + styleAccent.Render(strings.Repeat("-", 48)) + "\n\n")
+	// Render the high-fidelity responsive header matching the screenshot
+	doc.WriteString(RenderHeader(m.width, "duster --status"))
 
 	// 3. SYSTEM STATUS section
 	doc.WriteString("  " + styleAccent.Render("SYSTEM STATUS") + "\n")
@@ -282,17 +277,36 @@ func (m statusModel) View() string {
 	}
 	rightLines = append(rightLines, styleAccent.Render("System Up: ")+styleWarning.Render(uptimeStr))
 
-	// 7. Join tables side-by-side using Lipgloss
-	leftCol := strings.Join(leftLines, "\n")
-	rightCol := strings.Join(rightLines, "\n")
+	// 7. Join tables side-by-side line-by-line with a vertical separator box-drawing line
+	leftLinesSplit := strings.Split(strings.Join(leftLines, "\n"), "\n")
+	rightLinesSplit := strings.Split(strings.Join(rightLines, "\n"), "\n")
 
-	combined := lipgloss.JoinHorizontal(lipgloss.Top,
-		lipgloss.NewStyle().Width(52).Render(leftCol),
-		lipgloss.NewStyle().Width(45).Render(rightCol),
-	)
+	maxLines := len(leftLinesSplit)
+	if len(rightLinesSplit) > maxLines {
+		maxLines = len(rightLinesSplit)
+	}
 
-	doc.WriteString("  " + strings.ReplaceAll(combined, "\n", "\n  "))
-	doc.WriteString("\n\n")
+	// Pad both slices to match maxLines
+	for len(leftLinesSplit) < maxLines {
+		leftLinesSplit = append(leftLinesSplit, "")
+	}
+	for len(rightLinesSplit) < maxLines {
+		rightLinesSplit = append(rightLinesSplit, "")
+	}
+
+	var combinedRows []string
+	styleSep := lipgloss.NewStyle().Foreground(colorDimGray)
+
+	for i := 0; i < maxLines; i++ {
+		// Safely place horizontal padding to 52 characters, respecting ANSI
+		leftCell := lipgloss.PlaceHorizontal(52, lipgloss.Left, leftLinesSplit[i])
+		sep := styleSep.Render("│ ")
+		rightCell := rightLinesSplit[i]
+
+		combinedRows = append(combinedRows, "  " + leftCell + sep + rightCell)
+	}
+
+	doc.WriteString(strings.Join(combinedRows, "\n") + "\n\n")
 
 	// 8. Keyboard Shortcuts
 	doc.WriteString("  " + styleAccent.Render("Keyboard Shortcuts") + "\n")
