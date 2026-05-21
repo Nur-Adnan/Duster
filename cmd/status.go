@@ -136,7 +136,7 @@ func (m statusModel) View() string {
 
 	// 3. SYSTEM STATUS section
 	doc.WriteString("  " + styleAccent.Render("SYSTEM STATUS") + "\n")
-	
+
 	// Spacing alignment for status progress bars:
 	// Label aligned to 8 chars, progress bar 20 chars, percent value
 	cpuPercent := s.CPUPercent
@@ -303,14 +303,14 @@ func (m statusModel) View() string {
 		sep := styleSep.Render("│ ")
 		rightCell := rightLinesSplit[i]
 
-		combinedRows = append(combinedRows, "  " + leftCell + sep + rightCell)
+		combinedRows = append(combinedRows, "  "+leftCell+sep+rightCell)
 	}
 
 	doc.WriteString(strings.Join(combinedRows, "\n") + "\n\n")
 
 	// 8. Keyboard Shortcuts
 	doc.WriteString("  " + styleAccent.Render("Keyboard Shortcuts") + "\n")
-	
+
 	formatShortcut := func(key, name string) string {
 		return styleValue.Render("[") + styleSuccess.Render(key) + styleValue.Render("] ") + styleValue.Render(name)
 	}
