@@ -1,5 +1,4 @@
 <div align="center">
-  <img src="assets/duster-icon.png" width="120" alt="Duster Logo">
   <h1>Duster</h1>
   <p><strong>Windows-native deep cleaner & system optimization CLI</strong></p>
   <p>A single-binary, zero-dependency terminal utility that cleans caches, analyzes disk usage, monitors system health, and purges developer artifacts — all from your terminal.</p>
@@ -14,7 +13,7 @@
 </p>
 
 <p align="center">
-  <img src="assets/terminal_view.png" width="700" alt="Duster Terminal UI">
+  <img width="1448" height="1086" alt="ChatGPT Image May 21, 2026, 12_01_51 PM" src="https://github.com/user-attachments/assets/259dfe0e-fdb9-4501-a4d6-880ff26d1ca0" />
 </p>
 
 ---
