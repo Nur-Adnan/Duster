@@ -1,0 +1,89 @@
+name: Continuous Integration
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: '1.25.x'
+
+jobs:
+  # ── Step 1: Static Analysis & Linting ──────────────────────────────────
+  lint:
+    name: Lint & Style Verification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Verify Dependencies
+        run: go mod verify
+
+      - name: Go Format Check
+        run: |
+          UNFORMATTED_FILES=$(gofmt -s -l .)
+          if [ -n "$UNFORMATTED_FILES" ]; then
+            echo "The following Go files are not formatted correctly:"
+            echo "$UNFORMATTED_FILES"
+            echo "Please run 'gofmt -w -s .' to fix them."
+            exit 1
+          fi
+          echo "✓ All files formatted correctly."
+
+      - name: Go Vet Static Analysis
+        run: go vet ./...
+
+  # ── Step 2: Test Suite ────────────────────────────────────────────────
+  test:
+    name: Unit Test Suite
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Run Unit Tests (with Race Detector)
+        env:
+          CGO_ENABLED: 1  # Race detector requires CGO
+        run: go test -count=1 -race -v ./...
+
+  # ── Step 3: Build Verification ─────────────────────────────────────────
+  build-verification:
+    name: Compiler & Cross-Build Verification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Run Build Integrity Verification Script
+        run: |
+          chmod +x scripts/verify_build.sh
+          ./scripts/verify_build.sh

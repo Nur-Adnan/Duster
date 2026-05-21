@@ -1,0 +1,196 @@
+# ╔══════════════════════════════════════════════════════════════════════╗
+# ║                  Duster — GoReleaser Configuration                 ║
+# ║              Automated Release Builds & Distribution               ║
+# ╚══════════════════════════════════════════════════════════════════════╝
+#
+# Usage:
+#   goreleaser release --snapshot --clean    # Test build (no publish)
+#   goreleaser release --clean               # Production release (tag required)
+#
+# Install GoReleaser:
+#   go install github.com/goreleaser/goreleaser@latest
+#   or: scoop install goreleaser
+
+version: 2
+
+project_name: duster
+
+before:
+  hooks:
+    # Ensure dependencies are clean
+    - go mod tidy
+    - go mod verify
+    # Run full test suite before any build
+    - go test -count=1 ./...
+    # Generate Windows resource syso file (icon + version metadata)
+    # Requires: go install github.com/josephspurrier/goversioninfo/cmd/goversioninfo@latest
+    - goversioninfo -64 -o resource_windows_amd64.syso
+    - GOARCH=arm64 goversioninfo -arm -o resource_windows_arm64.syso
+
+builds:
+  - id: duster-windows-amd64
+    main: ./main.go
+    binary: du
+    goos:
+      - windows
+    goarch:
+      - amd64
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.Version={{ .Version }}
+      - -X main.BuildDate={{ .Date }}
+      - -X main.Commit={{ .ShortCommit }}
+    # Embed the .syso resource file for Windows PE metadata
+    hooks:
+      pre:
+        - cp resource_windows_amd64.syso .
+
+  - id: duster-windows-arm64
+    main: ./main.go
+    binary: du
+    goos:
+      - windows
+    goarch:
+      - arm64
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.Version={{ .Version }}
+      - -X main.BuildDate={{ .Date }}
+      - -X main.Commit={{ .ShortCommit }}
+    hooks:
+      pre:
+        - cp resource_windows_arm64.syso .
+
+archives:
+  - id: portable
+    builds:
+      - duster-windows-amd64
+      - duster-windows-arm64
+    format: zip
+    name_template: "duster-{{ .Version }}-{{ .Os }}-{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+      - SECURITY.md
+
+checksum:
+  name_template: "checksums-sha256.txt"
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  use: github
+  groups:
+    - title: "🚀 Features"
+      regexp: '^.*?feat(\(.+\))?\!?:.+$'
+      order: 0
+    - title: "🐛 Bug Fixes"
+      regexp: '^.*?fix(\(.+\))?\!?:.+$'
+      order: 1
+    - title: "🔒 Security"
+      regexp: '^.*?sec(\(.+\))?\!?:.+$'
+      order: 2
+    - title: "📖 Documentation"
+      regexp: '^.*?docs?(\(.+\))?\!?:.+$'
+      order: 3
+    - title: "🔧 Maintenance"
+      regexp: '^.*?(refactor|chore|test)(\(.+\))?\!?:.+$'
+      order: 4
+  filters:
+    exclude:
+      - "^Merge"
+      - "^ci:"
+
+release:
+  github:
+    owner: Nur-Adnan
+    name: Duster
+  draft: false
+  prerelease: false
+  make_latest: true
+  name_template: "Duster v{{ .Version }}"
+  header: |
+    ## Duster v{{ .Version }} — Windows Deep Cleaner & System Optimizer
+
+    Production release for Windows 10/11 (x64 and ARM64).
+
+    ### Installation Options
+
+    | Method | Command / Action |
+    |--------|-----------------|
+    | **Portable** | Download `duster-{{ .Version }}-windows-amd64.zip`, extract, and run `du.exe` |
+    | **Installer** | Download `Duster-Setup-{{ .Version }}-x64.exe` and run the setup wizard |
+    | **Scoop** | `scoop bucket add duster https://github.com/Nur-Adnan/scoop-duster && scoop install duster` |
+    | **winget** | `winget install NurAdnan.Duster` (pending submission) |
+
+    ### Quick Start
+    ```powershell
+    # View system status dashboard
+    du status
+
+    # Preview what can be cleaned (safe dry-run)
+    du clean --dry-run
+
+    # Deep clean with all categories
+    du clean
+
+    # Run system diagnostics
+    du doctor
+    ```
+  footer: |
+    ---
+    **Full Changelog**: https://github.com/Nur-Adnan/Duster/compare/{{ .PreviousTag }}...{{ .Tag }}
+
+    > ⚠️ **Note**: If Windows SmartScreen blocks the executable, click "More info" → "Run anyway".
+    > This is normal for unsigned software. Code signing is planned for a future release.
+
+# Signing configuration (uncomment when you have a code signing certificate)
+# signs:
+#   - cmd: powershell
+#     args:
+#       - "-File"
+#       - "scripts/sign.ps1"
+#       - "-BinaryPath"
+#       - "${artifact}"
+#     artifacts: binary
+
+# Scoop manifest generation
+scoops:
+  - name: duster
+    repository:
+      owner: Nur-Adnan
+      name: scoop-duster
+    homepage: "https://github.com/Nur-Adnan/Duster"
+    description: "Windows-native deep cleaner and system optimization CLI utility"
+    license: MIT
+    skip_upload: true  # Set to false when scoop bucket repo is ready
+
+# Winget manifest generation
+winget:
+  - name: duster
+    publisher: "Nur Adnan"
+    short_description: "Windows-native deep cleaner and system optimization CLI"
+    license: MIT
+    publisher_url: "https://github.com/Nur-Adnan"
+    publisher_support_url: "https://github.com/Nur-Adnan/Duster/issues"
+    copyright: "Copyright (c) 2026 Nur Adnan"
+    tags:
+      - cleaner
+      - optimizer
+      - windows
+      - cli
+      - disk
+      - cache
+    repository:
+      owner: Nur-Adnan
+      name: winget-pkgs
+      branch: "duster-{{ .Version }}"
+    skip_upload: true  # Set to false when ready to submit to winget-pkgs

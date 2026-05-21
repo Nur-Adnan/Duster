@@ -1,0 +1,271 @@
+name: Release Pipeline
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  GO_VERSION: '1.25.x'
+
+jobs:
+  # ── Stage 1: Test ──────────────────────────────────────────────────
+  test:
+    name: Test Suite
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Verify Dependencies
+        run: go mod verify
+
+      - name: Run Tests
+        env:
+          CGO_ENABLED: 0
+        run: go test -count=1 -v ./...
+
+      - name: Static Analysis
+        run: go vet ./...
+
+  # ── Stage 2: Build ─────────────────────────────────────────────────
+  build:
+    name: Build Windows Binaries
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: windows
+            goarch: amd64
+            suffix: amd64
+          - goos: windows
+            goarch: arm64
+            suffix: arm64
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Extract Version from Tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Compile Binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          BUILD_DATE=$(date +%Y-%m-%d)
+          COMMIT=$(git rev-parse --short HEAD)
+          go build -trimpath \
+            -ldflags="-s -w \
+              -X main.Version=${{ steps.version.outputs.version }} \
+              -X main.BuildDate=${BUILD_DATE} \
+              -X main.Commit=${COMMIT}" \
+            -o duster-windows-${{ matrix.suffix }}.exe .
+
+      - name: Upload Binary Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: duster-windows-${{ matrix.suffix }}
+          path: duster-windows-${{ matrix.suffix }}.exe
+          retention-days: 5
+
+  # ── Stage 3: Package & Release ─────────────────────────────────────
+  release:
+    name: Package & Publish Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for changelog
+
+      - name: Extract Version from Tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Download AMD64 Binary
+        uses: actions/download-artifact@v4
+        with:
+          name: duster-windows-amd64
+          path: dist/
+
+      - name: Download ARM64 Binary
+        uses: actions/download-artifact@v4
+        with:
+          name: duster-windows-arm64
+          path: dist/
+
+      - name: Create Portable ZIP (AMD64)
+        run: |
+          mkdir -p dist/portable/Duster-${{ steps.version.outputs.version }}-Portable-x64
+          cp dist/duster-windows-amd64.exe dist/portable/Duster-${{ steps.version.outputs.version }}-Portable-x64/du.exe
+          cp README.md LICENSE SECURITY.md dist/portable/Duster-${{ steps.version.outputs.version }}-Portable-x64/ 2>/dev/null || true
+          printf '@echo off\ntitle Duster\n"%%~dp0du.exe" --version\ncmd /K\n' > dist/portable/Duster-${{ steps.version.outputs.version }}-Portable-x64/Launch-Duster.bat
+          cd dist/portable && zip -r ../Duster-${{ steps.version.outputs.version }}-Portable-x64.zip Duster-${{ steps.version.outputs.version }}-Portable-x64/
+
+      - name: Create Portable ZIP (ARM64)
+        run: |
+          mkdir -p dist/portable/Duster-${{ steps.version.outputs.version }}-Portable-arm64
+          cp dist/duster-windows-arm64.exe dist/portable/Duster-${{ steps.version.outputs.version }}-Portable-arm64/du.exe
+          cp README.md LICENSE SECURITY.md dist/portable/Duster-${{ steps.version.outputs.version }}-Portable-arm64/ 2>/dev/null || true
+          printf '@echo off\ntitle Duster\n"%%~dp0du.exe" --version\ncmd /K\n' > dist/portable/Duster-${{ steps.version.outputs.version }}-Portable-arm64/Launch-Duster.bat
+          cd dist/portable && zip -r ../Duster-${{ steps.version.outputs.version }}-Portable-arm64.zip Duster-${{ steps.version.outputs.version }}-Portable-arm64/
+
+      - name: Generate SHA-256 Checksums
+        run: |
+          cd dist
+          sha256sum \
+            duster-windows-amd64.exe \
+            duster-windows-arm64.exe \
+            Duster-${{ steps.version.outputs.version }}-Portable-x64.zip \
+            Duster-${{ steps.version.outputs.version }}-Portable-arm64.zip \
+            > checksums-sha256.txt
+
+      - name: Generate Changelog
+        id: changelog
+        run: |
+          # Get commits since last tag
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            CHANGELOG=$(git log --oneline --no-merges ${PREV_TAG}..HEAD)
+          else
+            CHANGELOG=$(git log --oneline --no-merges -20)
+          fi
+          # Write to file for the release body
+          echo "$CHANGELOG" > dist/CHANGELOG.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/duster-windows-amd64.exe
+            dist/duster-windows-arm64.exe
+            dist/Duster-${{ steps.version.outputs.version }}-Portable-x64.zip
+            dist/Duster-${{ steps.version.outputs.version }}-Portable-arm64.zip
+            dist/checksums-sha256.txt
+            scripts/install.ps1
+            scripts/install.cmd
+            scripts/uninstall.ps1
+          draft: false
+          make_latest: true
+          prerelease: false
+          name: "Duster v${{ steps.version.outputs.version }}"
+          body: |
+            ## Duster v${{ steps.version.outputs.version }} — Windows Deep Cleaner & System Optimizer
+
+            Production release for Windows 10/11 (x64 and ARM64).
+
+            ---
+
+            ### ⚡ Quick Install
+
+            **PowerShell** (recommended — auto-detects architecture, verifies checksum, adds to PATH):
+            ```powershell
+            irm https://raw.githubusercontent.com/Nur-Adnan/Duster/main/scripts/install.ps1 | iex
+            ```
+
+            **CMD** (Command Prompt):
+            ```cmd
+            powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/Nur-Adnan/Duster/main/scripts/install.ps1 | iex"
+            ```
+
+            ---
+
+            ### 📥 Manual Download
+
+            | File | Architecture | Description |
+            |------|-------------|-------------|
+            | `duster-windows-amd64.exe` | x64 | Standalone binary (most PCs) |
+            | `duster-windows-arm64.exe` | ARM64 | Standalone binary (Surface Pro X, etc.) |
+            | `Duster-...-Portable-x64.zip` | x64 | Portable ZIP with launcher + docs |
+            | `Duster-...-Portable-arm64.zip` | ARM64 | Portable ZIP with launcher + docs |
+            | `install.ps1` | Any | PowerShell installer script |
+            | `install.cmd` | Any | CMD installer script |
+            | `uninstall.ps1` | Any | PowerShell uninstaller |
+            | `checksums-sha256.txt` | — | SHA-256 checksums for all files |
+
+            ### 🚀 Quick Start
+            ```powershell
+            du status          # Live system dashboard
+            du clean --dry-run # Preview cleanable data
+            du clean           # Deep clean (35 categories)
+            du doctor          # System diagnostics
+            du --help          # All commands
+            ```
+
+            ### 🔒 Security
+            - Compiled with `CGO_ENABLED=0` — fully static, no C runtime
+            - Built with `-trimpath` for reproducible builds
+            - Stripped with `-s -w` for minimal binary size
+            - SHA-256 checksums provided — verify before running
+
+            > ⚠️ **Windows SmartScreen**: Click "More info" → "Run anyway" if blocked. This is normal for unsigned binaries.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ── Stage 4: Build Inno Setup Installer (Windows runner) ───────────
+  installer:
+    name: Build Inno Setup Installer
+    needs: [build, release]
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Extract Version from Tag
+        id: version
+        shell: bash
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Download AMD64 Binary
+        uses: actions/download-artifact@v4
+        with:
+          name: duster-windows-amd64
+          path: dist/
+
+      - name: Install Inno Setup
+        shell: powershell
+        run: |
+          choco install innosetup -y --no-progress
+          echo "C:\Program Files (x86)\Inno Setup 6" | Out-File -Append -FilePath $env:GITHUB_PATH -Encoding utf8
+
+      - name: Compile Installer
+        shell: cmd
+        run: |
+          "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion=${{ steps.version.outputs.version }} installer\duster-setup.iss
+
+      - name: Upload Installer Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: duster-installer
+          path: dist/installer/Duster-Setup-*.exe
+          retention-days: 5
+
+      - name: Upload Installer to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/installer/Duster-Setup-*.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

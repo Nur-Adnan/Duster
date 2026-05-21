@@ -1,0 +1,97 @@
+# ====================================================================
+# DUSTER PRODUCTION-GRADE GITIGNORE
+# Optimized for Windows Native Go Development & AI-Assisted Environments
+# ====================================================================
+
+# --------------------------------------------------------------------
+# Windows OS Specific Junk Files
+# --------------------------------------------------------------------
+Thumbs.db
+ehthumbs.db
+desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# --------------------------------------------------------------------
+# Compiled Binaries and Go Build Outputs
+# --------------------------------------------------------------------
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.prof
+*.syso
+dist/
+bin/
+__debug_bin
+
+# --------------------------------------------------------------------
+# Go Dependencies and Caches
+# --------------------------------------------------------------------
+.gocache/
+.gomod/
+vendor/
+*.out
+coverage.out
+coverage.html
+
+# --------------------------------------------------------------------
+# Development Caches and Temporary Files
+# --------------------------------------------------------------------
+tmp/
+temp/
+*.tmp
+*.temp
+*.log
+logs/
+session.json
+
+# --------------------------------------------------------------------
+# Editor / IDE Configuration (VS Code, Cursor, JetBrains)
+# --------------------------------------------------------------------
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+*.swo
+
+# --------------------------------------------------------------------
+# Node.js / Next.js Setup (if any scripts/collateral are run)
+# --------------------------------------------------------------------
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# --------------------------------------------------------------------
+# AI Assistants, Agentic Tools & Editor Configurations (CRITICAL)
+# --------------------------------------------------------------------
+.agents/
+.cursor/
+.gemini/
+.claude/
+.kiro/
+.cursorrules
+journal/
+
+# --------------------------------------------------------------------
+# Private Documentation, Prompts, Planning & AI Notes
+# --------------------------------------------------------------------
+# Ignore all markdown files globally by default to prevent committing
+# private planning documents, workflow logs, fuzzer notes, or guidelines.
+*.md
+**/*.md
+
+# Whitelist: Explicitly preserve required public files
+!/README.md
+!/CONTRIBUTING.md
+!/SECURITY.md
+!/CHANGELOG.md
+!/docs/*.md
+!/docs/**/*.md

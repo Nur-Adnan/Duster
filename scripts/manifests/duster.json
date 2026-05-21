@@ -1,0 +1,39 @@
+{
+    "version": "1.0.1",
+    "description": "Duster (du) — Windows-native deep cleaner & system optimizer CLI utility.",
+    "homepage": "https://github.com/Nur-Adnan/Duster",
+    "license": "MIT",
+    "notes": [
+        "Duster is a fast, safe, Windows-native disk cleaning and optimization CLI.",
+        "Run 'du --help' to see all available commands.",
+        "Run 'du status' for a live system status dashboard.",
+        "Run 'du clean --dry-run' to preview cleanable data."
+    ],
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/Nur-Adnan/Duster/releases/download/v1.0.1/duster-windows-amd64.exe#/du.exe",
+            "hash": ""
+        },
+        "arm64": {
+            "url": "https://github.com/Nur-Adnan/Duster/releases/download/v1.0.1/duster-windows-arm64.exe#/du.exe",
+            "hash": ""
+        }
+    },
+    "bin": "du.exe",
+    "checkver": {
+        "github": "https://github.com/Nur-Adnan/Duster"
+    },
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/Nur-Adnan/Duster/releases/download/v$version/duster-windows-amd64.exe#/du.exe"
+            },
+            "arm64": {
+                "url": "https://github.com/Nur-Adnan/Duster/releases/download/v$version/duster-windows-arm64.exe#/du.exe"
+            }
+        }
+    },
+    "suggest": {
+        "Windows Terminal": ["extras/windows-terminal"]
+    }
+}

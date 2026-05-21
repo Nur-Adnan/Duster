@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Do not easy edit this file. Verify elements using choco pack -->
+<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+  <metadata>
+    <id>duster</id>
+    <version>1.0.1</version>
+    <packageSourceUrl>https://github.com/Nur-Adnan/duster/tree/main/scripts/manifests</packageSourceUrl>
+    <owners>Nur Adnan</owners>
+    <title>Duster CLI</title>
+    <authors>Nur Adnan</authors>
+    <projectUrl>https://github.com/Nur-Adnan/duster</projectUrl>
+    <iconUrl>https://raw.githubusercontent.com/Nur-Adnan/Duster/main/assets/duster-icon.png</iconUrl>
+    <copyright>2026 Nur Adnan</copyright>
+    <licenseUrl>https://github.com/Nur-Adnan/duster/blob/main/LICENSE</licenseUrl>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <projectSourceUrl>https://github.com/Nur-Adnan/duster</projectSourceUrl>
+    <docsUrl>https://github.com/Nur-Adnan/duster/blob/main/README.md</docsUrl>
+    <bugTrackerUrl>https://github.com/Nur-Adnan/duster/issues</bugTrackerUrl>
+    <tags>duster clean optimize disk system memory cli admin windows-native</tags>
+    <summary>Duster (du) - Native Windows CLI Deep Cleaner &amp; Optimizer</summary>
+    <description>
+      Duster is an advanced, Windows-native command-line cleaning and performance optimization tool.
+      It safely cleans temporary folders, Windows Update cache, Prefetch directories, and browser databases.
+      It also offers live performance optimization such as system SSD TRIM execution and DNS flushing.
+    </description>
+    <releaseNotes>https://github.com/Nur-Adnan/Duster/releases/tag/v1.0.1</releaseNotes>
+  </metadata>
+  <files>
+    <file src="tools\**" target="tools" />
+  </files>
+</package>

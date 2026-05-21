@@ -1,0 +1,48 @@
+# yaml-language-server: $schema=https://github.com/microsoft/winget-cli/releases/download/v1.4.10173/manifest.singleton.1.4.0.schema.json
+PackageIdentifier: NurAdnan.Duster
+PackageVersion: 1.0.1
+PackageName: Duster
+Publisher: Nur Adnan
+PublisherUrl: https://github.com/Nur-Adnan/Duster
+PublisherSupportUrl: https://github.com/Nur-Adnan/Duster/issues
+Author: Nur Adnan
+ShortDescription: Native Windows CLI Deep Cleaning & Performance Optimizer.
+Description: >-
+  Duster (du) is a high-performance, Windows-native command-line cleaning
+  and optimization utility. It safely reclaims disk space by cleaning
+  35+ categories including browser caches, developer tool caches, system
+  temp files, application caches (Discord, Spotify, Slack, Teams, Steam),
+  GPU shader caches, crash dumps, and more. Features include live system
+  monitoring, SSD TRIM optimization, DNS flushing, and detailed cleanup
+  reporting with dry-run preview support.
+Moniker: duster
+Tags:
+  - utility
+  - clean
+  - cleaner
+  - optimization
+  - system
+  - windows
+  - cli
+  - disk
+  - cache
+  - performance
+License: MIT
+LicenseUrl: https://github.com/Nur-Adnan/Duster/blob/main/LICENSE
+Copyright: Copyright (c) 2026 Nur Adnan
+ReleaseNotesUrl: https://github.com/Nur-Adnan/Duster/releases/tag/v1.0.1
+Installers:
+  - Architecture: x64
+    InstallerType: portable
+    InstallerUrl: https://github.com/Nur-Adnan/Duster/releases/download/v1.0.1/duster-windows-amd64.exe
+    InstallerSha256: cc49ca588370b2332841f9c176eb1020da675c2329f8fd06cea1587c39dc32cc
+    Commands:
+      - du
+  - Architecture: arm64
+    InstallerType: portable
+    InstallerUrl: https://github.com/Nur-Adnan/Duster/releases/download/v1.0.1/duster-windows-arm64.exe
+    InstallerSha256: b96dce7fe04e20aa6b6cc4e3c34516bf870e3940d3668c7e41b776f252c9cf65
+    Commands:
+      - du
+ManifestType: singleton
+ManifestVersion: 1.4.0
