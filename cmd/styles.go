@@ -377,6 +377,11 @@ func scheduleDelayedDelete(targetPath string) {
 // ─────────────────────────────────────────────
 
 func RenderHeader(width int, currentCommand string) string {
+	return RenderHeaderWithSubtitle(width, currentCommand, "System Maintenance CLI v"+AppVersion, "Keep your system clean. Keep it running smooth.")
+}
+
+// RenderHeaderWithSubtitle — generalized header layout supporting custom title and subtitle on the right
+func RenderHeaderWithSubtitle(width int, currentCommand, title, subtitle string) string {
 	var sb strings.Builder
 	// Top command prompt:
 	// path is C:\> (white)
@@ -386,8 +391,10 @@ func RenderHeader(width int, currentCommand string) string {
 
 	// If width is too narrow, render a compact version
 	if width > 0 && width < 78 {
-		sb.WriteString("  " + styleAccent.Render("DUSTER") + styleValue.Render(" | System Maintenance CLI v"+AppVersion) + "\n")
-		sb.WriteString("  " + styleSuccess.Render("Keep your system clean. Keep it running smooth.") + "\n")
+		sb.WriteString("  " + styleAccent.Render("DUSTER") + styleValue.Render(" | "+title) + "\n")
+		if subtitle != "" {
+			sb.WriteString("  " + styleSuccess.Render(subtitle) + "\n")
+		}
 		sb.WriteString("  " + styleMuted.Render(strings.Repeat("─", width-4)) + "\n\n")
 		return sb.String()
 	}
@@ -414,7 +421,7 @@ func RenderHeader(width int, currentCommand string) string {
 	styleDuster := lipgloss.NewStyle().Foreground(colorSkyBlue)
 	styleSep := lipgloss.NewStyle().Foreground(colorDimGray)
 	styleTagline := lipgloss.NewStyle().Foreground(colorMint)
-	styleVer := lipgloss.NewStyle().Foreground(colorWhite)
+	styleVer := lipgloss.NewStyle().Foreground(colorWhite).Bold(true)
 
 	for i := 0; i < 6; i++ {
 		bLine := styleBroom.Render(broom[i])
@@ -424,9 +431,9 @@ func RenderHeader(width int, currentCommand string) string {
 		var rLine string
 		switch i {
 		case 1:
-			rLine = styleVer.Render("System Maintenance CLI v" + AppVersion)
+			rLine = styleVer.Render(title)
 		case 2:
-			rLine = styleTagline.Render("Keep your system clean. Keep it running smooth.")
+			rLine = styleTagline.Render(subtitle)
 		default:
 			rLine = ""
 		}
