@@ -393,28 +393,15 @@ func executeClean(cmd *cobra.Command, args []string) {
 }
 
 func executeCleanCLI(cmd *cobra.Command, args []string) {
-	// ── Header ──────────────────────────────────────────────────────────
-	fmt.Println()
-	fmt.Println("  " + styleTitle.Render("Duster — Deep Clean"))
-	fmt.Println("  " + styleMuted.Render(strings.Repeat("═", 60)))
-	fmt.Println()
+	startTime := time.Now()
 
 	categories := getCategories()
-	var totalSize int64
-	var totalFiles int
+	totalCategories := len(categories)
 
 	whitelistMap := make(map[string]bool)
 	for _, id := range whitelist {
 		whitelistMap[strings.ToLower(strings.TrimSpace(id))] = true
 	}
-
-	type resultRow struct {
-		name      string
-		sizeText  string
-		fileCount int
-		status    string // "ok", "skipped", "noaccess", "adminonly"
-	}
-	var rows []resultRow
 
 	// Setup spinner usage detection
 	useSpinner := !debug
@@ -425,84 +412,182 @@ func executeCleanCLI(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	if useSpinner {
-		fmt.Println("  " + styleAccent.Render("🔍 [1/2] Scanning cache directories..."))
-		fmt.Println()
+	// ── Category group definitions ───────────────────────────────────────
+	type categoryGroup struct {
+		name  string
+		icon  string
+		catID map[string]bool
+	}
+	groups := []categoryGroup{
+		{name: "System Core", icon: "⚙", catID: map[string]bool{
+			"temp": true, "update": true, "prefetch": true, "wer": true,
+			"recycle": true, "dns": true, "delivery_opt": true, "memdumps": true,
+			"logfiles": true, "recent": true, "installer_patches": true, "fontcache": true,
+		}},
+		{name: "Web Browsers", icon: "🌐", catID: map[string]bool{
+			"browsers": true, "opera": true,
+		}},
+		{name: "Developer Tools", icon: "🛠", catID: map[string]bool{
+			"npm": true, "pnpm": true, "yarn": true, "bun": true, "pip": true,
+			"cargo": true, "gradle": true, "nuget": true, "docker": true,
+			"vscode": true, "jetbrains": true,
+		}},
+		{name: "Applications", icon: "📦", catID: map[string]bool{
+			"discord": true, "spotify": true, "slack": true, "teams": true,
+			"steam": true, "epic": true, "adobe": true,
+		}},
+		{name: "GPU & Graphics", icon: "🎮", catID: map[string]bool{
+			"gpu_shader": true, "thumbs": true,
+		}},
+		{name: "Crash & Diagnostic Data", icon: "🔍", catID: map[string]bool{
+			"crash_dumps": true,
+		}},
 	}
 
+	// ── Full System Scan Header ──────────────────────────────────────────
+	modeLabel := "DEEP CLEAN"
+	if dryRun {
+		modeLabel = "DRY RUN SCAN"
+	}
+
+	fmt.Println()
+	fmt.Println("  " + styleDivider.Render(strings.Repeat("═", 66)))
+	fmt.Printf("  %s  %s\n",
+		styleAccent.Render("DUSTER"),
+		styleValue.Render("Full System "+modeLabel),
+	)
+	fmt.Printf("  %s\n",
+		styleMuted.Render("Scanning entire Windows environment for reclaimable space"),
+	)
+	fmt.Println("  " + styleDivider.Render(strings.Repeat("═", 66)))
+	fmt.Println()
+
+	// Scan scope summary
+	fmt.Printf("  %s  %s categories across %s scan groups\n",
+		styleAccent.Render("▸ Scope:"),
+		styleValue.Render(fmt.Sprintf("%d", totalCategories)),
+		styleValue.Render(fmt.Sprintf("%d", len(groups))),
+	)
+
+	scanLocations := []string{
+		"C:\\Windows\\Temp", "C:\\Windows\\SoftwareDistribution",
+		"%LOCALAPPDATA%", "%APPDATA%", "%TEMP%",
+		"%USERPROFILE%", "C:\\$Recycle.Bin",
+	}
+	fmt.Printf("  %s  %s\n",
+		styleAccent.Render("▸ Targets:"),
+		styleMuted.Render(strings.Join(scanLocations, ", ")),
+	)
+	fmt.Println()
+
+	type resultRow struct {
+		name      string
+		sizeText  string
+		fileCount int
+		status    string // "ok", "skipped", "noaccess", "adminonly"
+		size      int64
+	}
+	var rows []resultRow
+	var totalSize int64
+	var totalFiles int
+	completedCategories := 0
+
 	// ── Scan phase ────────────────────────────────────────────────────────
-	for _, cat := range categories {
-		if whitelistMap[cat.ID] {
-			rows = append(rows, resultRow{name: cat.Name, sizeText: "protected", status: "skipped"})
-			if useSpinner {
+	for gi, group := range groups {
+		// Collect categories that belong to this group in the original order
+		var groupCats []CleanCategory
+		for _, cat := range categories {
+			if group.catID[cat.ID] {
+				groupCats = append(groupCats, cat)
+			}
+		}
+		if len(groupCats) == 0 {
+			continue
+		}
+
+		// Print stage header
+		stageNum := gi + 1
+		fmt.Printf("  %s %s %s %s\n",
+			styleAccent.Render(fmt.Sprintf("━━━ STAGE %d/%d ━━━", stageNum, len(groups))),
+			styleMuted.Render(group.icon),
+			styleValue.Render(group.name),
+			styleMuted.Render(strings.Repeat("━", 40-len(group.name))),
+		)
+		fmt.Println()
+
+		var stageSize int64
+		var stageFiles int
+
+		for _, cat := range groupCats {
+			completedCategories++
+			progressPct := float64(completedCategories) / float64(totalCategories) * 100.0
+
+			if whitelistMap[cat.ID] {
+				rows = append(rows, resultRow{name: cat.Name, sizeText: "protected", status: "skipped"})
 				fmt.Printf("  %s  %s  %s\n",
 					styleMuted.Render("○"),
 					styleLabel.Render(padRight(cat.Name, 32)),
 					styleWarning.Render("skipped"),
 				)
+				continue
 			}
-			continue
-		}
-		if cat.ID == "prefetch" && !elevation.IsAdmin() {
-			rows = append(rows, resultRow{name: cat.Name, sizeText: "admin required", status: "adminonly"})
-			if useSpinner {
+			if cat.ID == "prefetch" && !elevation.IsAdmin() {
+				rows = append(rows, resultRow{name: cat.Name, sizeText: "admin required", status: "adminonly"})
 				fmt.Printf("  %s  %s  %s\n",
 					styleMuted.Render("○"),
 					styleLabel.Render(padRight(cat.Name, 32)),
 					styleWarning.Render("admin only"),
 				)
+				continue
 			}
-			continue
-		}
 
-		var spinner *cliSpinner
-		if useSpinner {
-			spinner = newCliSpinner("Scan", cat.Name)
-			onScanProgress = func(path string, info os.FileInfo) {
-				spinner.updateProgress(path, info.Size())
-			}
-			spinner.start()
-		}
-
-		var size int64
-		var files int
-		var err error
-		if cat.CustomScan != nil {
-			size, files, err = cat.CustomScan(true, debug)
-		} else {
-			size, files, err = scanDirCategory(cat)
-		}
-
-		if useSpinner {
-			spinner.stop()
-			onScanProgress = nil
-		}
-
-		if err != nil {
-			if debug {
-				fmt.Printf("  [debug] scan %s: %v\n", cat.Name, err)
-			}
-			rows = append(rows, resultRow{name: cat.Name, sizeText: "no access", status: "noaccess"})
+			var spinner *cliSpinner
 			if useSpinner {
+				spinner = newCliSpinner("Scan", cat.Name)
+				onScanProgress = func(path string, info os.FileInfo) {
+					spinner.updateProgress(path, info.Size())
+				}
+				spinner.start()
+			}
+
+			var size int64
+			var files int
+			var err error
+			if cat.CustomScan != nil {
+				size, files, err = cat.CustomScan(true, debug)
+			} else {
+				size, files, err = scanDirCategory(cat)
+			}
+
+			if useSpinner {
+				spinner.stop()
+				onScanProgress = nil
+			}
+
+			if err != nil {
+				if debug {
+					fmt.Printf("  [debug] scan %s: %v\n", cat.Name, err)
+				}
+				rows = append(rows, resultRow{name: cat.Name, sizeText: "no access", status: "noaccess"})
 				fmt.Printf("  %s  %s  %s\n",
 					styleDanger.Render("✗"),
 					styleLabel.Render(padRight(cat.Name, 32)),
 					styleDanger.Render("no access"),
 				)
+				continue
 			}
-			continue
-		}
 
-		totalSize += size
-		totalFiles += files
-		rows = append(rows, resultRow{name: cat.Name, sizeText: formatBytes(size), fileCount: files, status: "ok"})
+			totalSize += size
+			totalFiles += files
+			stageSize += size
+			stageFiles += files
+			rows = append(rows, resultRow{name: cat.Name, sizeText: formatBytes(size), fileCount: files, status: "ok", size: size})
 
-		if useSpinner {
 			if files == 0 && size == 0 {
 				fmt.Printf("  %s  %s  %s\n",
-					styleMuted.Render("-"),
+					styleMuted.Render("·"),
 					styleLabel.Render(padRight(cat.Name, 32)),
-					styleMuted.Render("empty"),
+					styleMuted.Render("clean"),
 				)
 			} else {
 				fmt.Printf("  %s  %s  %s  %s\n",
@@ -512,73 +597,63 @@ func executeCleanCLI(cmd *cobra.Command, args []string) {
 					styleMuted.Render(fmt.Sprintf("(%s files)", formatInt(files))),
 				)
 			}
-		}
-	}
 
-	// ── Print scan table (Only if spinner wasn't used, to avoid duplication!) ─
-	if !useSpinner {
-		const nameW = 32
-		const sizeW = 10
-		for _, row := range rows {
-			name := padRight(row.name, nameW)
-			switch row.status {
-			case "skipped":
-				fmt.Printf("  %s  %s  %s\n",
-					styleMuted.Render("○"),
-					styleLabel.Render(name),
-					styleWarning.Render("skipped"),
+			// Show running progress after each category
+			if useSpinner && completedCategories%5 == 0 {
+				fmt.Printf("  %s  %s %s scanned so far  %s\n",
+					styleMuted.Render("  "),
+					styleMuted.Render("↳"),
+					styleAccent.Render(formatBytes(totalSize)),
+					styleMuted.Render(fmt.Sprintf("[%d%%]", int(progressPct))),
 				)
-			case "adminonly":
-				fmt.Printf("  %s  %s  %s\n",
-					styleMuted.Render("○"),
-					styleLabel.Render(name),
-					styleWarning.Render("admin only"),
-				)
-			case "noaccess":
-				fmt.Printf("  %s  %s  %s\n",
-					styleDanger.Render("✗"),
-					styleLabel.Render(name),
-					styleDanger.Render("no access"),
-				)
-			default: // "ok"
-				if row.fileCount == 0 && row.sizeText == "0 B" {
-					fmt.Printf("  %s  %s  %s\n",
-						styleMuted.Render("-"),
-						styleLabel.Render(name),
-						styleMuted.Render("empty"),
-					)
-				} else {
-					fmt.Printf("  %s  %s  %s  %s\n",
-						styleSuccess.Render("✓"),
-						styleLabel.Render(name),
-						styleAccent.Render(fmt.Sprintf("%*s", sizeW, row.sizeText)),
-						styleMuted.Render(fmt.Sprintf("(%s files)", formatInt(row.fileCount))),
-					)
-				}
 			}
 		}
+
+		// Stage summary
+		if stageSize > 0 || stageFiles > 0 {
+			fmt.Printf("  %s  %s: %s in %s files\n",
+				styleMuted.Render("  "),
+				styleMuted.Render("Stage total"),
+				styleAccent.Render(formatBytes(stageSize)),
+				styleAccent.Render(formatInt(stageFiles)),
+			)
+		}
+		fmt.Println()
 	}
+
+	// ── Scan complete summary line ─────────────────────────────────────
+	scanDuration := time.Since(startTime)
+	fmt.Println("  " + styleDivider.Render(strings.Repeat("─", 66)))
+	fmt.Printf("  %s  %s reclaimable across %s files in %s categories\n",
+		styleSuccess.Render("SCAN COMPLETE"),
+		styleAccent.Render(formatBytes(totalSize)),
+		styleAccent.Render(formatInt(totalFiles)),
+		styleAccent.Render(fmt.Sprintf("%d", totalCategories)),
+	)
+	fmt.Printf("  %s  Scan completed in %s\n",
+		styleMuted.Render("  "),
+		styleAccent.Render(fmt.Sprintf("%.1fs", scanDuration.Seconds())),
+	)
+	fmt.Println("  " + styleDivider.Render(strings.Repeat("─", 66)))
+	fmt.Println()
 
 	// ── Dry run path ──────────────────────────────────────────────────────
 	if dryRun {
-		fmt.Println()
 		freeNow := getDiskFreeBytes(os.TempDir())
 		printCleanupBanner(true, totalSize, freeNow, totalFiles, len(rows))
 		return
 	}
 
 	// ── Delete phase ──────────────────────────────────────────────────────
+	fmt.Printf("  %s\n",
+		styleAccent.Render("⚡ RECLAIMING SYSTEM SPACE..."),
+	)
 	fmt.Println()
-	if useSpinner {
-		fmt.Println("  " + styleAccent.Render("⚡ [2/2] Reclaiming system space..."))
-		fmt.Println()
-	} else {
-		fmt.Println("  " + styleMuted.Render("Cleaning..."))
-		fmt.Println()
-	}
 
 	var freedSize int64
 	var freedFiles int
+	cleanStart := time.Now()
+
 	for _, cat := range categories {
 		if whitelistMap[cat.ID] {
 			continue
@@ -621,14 +696,62 @@ func executeCleanCLI(cmd *cobra.Command, args []string) {
 				styleSuccess.Render("✓"),
 				styleLabel.Render(padRight(cat.Name, 32)),
 				styleAccent.Render(formatBytes(sizeFreed)),
-				styleMuted.Render(fmt.Sprintf("(%s files)", formatInt(freedFiles))),
+				styleMuted.Render(fmt.Sprintf("(%s files)", formatInt(filesFreed))),
 			)
 		}
 	}
 
+	cleanDuration := time.Since(cleanStart)
+	totalDuration := time.Since(startTime)
+
+	// ── Final completion banner ───────────────────────────────────────
 	fmt.Println()
+	fmt.Println("  " + styleDivider.Render(strings.Repeat("═", 66)))
+	fmt.Println("  " + styleSuccess.Render("✓ FULL SYSTEM CLEANUP COMPLETE"))
+	fmt.Println("  " + styleDivider.Render(strings.Repeat("─", 66)))
+
 	freeNow := getDiskFreeBytes(os.TempDir())
-	printCleanupBanner(false, freedSize, freeNow, freedFiles, len(rows))
+
+	fmt.Printf("  %s  %s  %s  %s\n",
+		styleLabel.Render("Space freed:"),
+		styleAccent.Render(formatBytes(freedSize)),
+		styleMuted.Render("│"),
+		styleLabel.Render("Free now: ")+styleValue.Render(formatBytes(freeNow)),
+	)
+	fmt.Printf("  %s  %s  %s  %s\n",
+		styleLabel.Render("Files cleaned:"),
+		styleAccent.Render(formatInt(freedFiles)),
+		styleMuted.Render("│"),
+		styleLabel.Render("Categories: ")+styleAccent.Render(fmt.Sprintf("%d", len(rows))),
+	)
+	fmt.Printf("  %s  %s  %s  %s\n",
+		styleLabel.Render("Scan time:"),
+		styleAccent.Render(fmt.Sprintf("%.1fs", scanDuration.Seconds())),
+		styleMuted.Render("│"),
+		styleLabel.Render("Clean time: ")+styleAccent.Render(fmt.Sprintf("%.1fs", cleanDuration.Seconds())),
+	)
+	fmt.Printf("  %s  %s\n",
+		styleLabel.Render("Total time:"),
+		styleAccent.Render(fmt.Sprintf("%.1fs", totalDuration.Seconds())),
+	)
+
+	// Show visual recovery bar
+	if totalSize > 0 {
+		recoverPct := float64(freedSize) / float64(totalSize) * 100.0
+		fmt.Println()
+		fmt.Printf("  %s  %s %s\n",
+			styleLabel.Render("Recovery:"),
+			progressBar(recoverPct, 30),
+			styleAccent.Render(fmt.Sprintf("%.0f%% of detected junk removed", recoverPct)),
+		)
+	}
+
+	if equiv := spaceEquivalent(freedSize); equiv != "" {
+		fmt.Println("  " + styleSub.Render(equiv))
+	}
+
+	fmt.Println("  " + styleDivider.Render(strings.Repeat("═", 66)))
+	fmt.Println()
 }
 
 func scanDirCategory(cat CleanCategory) (int64, int, error) {
