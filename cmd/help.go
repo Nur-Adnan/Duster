@@ -49,14 +49,14 @@ func printBeautifulHelp(cmd *cobra.Command) {
 
 	// 3. Render Usage
 	sb.WriteString("  " + styleTitle.Render("USAGE") + "\n")
-	
+
 	// Create a styled usage string
 	useLine := cmd.UseLine()
 	// Highlight "du" and [command]/[flags]
 	useLine = strings.Replace(useLine, "du", styleSuccess.Render("du"), 1)
 	useLine = strings.Replace(useLine, "[command]", styleAccent.Render("[command]"), -1)
 	useLine = strings.Replace(useLine, "[flags]", styleWarning.Render("[flags]"), -1)
-	
+
 	sb.WriteString("    " + useLine + "\n\n")
 
 	// 4. Render Available Commands
@@ -99,7 +99,7 @@ func printBeautifulHelp(cmd *cobra.Command) {
 
 	if len(flagsList) > 0 {
 		sb.WriteString("  " + styleTitle.Render("FLAGS") + "\n")
-		
+
 		var flagNames []string
 		maxFlagLen := 0
 		for _, f := range flagsList {
@@ -123,7 +123,7 @@ func printBeautifulHelp(cmd *cobra.Command) {
 			nameStr := padRight(flagNames[i], maxFlagLen+2)
 			nameRendered := styleAccent.Render(nameStr)
 			descRendered := styleLabel.Render(f.Usage)
-			
+
 			defaultStr := ""
 			if f.DefValue != "" && f.DefValue != "false" && f.DefValue != "[]" {
 				defaultStr = styleMuted.Render(fmt.Sprintf(" (default: %s)", f.DefValue))
@@ -145,7 +145,7 @@ func printBeautifulHelp(cmd *cobra.Command) {
 
 	if len(inhFlagsList) > 0 {
 		sb.WriteString("  " + styleTitle.Render("GLOBAL FLAGS") + "\n")
-		
+
 		var flagNames []string
 		maxFlagLen := 0
 		for _, f := range inhFlagsList {

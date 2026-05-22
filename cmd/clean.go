@@ -15,7 +15,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-
 // CleanCategory represents a distinct system cache target.
 type CleanCategory struct {
 	ID          string
