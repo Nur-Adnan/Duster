@@ -76,6 +76,12 @@ if defined PS_SCRIPT (
 if errorlevel 1 (
     echo.
     echo   Installation failed. See errors above.
+    echo.
+    echo   If you see "Application Control policy has blocked this file":
+    echo   Your organization's security policy blocks executables from AppData.
+    echo   FIX: Run as Administrator to install to Program Files:
+    echo     powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process powershell -Verb RunAs -ArgumentList '-NoProfile -ExecutionPolicy Bypass -Command ""irm https://raw.githubusercontent.com/Nur-Adnan/Duster/main/scripts/install.ps1 | iex""'"
+    echo.
     echo   Manual install: https://github.com/Nur-Adnan/Duster/releases/latest
     exit /b 1
 )

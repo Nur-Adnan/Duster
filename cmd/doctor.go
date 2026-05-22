@@ -259,6 +259,54 @@ func runDoctorDiagnostics() DoctorSnapshot {
 	}
 	results = append(results, termRes)
 
+	// 10. WDAC / AppLocker Install-Path Safety
+	wdacRes := DoctorResult{
+		ID:          "wdac_path",
+		Name:        "Install Path Safety (WDAC)",
+		Description: "Checks if Duster is installed in a WDAC/AppLocker-safe location.",
+	}
+	exePath, exeErr := os.Executable()
+	if exeErr == nil {
+		exeDir := filepath.Dir(exePath)
+		localAppData := fs.ResolveEnvPath("%LOCALAPPDATA%")
+		appData := fs.ResolveEnvPath("%APPDATA%")
+		tempPath := fs.ResolveEnvPath("%TEMP%")
+
+		isUserWritable := strings.HasPrefix(strings.ToLower(exeDir), strings.ToLower(localAppData)) ||
+			strings.HasPrefix(strings.ToLower(exeDir), strings.ToLower(appData)) ||
+			strings.HasPrefix(strings.ToLower(exeDir), strings.ToLower(tempPath))
+
+		if isUserWritable {
+			// Check if WDAC/AppLocker policies are likely active
+			ciPolicyExists := false
+			ciPaths := []string{
+				filepath.Join(fs.ResolveEnvPath("%SystemRoot%"), "System32", "CodeIntegrity", "SIPolicy.p7b"),
+				filepath.Join(fs.ResolveEnvPath("%SystemRoot%"), "System32", "CodeIntegrity", "CiPolicies", "Active"),
+			}
+			for _, cp := range ciPaths {
+				if _, statErr := os.Stat(cp); statErr == nil {
+					ciPolicyExists = true
+					break
+				}
+			}
+
+			if ciPolicyExists {
+				wdacRes.Status = "FAIL"
+				wdacRes.Message = fmt.Sprintf("BLOCKED: Installed in '%s' which is blocked by WDAC/AppLocker. Reinstall to C:\\Program Files\\Duster.", exeDir)
+			} else {
+				wdacRes.Status = "WARN"
+				wdacRes.Message = fmt.Sprintf("Risky path: '%s'. Enterprise PCs may block executables from this location.", exeDir)
+			}
+		} else {
+			wdacRes.Status = "PASS"
+			wdacRes.Message = fmt.Sprintf("Safe: Installed in '%s' (WDAC-compatible path).", exeDir)
+		}
+	} else {
+		wdacRes.Status = "WARN"
+		wdacRes.Message = "Could not determine executable path."
+	}
+	results = append(results, wdacRes)
+
 	// Final Summary Counts
 	passed, warnings, failed := 0, 0, 0
 	for _, r := range results {

@@ -113,6 +113,92 @@ if (-not $Silent) {
     Write-Host ""
 }
 
+# == WDAC / AppLocker Safety Check =====================================
+# Enterprise/school PCs often block executables from user-writable paths
+# like %LOCALAPPDATA%. Detect this and switch to a safe install directory.
+
+$UserSpecifiedDir = $PSBoundParameters.ContainsKey('InstallDir')
+$IsDefaultLocalAppData = (-not $UserSpecifiedDir) -and ($InstallDir -like "*$env:LOCALAPPDATA*" -or $InstallDir -like "*$env:APPDATA*")
+
+function Test-WDACBlocked {
+    param([string]$Dir)
+    # Check if WDAC / AppLocker policies are active by querying the AppLocker service
+    try {
+        $appidSvc = Get-Service -Name "AppIDSvc" -ErrorAction SilentlyContinue
+        if ($appidSvc -and $appidSvc.Status -eq "Running") {
+            return $true
+        }
+    } catch { }
+
+    # Additional check: query AppLocker effective policy via COM
+    try {
+        $appLockerPolicy = Get-AppLockerPolicy -Effective -ErrorAction SilentlyContinue
+        if ($appLockerPolicy -and $appLockerPolicy.RuleCollections.Count -gt 0) {
+            # Check if there are explicit EXE deny rules for user-writable paths
+            foreach ($collection in $appLockerPolicy.RuleCollections) {
+                if ($collection.RuleCollectionType -eq "Exe") {
+                    return $true
+                }
+            }
+        }
+    } catch { }
+
+    # Heuristic check: see if WDAC CI policy files exist
+    $ciPolicyPaths = @(
+        "$env:SystemRoot\System32\CodeIntegrity\SIPolicy.p7b",
+        "$env:SystemRoot\System32\CodeIntegrity\CiPolicies\Active"
+    )
+    foreach ($p in $ciPolicyPaths) {
+        if (Test-Path $p) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Test-IsAdminSession {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = [Security.Principal.WindowsPrincipal]$identity
+    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+if ($IsDefaultLocalAppData) {
+    $wdacDetected = Test-WDACBlocked -Dir $InstallDir
+
+    if ($wdacDetected) {
+        $SafeDir = "$env:ProgramFiles\Duster"
+        Write-Warn "Application Control policy detected (WDAC/AppLocker)."
+        Write-Warn "Executables from '$InstallDir' will be BLOCKED by Windows."
+        Write-Step "Switching install directory to: $SafeDir"
+        $InstallDir = $SafeDir
+
+        # If not already admin, request elevation
+        if (-not (Test-IsAdminSession)) {
+            Write-Step "Requesting administrator privileges for Program Files install..."
+            $scriptPath = $MyInvocation.MyCommand.Path
+            if ($scriptPath) {
+                $elevateArgs = "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`" -InstallDir `"$InstallDir`""
+                if ($Version -ne "") { $elevateArgs += " -Version `"$Version`"" }
+                if ($Silent) { $elevateArgs += " -Silent" }
+                if ($Force) { $elevateArgs += " -Force" }
+                try {
+                    Start-Process powershell.exe -Verb RunAs -ArgumentList $elevateArgs -Wait
+                    Write-OK "Elevated install completed."
+                    return
+                } catch {
+                    Write-Fail "Administrator privileges are required to install to $InstallDir.`n  Please run PowerShell as Administrator and try again.`n`n  Or install to a user-writable location:`n    .\\install.ps1 -InstallDir `"$env:LOCALAPPDATA\\Duster`"`n`n  Note: This may still be blocked by your organization's security policy."
+                }
+            } else {
+                Write-Warn "Cannot auto-elevate from piped script. Please run as Administrator:"
+                Write-Host "  Start-Process powershell -Verb RunAs -ArgumentList '-NoProfile -ExecutionPolicy Bypass -Command ""irm https://raw.githubusercontent.com/Nur-Adnan/Duster/main/scripts/install.ps1 | iex""'" -ForegroundColor Yellow
+                Write-Host ""
+                Write-Fail "Administrator privileges required for WDAC-safe install."
+            }
+        }
+    }
+}
+
 # == 1. Detect Architecture ============================================
 Write-Step "Detecting system architecture..."
 
@@ -409,9 +495,27 @@ if (Test-Path $ExePath) {
 if ($VerifyOk) {
     try {
         $VersionOutput = & $ExePath --version 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            throw "Non-zero exit code"
+        }
         Write-OK "Verified: $VersionOutput"
     } catch {
-        Write-OK "Binary installed (could not execute for verification - this is normal during cross-install)"
+        $errMsg = "$_"
+        if ($errMsg -match "Application Control" -or $errMsg -match "policy has blocked" -or $errMsg -match "NativeCommandFailed") {
+            Write-Host ""
+            Write-Warn "APPLICATION CONTROL POLICY BLOCKED du.exe!"
+            Write-Warn "Your organization's security policy prevents running executables from:"
+            Write-Host "    $InstallDir" -ForegroundColor Red
+            Write-Host ""
+            Write-Host "  FIX: Reinstall to Program Files (requires admin):" -ForegroundColor White
+            Write-Host "    Start-Process powershell -Verb RunAs -ArgumentList '-NoProfile -ExecutionPolicy Bypass -Command ""irm https://raw.githubusercontent.com/Nur-Adnan/Duster/main/scripts/install.ps1 | iex""'" -ForegroundColor Cyan
+            Write-Host ""
+            Write-Host "  Or install to a specific directory:" -ForegroundColor White
+            Write-Host "    .\install.ps1 -InstallDir ""C:\Tools\Duster""" -ForegroundColor Cyan
+            Write-Host ""
+        } else {
+            Write-OK "Binary installed (could not execute for verification - this is normal during cross-install)"
+        }
     }
 }
 

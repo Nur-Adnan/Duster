@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Nur-Adnan/duster/internal/logging"
 	"github.com/Nur-Adnan/duster/lib/elevation"
@@ -14,15 +15,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Clean-specific additional styles (all shared styles are in styles.go)
-var (
-	titleStyle   = styleTitle
-	borderStyle  = styleDivider
-	successStyle = styleSuccess
-	skippedStyle = styleWarning
-	failStyle    = styleDanger
-	textStyle    = styleLabel
-)
 
 // CleanCategory represents a distinct system cache target.
 type CleanCategory struct {
@@ -39,6 +31,9 @@ var (
 	dryRun    bool
 	debug     bool
 	whitelist []string
+
+	onScanProgress  func(path string, info os.FileInfo)
+	onCleanProgress func(path string, info os.FileInfo)
 )
 
 var CleanCmd = &cobra.Command{
@@ -422,15 +417,52 @@ func executeCleanCLI(cmd *cobra.Command, args []string) {
 	}
 	var rows []resultRow
 
+	// Setup spinner usage detection
+	useSpinner := !debug
+	if isPiped() {
+		stat, err := os.Stdout.Stat()
+		if err != nil || stat.Mode().IsRegular() || os.Getenv("TERM") == "" {
+			useSpinner = false
+		}
+	}
+
+	if useSpinner {
+		fmt.Println("  " + styleAccent.Render("🔍 [1/2] Scanning cache directories..."))
+		fmt.Println()
+	}
+
 	// ── Scan phase ────────────────────────────────────────────────────────
 	for _, cat := range categories {
 		if whitelistMap[cat.ID] {
 			rows = append(rows, resultRow{name: cat.Name, sizeText: "protected", status: "skipped"})
+			if useSpinner {
+				fmt.Printf("  %s  %s  %s\n",
+					styleMuted.Render("○"),
+					styleLabel.Render(padRight(cat.Name, 32)),
+					styleWarning.Render("skipped"),
+				)
+			}
 			continue
 		}
 		if cat.ID == "prefetch" && !elevation.IsAdmin() {
 			rows = append(rows, resultRow{name: cat.Name, sizeText: "admin required", status: "adminonly"})
+			if useSpinner {
+				fmt.Printf("  %s  %s  %s\n",
+					styleMuted.Render("○"),
+					styleLabel.Render(padRight(cat.Name, 32)),
+					styleWarning.Render("admin only"),
+				)
+			}
 			continue
+		}
+
+		var spinner *cliSpinner
+		if useSpinner {
+			spinner = newCliSpinner("Scan", cat.Name)
+			onScanProgress = func(path string, info os.FileInfo) {
+				spinner.updateProgress(path, info.Size())
+			}
+			spinner.start()
 		}
 
 		var size int64
@@ -441,56 +473,89 @@ func executeCleanCLI(cmd *cobra.Command, args []string) {
 		} else {
 			size, files, err = scanDirCategory(cat)
 		}
+
+		if useSpinner {
+			spinner.stop()
+			onScanProgress = nil
+		}
+
 		if err != nil {
 			if debug {
 				fmt.Printf("  [debug] scan %s: %v\n", cat.Name, err)
 			}
 			rows = append(rows, resultRow{name: cat.Name, sizeText: "no access", status: "noaccess"})
+			if useSpinner {
+				fmt.Printf("  %s  %s  %s\n",
+					styleDanger.Render("✗"),
+					styleLabel.Render(padRight(cat.Name, 32)),
+					styleDanger.Render("no access"),
+				)
+			}
 			continue
 		}
+
 		totalSize += size
 		totalFiles += files
 		rows = append(rows, resultRow{name: cat.Name, sizeText: formatBytes(size), fileCount: files, status: "ok"})
-	}
 
-	// ── Print scan table ─────────────────────────────────────────────────────
-	const nameW = 32
-	const sizeW = 10
-	for _, row := range rows {
-		name := padRight(row.name, nameW)
-		switch row.status {
-		case "skipped":
-			fmt.Printf("  %s  %s  %s\n",
-				styleMuted.Render("○"),
-				styleLabel.Render(name),
-				styleWarning.Render("skipped"),
-			)
-		case "adminonly":
-			fmt.Printf("  %s  %s  %s\n",
-				styleMuted.Render("○"),
-				styleLabel.Render(name),
-				styleWarning.Render("admin only"),
-			)
-		case "noaccess":
-			fmt.Printf("  %s  %s  %s\n",
-				styleDanger.Render("✗"),
-				styleLabel.Render(name),
-				styleDanger.Render("no access"),
-			)
-		default: // "ok"
-			if row.fileCount == 0 && row.sizeText == "0 B" {
+		if useSpinner {
+			if files == 0 && size == 0 {
 				fmt.Printf("  %s  %s  %s\n",
 					styleMuted.Render("-"),
-					styleLabel.Render(name),
+					styleLabel.Render(padRight(cat.Name, 32)),
 					styleMuted.Render("empty"),
 				)
 			} else {
 				fmt.Printf("  %s  %s  %s  %s\n",
 					styleSuccess.Render("✓"),
-					styleLabel.Render(name),
-					styleAccent.Render(fmt.Sprintf("%*s", sizeW, row.sizeText)),
-					styleMuted.Render(fmt.Sprintf("(%s files)", formatInt(row.fileCount))),
+					styleLabel.Render(padRight(cat.Name, 32)),
+					styleAccent.Render(fmt.Sprintf("%10s", formatBytes(size))),
+					styleMuted.Render(fmt.Sprintf("(%s files)", formatInt(files))),
 				)
+			}
+		}
+	}
+
+	// ── Print scan table (Only if spinner wasn't used, to avoid duplication!) ─
+	if !useSpinner {
+		const nameW = 32
+		const sizeW = 10
+		for _, row := range rows {
+			name := padRight(row.name, nameW)
+			switch row.status {
+			case "skipped":
+				fmt.Printf("  %s  %s  %s\n",
+					styleMuted.Render("○"),
+					styleLabel.Render(name),
+					styleWarning.Render("skipped"),
+				)
+			case "adminonly":
+				fmt.Printf("  %s  %s  %s\n",
+					styleMuted.Render("○"),
+					styleLabel.Render(name),
+					styleWarning.Render("admin only"),
+				)
+			case "noaccess":
+				fmt.Printf("  %s  %s  %s\n",
+					styleDanger.Render("✗"),
+					styleLabel.Render(name),
+					styleDanger.Render("no access"),
+				)
+			default: // "ok"
+				if row.fileCount == 0 && row.sizeText == "0 B" {
+					fmt.Printf("  %s  %s  %s\n",
+						styleMuted.Render("-"),
+						styleLabel.Render(name),
+						styleMuted.Render("empty"),
+					)
+				} else {
+					fmt.Printf("  %s  %s  %s  %s\n",
+						styleSuccess.Render("✓"),
+						styleLabel.Render(name),
+						styleAccent.Render(fmt.Sprintf("%*s", sizeW, row.sizeText)),
+						styleMuted.Render(fmt.Sprintf("(%s files)", formatInt(row.fileCount))),
+					)
+				}
 			}
 		}
 	}
@@ -505,8 +570,13 @@ func executeCleanCLI(cmd *cobra.Command, args []string) {
 
 	// ── Delete phase ──────────────────────────────────────────────────────
 	fmt.Println()
-	fmt.Println("  " + styleMuted.Render("Cleaning..."))
-	fmt.Println()
+	if useSpinner {
+		fmt.Println("  " + styleAccent.Render("⚡ [2/2] Reclaiming system space..."))
+		fmt.Println()
+	} else {
+		fmt.Println("  " + styleMuted.Render("Cleaning..."))
+		fmt.Println()
+	}
 
 	var freedSize int64
 	var freedFiles int
@@ -514,6 +584,16 @@ func executeCleanCLI(cmd *cobra.Command, args []string) {
 		if whitelistMap[cat.ID] {
 			continue
 		}
+
+		var spinner *cliSpinner
+		if useSpinner {
+			spinner = newCliSpinner("Clean", cat.Name)
+			onCleanProgress = func(path string, info os.FileInfo) {
+				spinner.updateProgress(path, info.Size())
+			}
+			spinner.start()
+		}
+
 		var sizeFreed int64
 		var filesFreed int
 		var err error
@@ -522,20 +602,27 @@ func executeCleanCLI(cmd *cobra.Command, args []string) {
 		} else {
 			sizeFreed, filesFreed, err = cleanDirCategory(cat)
 		}
+
+		if useSpinner {
+			spinner.stop()
+			onCleanProgress = nil
+		}
+
 		if err != nil {
 			if debug {
 				fmt.Printf("  [debug] clean %s: %v\n", cat.Name, err)
 			}
 			continue
 		}
+
 		freedSize += sizeFreed
 		freedFiles += filesFreed
 		if sizeFreed > 0 {
 			fmt.Printf("  %s  %s  %s freed  %s\n",
 				styleSuccess.Render("✓"),
-				styleLabel.Render(padRight(cat.Name, nameW)),
+				styleLabel.Render(padRight(cat.Name, 32)),
 				styleAccent.Render(formatBytes(sizeFreed)),
-				styleMuted.Render(fmt.Sprintf("(%s files)", formatInt(filesFreed))),
+				styleMuted.Render(fmt.Sprintf("(%s files)", formatInt(freedFiles))),
 			)
 		}
 	}
@@ -588,6 +675,9 @@ func scanDirCategory(cat CleanCategory) (int64, int, error) {
 
 				if debug {
 					fmt.Printf("[Debug] Found cache target: %s (%s)\n", path, formatBytes(info.Size()))
+				}
+				if onScanProgress != nil {
+					onScanProgress(path, info)
 				}
 				totalSize += info.Size()
 				fileCount++
@@ -643,6 +733,9 @@ func cleanDirCategory(cat CleanCategory) (int64, int, error) {
 					// Verify target safety check
 					if fs.IsValidPath(path) {
 						fileSize := info.Size()
+						if onCleanProgress != nil {
+							onCleanProgress(path, info)
+						}
 						if removeFileSafe(path) == nil {
 							sizeFreed += fileSize
 							filesFreed++
@@ -676,6 +769,9 @@ func cleanDirCategory(cat CleanCategory) (int64, int, error) {
 								if info, infoErr := d.Info(); infoErr == nil {
 									entrySize += info.Size()
 									entryFiles++
+									if onCleanProgress != nil {
+										onCleanProgress(p, info)
+									}
 								}
 							}
 							return nil
@@ -684,6 +780,9 @@ func cleanDirCategory(cat CleanCategory) (int64, int, error) {
 						if info, infoErr := entry.Info(); infoErr == nil {
 							entrySize = info.Size()
 							entryFiles = 1
+							if onCleanProgress != nil {
+								onCleanProgress(fullPath, info)
+							}
 						}
 					}
 
@@ -716,6 +815,9 @@ func scanAndEmptyRecycleBin(dryRunOnly bool, debug bool) (int64, int, error) {
 				if !d.IsDir() {
 					info, err := d.Info()
 					if err == nil {
+						if onScanProgress != nil {
+							onScanProgress(path, info)
+						}
 						size += info.Size()
 						count++
 					}
@@ -803,10 +905,16 @@ func scanJetBrainsCaches(dryRun bool, debugMode bool) (int64, int, error) {
 					info, infoErr := d.Info()
 					if infoErr == nil {
 						if dryRun {
+							if onScanProgress != nil {
+								onScanProgress(path, info)
+							}
 							totalSize += info.Size()
 							totalFiles++
 						} else {
 							fileSize := info.Size()
+							if onCleanProgress != nil {
+								onCleanProgress(path, info)
+							}
 							if removeFileSafe(path) == nil {
 								totalSize += fileSize
 								totalFiles++
@@ -880,4 +988,116 @@ func scanCategoriesConcurrent(categories []CleanCategory, whitelistMap map[strin
 	// callers currently don't use this function yet (wired in Phase 4 follow-up).
 	_ = results
 	return nil
+}
+
+type cliSpinner struct {
+	mu           sync.Mutex
+	active       bool
+	frames       []string
+	frameIdx     int
+	categoryName string
+	prefix       string
+	filesScanned int64
+	sizeScanned  int64
+	currentPath  string
+	stopChan     chan struct{}
+	lastPrinted  string
+}
+
+func newCliSpinner(prefix, categoryName string) *cliSpinner {
+	return &cliSpinner{
+		frames: []string{
+			"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏",
+		},
+		prefix:       prefix,
+		categoryName: categoryName,
+		stopChan:     make(chan struct{}),
+	}
+}
+
+func (s *cliSpinner) start() {
+	s.active = true
+	go func() {
+		ticker := time.NewTicker(80 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-s.stopChan:
+				return
+			case <-ticker.C:
+				s.mu.Lock()
+				if !s.active {
+					s.mu.Unlock()
+					return
+				}
+				frame := s.frames[s.frameIdx]
+				s.frameIdx = (s.frameIdx + 1) % len(s.frames)
+
+				// Colorize spinner frame using Lipgloss
+				spinnerCol := styleAccent.Render(frame)
+
+				// Format dynamic feedback text
+				nameW := 32
+				paddedName := padRight(s.categoryName, nameW)
+
+				var msg string
+				if s.prefix == "Scan" {
+					// Scanning: show file count and a shortened path if available
+					pathStr := ""
+					if s.currentPath != "" {
+						pathStr = truncateString(filepath.Base(s.currentPath), 25)
+						pathStr = styleMuted.Render(" -> " + pathStr)
+					}
+					msg = fmt.Sprintf("\r  %s  %s  %s  %s%s",
+						spinnerCol,
+						styleLabel.Render(paddedName),
+						styleAccent.Render(fmt.Sprintf("%10s", formatBytes(s.sizeScanned))),
+						styleMuted.Render(fmt.Sprintf("(%s files)", formatInt(int(s.filesScanned)))),
+						pathStr,
+					)
+				} else {
+					// Cleaning: show active progress
+					msg = fmt.Sprintf("\r  %s  %s  %s",
+						spinnerCol,
+						styleLabel.Render(paddedName),
+						styleMuted.Render(fmt.Sprintf("purging %s files...", formatInt(int(s.filesScanned)))),
+					)
+				}
+
+				// Clear previous line character length if shorter, to avoid ghost characters
+				clearLen := len(s.lastPrinted) - len(msg)
+				if clearLen > 0 {
+					msg += strings.Repeat(" ", clearLen)
+				}
+				s.lastPrinted = msg
+
+				fmt.Print(msg)
+				s.mu.Unlock()
+			}
+		}
+	}()
+}
+
+func (s *cliSpinner) stop() {
+	s.mu.Lock()
+	if !s.active {
+		s.mu.Unlock()
+		return
+	}
+	s.active = false
+	close(s.stopChan)
+	s.mu.Unlock()
+
+	// Clear the spinner line completely
+	if s.lastPrinted != "" {
+		fmt.Printf("\r%s\r", strings.Repeat(" ", len(s.lastPrinted)+5))
+	}
+}
+
+func (s *cliSpinner) updateProgress(path string, size int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.filesScanned++
+	s.sizeScanned += size
+	s.currentPath = path
 }
