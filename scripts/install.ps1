@@ -12,7 +12,7 @@
     Default: $env:LOCALAPPDATA\Duster
 
 .PARAMETER Version
-    Specific version to install (e.g. "1.0.1").
+    Specific version to install (e.g. "1.0.2").
     Default: latest release from GitHub.
 
 .PARAMETER AddToPath
@@ -35,7 +35,7 @@
 
 .EXAMPLE
     # Install specific version silently:
-    .\install.ps1 -Version "1.0.1" -Silent
+    .\install.ps1 -Version "1.0.2" -Silent
 #>
 
 [CmdletBinding()]
@@ -52,6 +52,13 @@ $ProgressPreference    = "SilentlyContinue"   # Speeds up Invoke-WebRequest dram
 
 # Guarantee TLS 1.2 is enabled for all secure REST and download queries (critical for GitHub API/CDN on older OS versions)
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+# == Constants =========================================================
+$RepoOwner       = "Nur-Adnan"
+$RepoName        = "Duster"
+$ApiBase          = "https://api.github.com/repos/$RepoOwner/$RepoName"
+$FallbackVersion  = "1.0.2"
+$MaxRetries       = 3
 
 # == Helpers ==========================================================
 # NOTE: No extra braces inside function bodies - that creates a ScriptBlock
@@ -74,12 +81,34 @@ function Write-Fail {
     throw "Duster installation aborted: $Msg"
 }
 
+function Invoke-WithRetry {
+    param(
+        [scriptblock]$Action,
+        [int]$MaxAttempts = 3,
+        [string]$Description = "operation"
+    )
+    $attempt = 0
+    while ($true) {
+        $attempt++
+        try {
+            return (& $Action)
+        } catch {
+            if ($attempt -ge $MaxAttempts) {
+                throw $_
+            }
+            $waitSec = [math]::Pow(2, $attempt)
+            Write-Warn "Attempt $attempt/$MaxAttempts for $Description failed. Retrying in ${waitSec}s..."
+            Start-Sleep -Seconds $waitSec
+        }
+    }
+}
+
 # == Banner ============================================================
 if (-not $Silent) {
     Write-Host ""
     Write-Host "  =================================================" -ForegroundColor DarkCyan
     Write-Host "    Duster  -  Windows System Cleaner" -ForegroundColor DarkCyan
-    Write-Host "    https://github.com/Nur-Adnan/Duster" -ForegroundColor DarkCyan
+    Write-Host "    https://github.com/$RepoOwner/$RepoName" -ForegroundColor DarkCyan
     Write-Host "  =================================================" -ForegroundColor DarkCyan
     Write-Host ""
 }
@@ -101,22 +130,60 @@ if ($Arch -eq "ARM64") {
 # == 2. Resolve Target Version =========================================
 Write-Step "Resolving release version..."
 
-$ApiBase = "https://api.github.com/repos/Nur-Adnan/Duster"
-$FallbackVersion = "1.0.2"
+$ReleaseAssetsAvailable = $false
+$TagName = ""
 
 if ($Version -eq "") {
+    # Strategy 1: Try /releases/latest API endpoint
     try {
-        $Release = Invoke-RestMethod "$ApiBase/releases/latest" -Headers @{ "User-Agent" = "DusterInstaller" }
+        $Headers = @{ "User-Agent" = "DusterInstaller/1.0" }
+        $Release = Invoke-RestMethod "$ApiBase/releases/latest" -Headers $Headers
         $Version = $Release.tag_name -replace "^v", ""
         $TagName = $Release.tag_name
+        $ReleaseAssetsAvailable = ($Release.assets.Count -gt 0)
+        Write-OK "Latest release: $Version (via API)"
     } catch {
-        Write-Warn "Could not fetch latest release from GitHub API (might be rate-limited)."
-        Write-Step "Falling back to default production version: $FallbackVersion"
-        $Version = $FallbackVersion
-        $TagName = "v$Version"
+        Write-Warn "Could not fetch latest release from GitHub API (might be rate-limited or no releases exist)."
+
+        # Strategy 2: Try /tags API endpoint to find latest tag
+        try {
+            $Headers = @{ "User-Agent" = "DusterInstaller/1.0" }
+            $Tags = Invoke-RestMethod "$ApiBase/tags?per_page=10" -Headers $Headers
+            if ($Tags.Count -gt 0) {
+                # Tags are returned newest-first; find the first semver-like tag
+                foreach ($Tag in $Tags) {
+                    if ($Tag.name -match "^v?\d+\.\d+\.\d+") {
+                        $TagName = $Tag.name
+                        $Version = $TagName -replace "^v", ""
+                        Write-OK "Found latest tag: $Version (via tags API)"
+                        break
+                    }
+                }
+            }
+        } catch {
+            Write-Warn "Tags API also unavailable."
+        }
+
+        # Strategy 3: Fall back to hardcoded version
+        if ($Version -eq "") {
+            Write-Step "Falling back to default production version: $FallbackVersion"
+            $Version = $FallbackVersion
+            $TagName = "v$Version"
+        }
     }
 } else {
     $TagName = "v$Version"
+}
+
+# If we don't know if release assets exist, probe the release for this specific version
+if (-not $ReleaseAssetsAvailable) {
+    try {
+        $Headers = @{ "User-Agent" = "DusterInstaller/1.0" }
+        $SpecificRelease = Invoke-RestMethod "$ApiBase/releases/tags/$TagName" -Headers $Headers
+        $ReleaseAssetsAvailable = ($SpecificRelease.assets.Count -gt 0)
+    } catch {
+        $ReleaseAssetsAvailable = $false
+    }
 }
 
 Write-OK "Target version: $Version"
@@ -149,50 +216,95 @@ if (Test-Path $ExePath) {
     }
 }
 
-# == 4. Download Release Archive =======================================
-$ArchiveName = "duster-$Version-$ArchSuffix.zip"
-Write-Step "Downloading Duster $Version ($ArchiveName)..."
+# == 4. Download Release Binary ========================================
+Write-Step "Downloading Duster $Version..."
 
-$DownloadBase = "https://github.com/Nur-Adnan/Duster/releases/download/$TagName"
-$ArchiveUrl   = "$DownloadBase/$ArchiveName"
-$ChecksumUrl  = "$DownloadBase/checksums-sha256.txt"
-$TempDir      = Join-Path $env:TEMP "duster-install-$Version"
-$TempZip      = Join-Path $TempDir $ArchiveName
-$TempChecksum = Join-Path $TempDir "checksums-sha256.txt"
+$DownloadBase   = "https://github.com/$RepoOwner/$RepoName/releases/download/$TagName"
+$ArchiveName    = "duster-$Version-$ArchSuffix.zip"
+$ArchiveUrl     = "$DownloadBase/$ArchiveName"
+$ChecksumUrl    = "$DownloadBase/checksums-sha256.txt"
+$TempDir        = Join-Path $env:TEMP "duster-install-$Version"
+$TempZip        = Join-Path $TempDir $ArchiveName
+$TempChecksum   = Join-Path $TempDir "checksums-sha256.txt"
+
+# Determine arch-specific exe name for direct binary fallback
+if ($ArchSuffix -eq "windows-amd64") {
+    $DirectExeName = "duster-windows-amd64.exe"
+} else {
+    $DirectExeName = "duster-windows-arm64.exe"
+}
+$DirectExeUrl = "$DownloadBase/$DirectExeName"
 
 # Create temp directory
 $null = New-Item -ItemType Directory -Path $TempDir -Force
 
+$DownloadedExePath = $null
+$DownloadMethod = ""
+
+# Download Strategy 1: Try the portable ZIP archive
+$ZipDownloaded = $false
 try {
-    Invoke-WebRequest -Uri $ArchiveUrl -OutFile $TempZip -UseBasicParsing
+    Write-Step "Trying portable archive: $ArchiveName..."
+    Invoke-WithRetry -MaxAttempts $MaxRetries -Description "ZIP download" -Action {
+        Invoke-WebRequest -Uri $ArchiveUrl -OutFile $TempZip -UseBasicParsing
+    }
+    $ArchiveSize = [math]::Round((Get-Item $TempZip).Length / 1MB, 1)
+    Write-OK "Downloaded $ArchiveName ($ArchiveSize MB)"
+    $ZipDownloaded = $true
+    $DownloadMethod = "zip"
 } catch {
-    Write-Fail "Failed to download release archive. Check if version '$Version' exists at:`n  $ArchiveUrl"
+    Write-Warn "Portable ZIP not available for version $Version."
 }
 
-$ArchiveSize = [math]::Round((Get-Item $TempZip).Length / 1MB, 1)
-Write-OK "Downloaded $ArchiveName ($ArchiveSize MB)"
+# Download Strategy 2: Try downloading the raw .exe binary directly
+if (-not $ZipDownloaded) {
+    try {
+        Write-Step "Trying direct binary: $DirectExeName..."
+        $TempExeDirect = Join-Path $TempDir $DirectExeName
+        Invoke-WithRetry -MaxAttempts $MaxRetries -Description "binary download" -Action {
+            Invoke-WebRequest -Uri $DirectExeUrl -OutFile $TempExeDirect -UseBasicParsing
+        }
+        $BinarySize = [math]::Round((Get-Item $TempExeDirect).Length / 1MB, 1)
+        if ($BinarySize -lt 0.5) {
+            throw "Downloaded binary is suspiciously small ($BinarySize MB)"
+        }
+        Write-OK "Downloaded $DirectExeName ($BinarySize MB)"
+        $DownloadedExePath = $TempExeDirect
+        $DownloadMethod = "binary"
+    } catch {
+        Write-Warn "Direct binary download also failed."
+    }
+}
+
+# Download Strategy 3: Try building from source as last resort (if Go is available)
+if (-not $ZipDownloaded -and $null -eq $DownloadedExePath) {
+    Write-Fail "Failed to download Duster $Version. No release assets found.`n`n  This version may not have been published yet.`n  The release workflow must be triggered first.`n`n  To fix this, the maintainer needs to run:`n    git tag -d v$Version`n    git push origin :refs/tags/v$Version`n    git tag v$Version`n    git push origin v$Version`n`n  Or manually trigger the release workflow:`n    gh workflow run release.yml`n`n  Manual download: https://github.com/$RepoOwner/$RepoName/releases`n  Build from source: git clone https://github.com/$RepoOwner/$RepoName && cd $RepoName && go build -o du.exe ."
+}
 
 # == 5. Verify SHA-256 Checksum ========================================
 Write-Step "Verifying SHA-256 checksum..."
 
 $ChecksumVerified = $false
+$FileToCheck = if ($DownloadMethod -eq "zip") { $TempZip } else { $DownloadedExePath }
+$ChecksumTarget = if ($DownloadMethod -eq "zip") { $ArchiveName } else { $DirectExeName }
+
 try {
     Invoke-WebRequest -Uri $ChecksumUrl -OutFile $TempChecksum -UseBasicParsing
 
-    # Parse the expected hash for our archive
+    # Parse the expected hash for our archive/binary
     $ChecksumLines = Get-Content $TempChecksum
-    $ExpectedLine  = $ChecksumLines | Where-Object { $_ -like "*$ArchiveName*" }
+    $ExpectedLine  = $ChecksumLines | Where-Object { $_ -like "*$ChecksumTarget*" }
 
     if ($ExpectedLine) {
         $ExpectedHash = ($ExpectedLine -split '\s+')[0].ToUpper()
         
         # Defensive check for Get-FileHash availability
         if (Get-Command Get-FileHash -ErrorAction SilentlyContinue) {
-            $ActualHash = (Get-FileHash -Path $TempZip -Algorithm SHA256).Hash.ToUpper()
+            $ActualHash = (Get-FileHash -Path $FileToCheck -Algorithm SHA256).Hash.ToUpper()
         } else {
             # Fallback to .NET SHA256 class (extremely compatible across all PowerShell versions!)
             $Sha256 = [System.Security.Cryptography.SHA256]::Create()
-            $Stream = [System.IO.File]::OpenRead($TempZip)
+            $Stream = [System.IO.File]::OpenRead($FileToCheck)
             $Bytes = $Sha256.ComputeHash($Stream)
             $Stream.Close()
             $ActualHash = (($Bytes | ForEach-Object { "{0:X2}" -f $_ }) -join "").ToUpper()
@@ -206,31 +318,33 @@ try {
         $ChecksumVerified = $true
         Write-OK "Checksum verified: $($ActualHash.Substring(0,16))..."
     } else {
-        Write-Warn "Checksum entry not found for $ArchiveName. Skipping verification."
+        Write-Warn "Checksum entry not found for $ChecksumTarget. Skipping verification."
     }
 } catch {
     Write-Warn "Could not fetch checksums file. Skipping verification."
 }
 
 # == 6. Extract & Install ==============================================
-Write-Step "Extracting release files..."
+if ($DownloadMethod -eq "zip") {
+    Write-Step "Extracting release files..."
+    try {
+        Expand-Archive -Path $TempZip -DestinationPath $TempDir -Force
+    } catch {
+        Write-Fail "Failed to extract release archive. Ensure Expand-Archive is available."
+    }
 
-try {
-    Expand-Archive -Path $TempZip -DestinationPath $TempDir -Force
-} catch {
-    Write-Fail "Failed to extract release archive. Ensure Expand-Archive is available."
-}
-
-$TempExe = Join-Path $TempDir "du.exe"
-if (-not (Test-Path $TempExe)) {
-    Write-Fail "Failed to find 'du.exe' inside extracted archive."
+    $TempExe = Join-Path $TempDir "du.exe"
+    if (-not (Test-Path $TempExe)) {
+        Write-Fail "Failed to find 'du.exe' inside extracted archive."
+    }
+    $DownloadedExePath = $TempExe
 }
 
 Write-Step "Installing to $InstallDir..."
 $null = New-Item -ItemType Directory -Path $InstallDir -Force
 
 try {
-    Copy-Item -Path $TempExe -Destination $ExePath -Force
+    Copy-Item -Path $DownloadedExePath -Destination $ExePath -Force
 } catch {
     Write-Fail "Could not write to $InstallDir. Try a different -InstallDir or run as Admin."
 }
