@@ -49,8 +49,10 @@ VersionInfoProductVersion={#MyAppVersion}.0
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 
-; Security: Don't require admin for per-user installs
-PrivilegesRequired=lowest
+; Security: Default to admin install (Program Files) for WDAC/AppLocker compatibility.
+; Executables in user-writable directories (AppData) are blocked by enterprise security policies.
+; Users on unrestricted PCs can still choose per-user install via the dialog.
+PrivilegesRequired=admin
 PrivilegesRequiredOverridesAllowed=dialog
 
 ; Output settings
