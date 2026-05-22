@@ -131,6 +131,7 @@ if ($Arch -eq "ARM64") {
 Write-Step "Resolving release version..."
 
 $ReleaseAssetsAvailable = $false
+$VersionResolvedFromApi = $false
 $TagName = ""
 
 if ($Version -eq "") {
@@ -141,6 +142,7 @@ if ($Version -eq "") {
         $Version = $Release.tag_name -replace "^v", ""
         $TagName = $Release.tag_name
         $ReleaseAssetsAvailable = ($Release.assets.Count -gt 0)
+        $VersionResolvedFromApi = $true
         Write-OK "Latest release: $Version (via API)"
     } catch {
         Write-Warn "Could not fetch latest release from GitHub API (might be rate-limited or no releases exist)."
@@ -155,6 +157,7 @@ if ($Version -eq "") {
                     if ($Tag.name -match "^v?\d+\.\d+\.\d+") {
                         $TagName = $Tag.name
                         $Version = $TagName -replace "^v", ""
+                        $VersionResolvedFromApi = $true
                         Write-OK "Found latest tag: $Version (via tags API)"
                         break
                     }
@@ -205,11 +208,18 @@ if (Test-Path $ExePath) {
     }
 
     if ($Existing -eq $Version -and -not $Force) {
-        Write-OK "Duster $Version is already installed at $ExePath"
-        Write-Host ""
-        Write-Host "  Run 'du --help' to get started." -ForegroundColor White
-        Write-Host ""
-        return
+        if ($VersionResolvedFromApi) {
+            # Version confirmed from GitHub API — safe to skip reinstall
+            Write-OK "Duster $Version is already installed at $ExePath"
+            Write-Host ""
+            Write-Host "  Run 'du --help' to get started." -ForegroundColor White
+            Write-Host ""
+            return
+        } else {
+            # Version came from fallback — we can't confirm this is actually the latest
+            Write-Warn "Duster $Version is installed, but could not verify latest version (API unavailable)."
+            Write-Step "Reinstalling to ensure you have the latest build..."
+        }
     }
     if ($Existing -ne "unknown" -and -not $Force) {
         Write-Warn "Duster $Existing is already installed. Upgrading to $Version."
