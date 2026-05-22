@@ -49,6 +49,7 @@ func init() {
 	rootCmd.AddCommand(cmd.DoctorCmd)
 	rootCmd.AddCommand(cmd.BenchmarkCmd)
 	rootCmd.AddCommand(cmd.VerifyCmd)
+	cmd.SetupCustomHelp(rootCmd)
 }
 
 func main() {
