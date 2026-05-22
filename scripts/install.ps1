@@ -190,10 +190,29 @@ if ($IsDefaultLocalAppData) {
                     Write-Fail "Administrator privileges are required to install to $InstallDir.`n  Please run PowerShell as Administrator and try again.`n`n  Or install to a user-writable location:`n    .\\install.ps1 -InstallDir `"$env:LOCALAPPDATA\\Duster`"`n`n  Note: This may still be blocked by your organization's security policy."
                 }
             } else {
-                Write-Warn "Cannot auto-elevate from piped script. Please run as Administrator:"
-                Write-Host "  Start-Process powershell -Verb RunAs -ArgumentList '-NoProfile -ExecutionPolicy Bypass -Command ""irm https://raw.githubusercontent.com/Nur-Adnan/Duster/main/scripts/install.ps1 | iex""'" -ForegroundColor Yellow
-                Write-Host ""
-                Write-Fail "Administrator privileges required for WDAC-safe install."
+                # Piped script (irm | iex) — auto-elevate by re-downloading elevated
+                Write-Step "Auto-elevating: spawning elevated installer..."
+                $redownloadUrl = "https://raw.githubusercontent.com/Nur-Adnan/Duster/main/scripts/install.ps1"
+                # Build the inner command that the elevated session will run.
+                # The re-downloaded script will detect WDAC again, but Test-IsAdminSession
+                # will return $true in the elevated session, so it proceeds to install.
+                $innerCmd = "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; irm $redownloadUrl | iex"
+                try {
+                    Start-Process powershell.exe -Verb RunAs -ArgumentList @(
+                        "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", $innerCmd
+                    ) -Wait
+                    Write-OK "Elevated install completed successfully."
+                    return
+                } catch {
+                    Write-Host ""
+                    Write-Warn "Could not obtain administrator privileges (UAC denied or unavailable)."
+                    Write-Host ""
+                    Write-Host "  To fix this manually, open PowerShell as Administrator:" -ForegroundColor White
+                    Write-Host "    1. Right-click PowerShell -> 'Run as administrator'" -ForegroundColor Gray
+                    Write-Host "    2. Run: irm $redownloadUrl | iex" -ForegroundColor Cyan
+                    Write-Host ""
+                    Write-Fail "Administrator privileges required to install to $InstallDir."
+                }
             }
         }
     }
