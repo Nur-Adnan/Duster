@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 )
@@ -82,4 +84,10 @@ func removeAllSafe(path string) error {
 func removeFileSafe(path string) error {
 	_ = os.Chmod(path, 0777)
 	return os.Remove(path)
+}
+
+// sha256Hex returns the lowercase hex-encoded SHA-256 digest of data.
+func sha256Hex(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }

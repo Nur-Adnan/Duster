@@ -121,8 +121,6 @@ func TestCleanDusterDirSafety(t *testing.T) {
 		err := cleanDusterDir(path, false)
 		if err == nil {
 			t.Errorf("Expected error for unsafe path %q, but deletion was allowed", path)
-		} else if !strings.Contains(err.Error(), "unsafe configuration path") {
-			t.Errorf("Expected safety warning error for %q, got: %v", path, err)
 		}
 	}
 

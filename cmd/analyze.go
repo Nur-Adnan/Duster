@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -93,6 +92,7 @@ func runHeadlessAnalyze(target string) {
 	}()
 
 	root, large, err := scanDirectory(target, ch)
+	close(ch)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error analyzing path: %v\n", err)
 		os.Exit(1)
@@ -140,7 +140,11 @@ func runHeadlessAnalyze(target string) {
 		TopLargeFiles: large,
 	}
 
-	data, _ := json.MarshalIndent(output, "", "  ")
+	data, err := json.MarshalIndent(output, "", "  ")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error encoding JSON: %v\n", err)
+		os.Exit(1)
+	}
 	fmt.Println(string(data))
 }
 
@@ -546,38 +550,6 @@ func (m analyzeModel) View() string {
 func scanDirectory(root string, progressChan chan<- scanProgressInfo) (*FolderNode, []FileNode, error) {
 	root = filepath.Clean(root)
 
-	// Check for mock path (Downloads) to support automated UI validation loops
-	rootLower := strings.ToLower(root)
-	if strings.Contains(rootLower, "downloads") || strings.Contains(rootLower, "mock_mode") {
-		// Simulate active traversal progress stream matching standard duster CLI speed
-		mockPaths := []string{
-			filepath.Join(root, "Video Projects"),
-			filepath.Join(root, "ISOs"),
-			filepath.Join(root, "Compressed"),
-			filepath.Join(root, "Installers"),
-			filepath.Join(root, "Documents"),
-			filepath.Join(root, "Others"),
-		}
-		mockSizes := []int64{
-			1000000,
-			500000000,
-			2000000000,
-			5000000000,
-			9000000000,
-			13389555302,
-		}
-		for i, p := range mockPaths {
-			progressChan <- scanProgressInfo{
-				DirsScanned:  i + 1,
-				FilesScanned: (i + 1) * 200,
-				TotalSize:    mockSizes[i],
-				CurrentPath:  p,
-			}
-			time.Sleep(150 * time.Millisecond)
-		}
-		return getMockAnalyzeData(root)
-	}
-
 	folderMap := make(map[string]*FolderNode)
 	var allFiles []FileNode
 
@@ -736,15 +708,11 @@ func scanDirectory(root string, progressChan chan<- scanProgressInfo) (*FolderNo
 // Premium System Operations & Safety Controls
 func openInExplorer(path string) error {
 	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		info, err := os.Stat(path)
-		if err == nil && info.IsDir() {
-			cmd = exec.Command("explorer.exe", path)
-		} else {
-			cmd = exec.Command("explorer.exe", "/select,", path)
-		}
+	info, err := os.Stat(path)
+	if err == nil && info.IsDir() {
+		cmd = exec.Command("explorer.exe", path)
 	} else {
-		cmd = exec.Command("xdg-open", path)
+		cmd = exec.Command("explorer.exe", "/select,", path)
 	}
 	return cmd.Start()
 }
@@ -768,17 +736,12 @@ func logDestructiveOperation(action, target string, size int64, success bool) {
 		return
 	}
 
-	var logDir string
-	if runtime.GOOS == "windows" {
-		logDir = os.Getenv("LOCALAPPDATA")
-		if logDir == "" {
-			logDir = os.Getenv("USERPROFILE")
-		}
-		if logDir != "" {
-			logDir = filepath.Join(logDir, "Duster")
-		}
-	} else {
-		logDir = filepath.Clean("./")
+	logDir := os.Getenv("LOCALAPPDATA")
+	if logDir == "" {
+		logDir = os.Getenv("USERPROFILE")
+	}
+	if logDir != "" {
+		logDir = filepath.Join(logDir, "Duster")
 	}
 
 	if logDir == "" {
@@ -808,34 +771,6 @@ func logDestructiveOperation(action, target string, size int64, success bool) {
 // ── Redesigned Disk Usage Explorer Layout Helpers ─────────────────────────────
 
 func formatSize(bytes int64) string {
-	// Exact matches for the blueprint mock values
-	switch bytes {
-	case 13389555302:
-		return "12.47 GB"
-	case 4520453079:
-		return "4.21 GB"
-	case 3350061056:
-		return "3.12 GB"
-	case 1986510848:
-		return "1.85 GB"
-	case 1202590842:
-		return "1.12 GB"
-	case 1032847360:
-		return "985 MB"
-	case 1310000000:
-		return "1.22 GB"
-	case 2512555000:
-		return "2.34 GB"
-	case 1556925000:
-		return "1.45 GB"
-	case 1299220000:
-		return "1.21 GB"
-	case 996270000:
-		return "950.12 MB"
-	case 642095000:
-		return "612.35 MB"
-	}
-
 	const unit = 1024
 	if bytes < unit {
 		return fmt.Sprintf("%d B", bytes)
@@ -1040,10 +975,6 @@ func renderFooterActions() string {
 }
 
 func countFilesAndFolders(node *FolderNode) (int, int) {
-	if node.Size == 13389555302 {
-		return 1248, 112
-	}
-
 	var files, folders int
 	var walk func(n *FolderNode)
 	walk = func(n *FolderNode) {
@@ -1055,43 +986,6 @@ func countFilesAndFolders(node *FolderNode) (int, int) {
 	}
 	walk(node)
 	return files, folders - 1
-}
-
-func getMockAnalyzeData(root string) (*FolderNode, []FileNode, error) {
-	root = filepath.Clean(root)
-
-	rootNode := &FolderNode{
-		Path:  root,
-		Name:  filepath.Base(root),
-		Size:  13389555302,
-		IsDir: true,
-	}
-	if rootNode.Name == "" || rootNode.Name == "." || rootNode.Name == "/" || rootNode.Name == "\\" {
-		rootNode.Name = "Downloads"
-	}
-
-	entries := []EntryInfo{
-		{Name: `.\Video Projects\`, Path: filepath.Join(root, "Video Projects"), Size: 4520453079, IsDir: true, Items: 128},
-		{Name: `.\ISOs\`, Path: filepath.Join(root, "ISOs"), Size: 3350061056, IsDir: true, Items: 26},
-		{Name: `.\Compressed\`, Path: filepath.Join(root, "Compressed"), Size: 1986510848, IsDir: true, Items: 340},
-		{Name: `.\Installers\`, Path: filepath.Join(root, "Installers"), Size: 1202590842, IsDir: true, Items: 74},
-		{Name: `.\Documents\`, Path: filepath.Join(root, "Documents"), Size: 1032847360, IsDir: true, Items: 302},
-		{Name: `.\Others\`, Path: filepath.Join(root, "Others"), Size: 1310000000, IsDir: true, Items: 378},
-	}
-
-	rootNode.Entries = entries
-
-	largeFiles := []FileNode{
-		{Path: filepath.Join(root, `Video Projects\Final_Edit_4K.mp4`), Size: 2512555000},
-		{Path: filepath.Join(root, `ISOs\Windows_11_23H2.iso`), Size: 1556925000},
-		{Path: filepath.Join(root, `Video Projects\Raw_Footage.zip`), Size: 1299220000},
-		{Path: filepath.Join(root, `Compressed\dataset_2024.tar.gz`), Size: 996270000},
-		{Path: filepath.Join(root, `Installers\VS_Community.exe`), Size: 642095000},
-	}
-
-	rootNode.Files = largeFiles
-
-	return rootNode, largeFiles, nil
 }
 
 func styleSilverText(s string) string {

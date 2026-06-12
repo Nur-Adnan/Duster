@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -628,17 +627,12 @@ func logPurgeOperation(action, target string, size int64, success bool) {
 		return
 	}
 
-	var logDir string
-	if runtime.GOOS == "windows" {
-		logDir = os.Getenv("LOCALAPPDATA")
-		if logDir == "" {
-			logDir = os.Getenv("USERPROFILE")
-		}
-		if logDir != "" {
-			logDir = filepath.Join(logDir, "Duster")
-		}
-	} else {
-		logDir = filepath.Clean("./")
+	logDir := os.Getenv("LOCALAPPDATA")
+	if logDir == "" {
+		logDir = os.Getenv("USERPROFILE")
+	}
+	if logDir != "" {
+		logDir = filepath.Join(logDir, "Duster")
 	}
 
 	if logDir == "" {
@@ -692,7 +686,11 @@ func runHeadlessPurge(target string) {
 		Artifacts:      list,
 	}
 
-	data, _ := json.MarshalIndent(out, "", "  ")
+	data, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: failed to marshal purge data: %v\n", err)
+		os.Exit(1)
+	}
 	fmt.Println(string(data))
 }
 

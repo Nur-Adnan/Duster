@@ -8,13 +8,12 @@ import (
 )
 
 func queryPowerShellExecutionPolicy() (string, error) {
-	// Read Registry for ExecutionPolicy
 	k, err := registry.OpenKey(registry.LOCAL_MACHINE, `SOFTWARE\Microsoft\PowerShell\1\ShellIds\Microsoft.PowerShell`, registry.QUERY_VALUE)
 	if err != nil {
 		k, err = registry.OpenKey(registry.CURRENT_USER, `SOFTWARE\Microsoft\PowerShell\1\ShellIds\Microsoft.PowerShell`, registry.QUERY_VALUE)
 	}
 	if err != nil {
-		return "Restricted", nil
+		return "", fmt.Errorf("cannot open PowerShell registry key: %w", err)
 	}
 	defer k.Close()
 

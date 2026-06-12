@@ -1,10 +1,15 @@
 package cmd
 
 import (
+	"archive/zip"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
+	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,12 +26,27 @@ var (
 	upForce bool
 )
 
-// Premium Lipgloss Styles (Zero-Allocation, prefixed to avoid package conflicts)
+// Release endpoint and verification constants.
+const (
+	updateRepoOwner   = "Nur-Adnan"
+	updateRepoName    = "Duster"
+	updateAPIURL      = "https://api.github.com/repos/" + updateRepoOwner + "/" + updateRepoName + "/releases/latest"
+	checksumsFileName = "checksums-sha256.txt"
+
+	maxReleaseJSONBytes = 4 << 20   // 4 MiB cap on the API response
+	maxChecksumBytes    = 1 << 20   // 1 MiB cap on the checksums file
+	maxArchiveBytes     = 256 << 20 // 256 MiB cap on the release archive
+	maxBinaryBytes      = 256 << 20 // 256 MiB cap on the extracted binary
+
+	updateHTTPTimeout = 30 * time.Second
+	downloadTimeout   = 5 * time.Minute
+)
+
+// Premium Lipgloss Styles (prefixed to avoid package conflicts)
 var (
 	upTealColor  = lipgloss.Color("#008080")
 	upCyanColor  = lipgloss.Color("#00FFFF")
 	upGrayColor  = lipgloss.Color("#666666")
-	upWhiteColor = lipgloss.Color("#FFFFFF")
 	upRedColor   = lipgloss.Color("#FF0000")
 	upGreenColor = lipgloss.Color("#00FF00")
 
@@ -63,18 +83,26 @@ const (
 	stateUpFinished
 )
 
+type releaseAsset struct {
+	Name        string `json:"name"`
+	DownloadURL string `json:"browser_download_url"`
+	Size        int64  `json:"size"`
+}
+
 type releaseMetadata struct {
-	TagName     string `json:"tag_name"`
-	PublishedAt string `json:"published_at"`
-	Body        string `json:"body"`
-	Size        int64  `json:"binary_size_bytes"`
+	TagName     string         `json:"tag_name"`
+	PublishedAt string         `json:"published_at"`
+	Body        string         `json:"body"`
+	Size        int64          `json:"binary_size_bytes"`
+	Assets      []releaseAsset `json:"assets,omitempty"`
 }
 
 var UpdateCmd = &cobra.Command{
 	Use:   "update",
 	Short: "Check and update Duster to the latest version",
-	Long: `Queries remote repositories to compare local version with the latest release, 
-and executes a Windows-native binary swap to safely self-update the utility in-place.`,
+	Long: `Queries the GitHub releases API to compare the local version with the latest release,
+verifies the download against its published SHA-256 checksum, and performs a
+Windows-native binary swap to safely self-update the utility in-place.`,
 	Run: executeUpdate,
 }
 
@@ -106,7 +134,6 @@ type updateModel struct {
 	latestRelease  releaseMetadata
 	updateFound    bool
 	statusMsg      string
-	reclaimed      int64
 	width          int
 	height         int
 }
@@ -135,83 +162,303 @@ func initialUpdateModel() updateModel {
 }
 
 func (m updateModel) Init() tea.Cmd {
-	return tea.Batch(
-		tea.Tick(200*time.Millisecond, func(t time.Time) tea.Msg {
-			// Small display delay
+	return nil
+}
+
+func newUpdateHTTPClient(timeout time.Duration) *http.Client {
+	return &http.Client{
+		Timeout: timeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("too many redirects")
+			}
+			// Never follow a redirect off HTTPS.
+			if req.URL.Scheme != "https" {
+				return fmt.Errorf("refusing insecure redirect to %s", req.URL)
+			}
 			return nil
-		}),
-	)
+		},
+	}
+}
+
+// fetchLatestRelease queries the GitHub releases API for the newest published release.
+func fetchLatestRelease() (releaseMetadata, error) {
+	client := newUpdateHTTPClient(updateHTTPTimeout)
+
+	req, err := http.NewRequest(http.MethodGet, updateAPIURL, nil)
+	if err != nil {
+		return releaseMetadata{}, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", "duster-updater/"+AppVersion)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return releaseMetadata{}, fmt.Errorf("cannot reach GitHub releases API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		// proceed
+	case http.StatusForbidden, http.StatusTooManyRequests:
+		return releaseMetadata{}, fmt.Errorf("GitHub API rate limit reached — please try again later")
+	case http.StatusNotFound:
+		return releaseMetadata{}, fmt.Errorf("no published releases found for %s/%s", updateRepoOwner, updateRepoName)
+	default:
+		return releaseMetadata{}, fmt.Errorf("GitHub API returned HTTP %d", resp.StatusCode)
+	}
+
+	var rel releaseMetadata
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxReleaseJSONBytes)).Decode(&rel); err != nil {
+		return releaseMetadata{}, fmt.Errorf("invalid release metadata: %w", err)
+	}
+	if rel.TagName == "" {
+		return releaseMetadata{}, fmt.Errorf("release metadata is missing a tag name")
+	}
+
+	// Surface the size of the archive matching this platform for display purposes.
+	if asset, err := selectArchiveAsset(rel); err == nil {
+		rel.Size = asset.Size
+	}
+	return rel, nil
+}
+
+// selectArchiveAsset picks the release zip matching this OS/architecture.
+func selectArchiveAsset(rel releaseMetadata) (releaseAsset, error) {
+	version := strings.TrimPrefix(rel.TagName, "v")
+	wanted := fmt.Sprintf("duster-%s-windows-%s.zip", version, runtime.GOARCH)
+	for _, a := range rel.Assets {
+		if strings.EqualFold(a.Name, wanted) {
+			return a, nil
+		}
+	}
+	return releaseAsset{}, fmt.Errorf("release %s has no asset named %q", rel.TagName, wanted)
+}
+
+func selectChecksumsAsset(rel releaseMetadata) (releaseAsset, error) {
+	for _, a := range rel.Assets {
+		if strings.EqualFold(a.Name, checksumsFileName) {
+			return a, nil
+		}
+	}
+	return releaseAsset{}, fmt.Errorf("release %s does not publish %s", rel.TagName, checksumsFileName)
+}
+
+// downloadAsset fetches a release asset over HTTPS with a hard size limit.
+func downloadAsset(asset releaseAsset, maxBytes int64) ([]byte, error) {
+	if !strings.HasPrefix(strings.ToLower(asset.DownloadURL), "https://") {
+		return nil, fmt.Errorf("refusing non-HTTPS download URL for %s", asset.Name)
+	}
+
+	client := newUpdateHTTPClient(downloadTimeout)
+	req, err := http.NewRequest(http.MethodGet, asset.DownloadURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "duster-updater/"+AppVersion)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("download of %s failed: %w", asset.Name, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("download of %s failed: HTTP %d", asset.Name, resp.StatusCode)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("download of %s interrupted: %w", asset.Name, err)
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, fmt.Errorf("download of %s exceeds the %d byte safety limit", asset.Name, maxBytes)
+	}
+	return data, nil
+}
+
+// expectedChecksumFor parses a goreleaser checksums file ("<hex>  <name>" lines)
+// and returns the SHA-256 hex digest recorded for the named asset.
+func expectedChecksumFor(checksums []byte, assetName string) (string, error) {
+	for _, line := range strings.Split(string(checksums), "\n") {
+		fields := strings.Fields(strings.TrimSpace(line))
+		if len(fields) != 2 {
+			continue
+		}
+		if strings.EqualFold(fields[1], assetName) {
+			return strings.ToLower(fields[0]), nil
+		}
+	}
+	return "", fmt.Errorf("no checksum entry found for %s", assetName)
+}
+
+// extractBinaryFromZip pulls the du executable out of the release archive.
+func extractBinaryFromZip(archive []byte) ([]byte, error) {
+	reader, err := zip.NewReader(bytes.NewReader(archive), int64(len(archive)))
+	if err != nil {
+		return nil, fmt.Errorf("release archive is not a valid zip: %w", err)
+	}
+
+	for _, f := range reader.File {
+		name := strings.ToLower(f.Name)
+		if name != "du.exe" && !strings.HasSuffix(name, "/du.exe") {
+			continue
+		}
+		if f.UncompressedSize64 > maxBinaryBytes {
+			return nil, fmt.Errorf("binary inside archive exceeds the %d byte safety limit", int64(maxBinaryBytes))
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return nil, err
+		}
+		defer rc.Close()
+
+		data, err := io.ReadAll(io.LimitReader(rc, maxBinaryBytes+1))
+		if err != nil {
+			return nil, err
+		}
+		if len(data) > maxBinaryBytes {
+			return nil, fmt.Errorf("binary inside archive exceeds the %d byte safety limit", int64(maxBinaryBytes))
+		}
+		// Sanity check: Windows executables start with the MZ header.
+		if len(data) < 2 || data[0] != 'M' || data[1] != 'Z' {
+			return nil, fmt.Errorf("extracted file is not a valid Windows executable")
+		}
+		return data, nil
+	}
+	return nil, fmt.Errorf("release archive does not contain du.exe")
+}
+
+// downloadVerifiedBinary downloads the platform archive, verifies it against the
+// release's published SHA-256 checksum, and returns the extracted binary bytes.
+func downloadVerifiedBinary(rel releaseMetadata) ([]byte, error) {
+	archiveAsset, err := selectArchiveAsset(rel)
+	if err != nil {
+		return nil, err
+	}
+	checksumsAsset, err := selectChecksumsAsset(rel)
+	if err != nil {
+		// SECURITY: verification is mandatory. A release without checksums is not installable.
+		return nil, err
+	}
+
+	checksums, err := downloadAsset(checksumsAsset, maxChecksumBytes)
+	if err != nil {
+		return nil, err
+	}
+	expected, err := expectedChecksumFor(checksums, archiveAsset.Name)
+	if err != nil {
+		return nil, err
+	}
+
+	archive, err := downloadAsset(archiveAsset, maxArchiveBytes)
+	if err != nil {
+		return nil, err
+	}
+
+	actual := sha256Hex(archive)
+	if actual != expected {
+		return nil, fmt.Errorf("SHA-256 mismatch for %s: expected %s, got %s — refusing to install",
+			archiveAsset.Name, expected, actual)
+	}
+
+	return extractBinaryFromZip(archive)
+}
+
+// swapBinary atomically replaces the running executable with the verified bytes.
+// The new binary is staged next to the current one (same volume) so both renames
+// are atomic, and the original is restored if any step fails.
+func swapBinary(newBytes []byte) error {
+	currentExe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+
+	stagedExe := currentExe + ".new"
+	oldExe := currentExe + ".old"
+
+	if err := os.WriteFile(stagedExe, newBytes, 0o755); err != nil {
+		return fmt.Errorf("cannot stage new binary: %w", err)
+	}
+
+	_ = os.Remove(oldExe) // clear leftovers from a previous update
+	if err := os.Rename(currentExe, oldExe); err != nil {
+		_ = os.Remove(stagedExe)
+		return fmt.Errorf("cannot move current binary aside: %w", err)
+	}
+
+	if err := os.Rename(stagedExe, currentExe); err != nil {
+		// Roll back: put the original binary back in place.
+		if rbErr := os.Rename(oldExe, currentExe); rbErr != nil {
+			return fmt.Errorf("swap failed (%v) and rollback failed (%v) — restore %s manually", err, rbErr, oldExe)
+		}
+		_ = os.Remove(stagedExe)
+		return fmt.Errorf("cannot activate new binary: %w", err)
+	}
+
+	// The old binary stays locked while this process runs; delete it after exit.
+	scheduleDelayedDelete(oldExe)
+	logUpOperation("self-update", currentExe, int64(len(newBytes)), true)
+	return nil
+}
+
+// isNewerVersion reports whether latest is strictly newer than current,
+// comparing dot-separated numeric components (pre-release suffixes ignored).
+func isNewerVersion(latest, current string) bool {
+	parse := func(v string) []int {
+		v = strings.TrimPrefix(strings.TrimSpace(v), "v")
+		if i := strings.IndexAny(v, "-+"); i >= 0 {
+			v = v[:i]
+		}
+		var nums []int
+		for _, part := range strings.Split(v, ".") {
+			n, err := strconv.Atoi(part)
+			if err != nil {
+				return nil
+			}
+			nums = append(nums, n)
+		}
+		return nums
+	}
+
+	l, c := parse(latest), parse(current)
+	if l == nil || c == nil {
+		// Unparseable versions (e.g. dev builds): treat any difference as an update.
+		return strings.TrimPrefix(latest, "v") != strings.TrimPrefix(current, "v")
+	}
+	for i := 0; i < len(l) || i < len(c); i++ {
+		var lv, cv int
+		if i < len(l) {
+			lv = l[i]
+		}
+		if i < len(c) {
+			cv = c[i]
+		}
+		if lv != cv {
+			return lv > cv
+		}
+	}
+	return false
 }
 
 func runCheckReleaseCmd() tea.Cmd {
 	return func() tea.Msg {
-		// Mock release query (simulating GitHub API response)
-		time.Sleep(800 * time.Millisecond)
-
-		rel := releaseMetadata{
-			TagName:     "v1.0.2",
-			PublishedAt: "2026-05-18T12:00:00Z",
-			Body:        "Features:\n- Implement du optimize performance tools\n- Add du installer setup cleaner\n- Self-executable binary renaming update engine",
-			Size:        16 * 1024 * 1024, // 16 MB
-		}
-		return checkCompleteMsg{release: rel, err: nil}
+		rel, err := fetchLatestRelease()
+		return checkCompleteMsg{release: rel, err: err}
 	}
 }
 
-func runDownloadBinaryCmd() tea.Cmd {
+func runDownloadBinaryCmd(rel releaseMetadata) tea.Cmd {
 	return func() tea.Msg {
-		// Simulate network download
-		time.Sleep(1200 * time.Millisecond)
-
-		// Get current executable bytes to copy them as a stub payload (safe and self-contained)
-		currentExe, err := os.Executable()
-		if err != nil {
-			return downloadCompleteMsg{err: err}
-		}
-
-		f, err := os.Open(currentExe)
-		if err != nil {
-			return downloadCompleteMsg{err: err}
-		}
-		defer f.Close()
-
-		bytes, err := io.ReadAll(f)
-		return downloadCompleteMsg{bytes: bytes, err: err}
+		data, err := downloadVerifiedBinary(rel)
+		return downloadCompleteMsg{bytes: data, err: err}
 	}
 }
 
 func runSwapBinaryCmd(newBytes []byte) tea.Cmd {
 	return func() tea.Msg {
-		time.Sleep(600 * time.Millisecond)
-
-		currentExe, err := os.Executable()
-		if err != nil {
-			return swapCompleteMsg{err: err}
-		}
-
-		// Windows running executable swap pipeline:
-		// 1. Rename active binary to duster.exe.old
-		oldExe := currentExe + ".old"
-		_ = os.Remove(oldExe) // delete previous leftovers if any
-		err = os.Rename(currentExe, oldExe)
-		if err != nil {
-			return swapCompleteMsg{err: err}
-		}
-
-		// 2. Write down active downloaded bytes
-		err = os.WriteFile(currentExe, newBytes, 0755)
-		if err != nil {
-			// Rollback on failure
-			_ = os.Rename(oldExe, currentExe)
-			return swapCompleteMsg{err: err}
-		}
-
-		// 3. Schedule safe delayed cleanup of the .old binary
-		// SECURITY: Uses discrete argument passing instead of shell string interpolation
-		scheduleDelayedDelete(oldExe)
-
-		logUpOperation("self-update", currentExe, int64(len(newBytes)), true)
-		return swapCompleteMsg{err: nil}
+		return swapCompleteMsg{err: swapBinary(newBytes)}
 	}
 }
 
@@ -224,15 +471,15 @@ func (m updateModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter", "y", "Y":
 			if m.state == stateUpIdle {
 				m.state = stateUpChecking
-				m.statusMsg = "Retrieving latest package manifest..."
+				m.statusMsg = "Retrieving latest release manifest..."
 				return m, runCheckReleaseCmd()
 			} else if m.state == stateUpChecking && m.updateFound {
 				if upCheck {
 					return m, tea.Quit
 				}
 				m.state = stateUpDownloading
-				m.statusMsg = "Downloading binary payload..."
-				return m, runDownloadBinaryCmd()
+				m.statusMsg = "Downloading and verifying release archive..."
+				return m, runDownloadBinaryCmd(m.latestRelease)
 			} else if m.state == stateUpFinished {
 				return m, tea.Quit
 			}
@@ -252,9 +499,7 @@ func (m updateModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		m.latestRelease = msg.release
 		m.latestVersion = strings.TrimPrefix(msg.release.TagName, "v")
-
-		// If force flag, simulate finding updates even if match
-		m.updateFound = m.latestVersion != m.currentVersion || upForce
+		m.updateFound = isNewerVersion(m.latestVersion, m.currentVersion) || upForce
 
 		m.state = stateUpChecking // transition display state within checking card
 		if m.updateFound {
@@ -303,7 +548,7 @@ func (m updateModel) View() string {
 	case stateUpIdle:
 		boxLayout.WriteString("  Update workflow preparing to query:\n\n")
 		boxLayout.WriteString(fmt.Sprintf("    Current installed version : %s\n", upCyanText("v"+m.currentVersion)))
-		boxLayout.WriteString("    Remote Registry URL       : Mock Github API Releases\n\n")
+		boxLayout.WriteString(fmt.Sprintf("    Release source            : github.com/%s/%s\n\n", updateRepoOwner, updateRepoName))
 		boxLayout.WriteString("  Press [Enter] to check for available updates, or [q] to Exit.")
 
 	case stateUpChecking:
@@ -313,10 +558,18 @@ func (m updateModel) View() string {
 		if m.updateFound {
 			boxLayout.WriteString(upSuccessStyle.Render("  Update Details:\n"))
 			boxLayout.WriteString(fmt.Sprintf("    Latest Release tag : %s\n", upWhiteText(m.latestRelease.TagName)))
-			boxLayout.WriteString(fmt.Sprintf("    Release Date       : %s\n", upWhiteText(m.latestRelease.PublishedAt[:10])))
-			boxLayout.WriteString(fmt.Sprintf("    Download Size      : %s\n", upWhiteText(formatBytes(m.latestRelease.Size))))
+			if len(m.latestRelease.PublishedAt) >= 10 {
+				boxLayout.WriteString(fmt.Sprintf("    Release Date       : %s\n", upWhiteText(m.latestRelease.PublishedAt[:10])))
+			}
+			if m.latestRelease.Size > 0 {
+				boxLayout.WriteString(fmt.Sprintf("    Download Size      : %s\n", upWhiteText(formatBytes(m.latestRelease.Size))))
+			}
 			boxLayout.WriteString("\n  Changelog summary:\n")
 			changelogLines := strings.Split(m.latestRelease.Body, "\n")
+			const maxChangelogLines = 12
+			if len(changelogLines) > maxChangelogLines {
+				changelogLines = changelogLines[:maxChangelogLines]
+			}
 			for _, line := range changelogLines {
 				boxLayout.WriteString(fmt.Sprintf("    %s\n", upGrayText(line)))
 			}
@@ -332,9 +585,9 @@ func (m updateModel) View() string {
 		}
 
 	case stateUpDownloading:
-		boxLayout.WriteString("⌛  " + upCyanText("DOWNLOADING REMOTE PACKAGE PAYLOAD") + "\n\n")
+		boxLayout.WriteString("⌛  " + upCyanText("DOWNLOADING VERIFIED RELEASE ARCHIVE") + "\n\n")
 		boxLayout.WriteString(fmt.Sprintf("  Status: %s\n\n", m.statusMsg))
-		boxLayout.WriteString("  Fetching static compressed bytes streams... Do NOT close this window.")
+		boxLayout.WriteString("  Downloading over HTTPS and verifying SHA-256 checksum... Do NOT close this window.")
 
 	case stateUpSwapping:
 		boxLayout.WriteString("⚡  " + upSuccessStyle.Render("EXECUTING WINDOWS-NATIVE BINARY SWAP") + "\n\n")
@@ -342,7 +595,11 @@ func (m updateModel) View() string {
 		boxLayout.WriteString("  Replacing running executable. Spawning detached background tasks...")
 
 	case stateUpFinished:
-		boxLayout.WriteString("✓  " + upSuccessStyle.Render("SELF-UPDATE WORKFLOW FINISHED") + "\n\n")
+		if strings.Contains(m.statusMsg, "failed") || strings.Contains(m.statusMsg, "Error") {
+			boxLayout.WriteString("✗  " + upFailStyle.Render("SELF-UPDATE WORKFLOW FINISHED") + "\n\n")
+		} else {
+			boxLayout.WriteString("✓  " + upSuccessStyle.Render("SELF-UPDATE WORKFLOW FINISHED") + "\n\n")
+		}
 		boxLayout.WriteString(fmt.Sprintf("  Result: %s\n\n", m.statusMsg))
 		boxLayout.WriteString("  Press [q] or [esc] to return to the CLI shell.")
 	}
@@ -379,63 +636,31 @@ func logUpOperation(action, target string, size int64, success bool) {
 }
 
 func runHeadlessUpdate() {
-	rel := releaseMetadata{
-		TagName:     "v1.0.2",
-		PublishedAt: "2026-05-18T12:00:00Z",
-		Body:        "Features:\n- Implement du optimize performance tools\n- Add du installer setup cleaner\n- Self-executable binary renaming update engine",
-		Size:        16 * 1024 * 1024,
-	}
-
 	currentVersion := AppVersion
+
+	rel, checkErr := fetchLatestRelease()
 	latestVersion := strings.TrimPrefix(rel.TagName, "v")
-	updateAvailable := latestVersion != currentVersion || upForce
+	updateAvailable := checkErr == nil && (isNewerVersion(latestVersion, currentVersion) || upForce)
 
 	var swapErr error
 	if updateAvailable && !upCheck {
-		// Mock read executable and write-swap
-		currentExe, err := os.Executable()
-		if err == nil {
-			f, errRead := os.Open(currentExe)
-			if errRead == nil {
-				bytes, errReadAll := io.ReadAll(f)
-				f.Close()
-				if errReadAll == nil {
-					oldExe := currentExe + ".old"
-					_ = os.Remove(oldExe)
-					errRename := os.Rename(currentExe, oldExe)
-					if errRename == nil {
-						errWrite := os.WriteFile(currentExe, bytes, 0755)
-						if errWrite == nil {
-							// SECURITY: Uses safe delayed delete instead of cmd.exe /C shell injection
-							scheduleDelayedDelete(oldExe)
-							logUpOperation("self-update", currentExe, int64(len(bytes)), true)
-						} else {
-							_ = os.Rename(oldExe, currentExe)
-							swapErr = errWrite
-						}
-					} else {
-						swapErr = errRename
-					}
-				} else {
-					swapErr = errReadAll
-				}
-			} else {
-				swapErr = errRead
-			}
-		} else {
+		if data, err := downloadVerifiedBinary(rel); err != nil {
 			swapErr = err
+		} else {
+			swapErr = swapBinary(data)
 		}
 	}
 
 	statusStr := "UP_TO_DATE"
-	if updateAvailable {
-		if upCheck {
-			statusStr = "NEW_VERSION_AVAILABLE"
-		} else if swapErr != nil {
-			statusStr = fmt.Sprintf("INSTALLATION_FAILED: %v", swapErr)
-		} else {
-			statusStr = "UPDATE_SUCCESSFULLY_INSTALLED"
-		}
+	switch {
+	case checkErr != nil:
+		statusStr = fmt.Sprintf("CHECK_FAILED: %v", checkErr)
+	case updateAvailable && upCheck:
+		statusStr = "NEW_VERSION_AVAILABLE"
+	case updateAvailable && swapErr != nil:
+		statusStr = fmt.Sprintf("INSTALLATION_FAILED: %v", swapErr)
+	case updateAvailable:
+		statusStr = "UPDATE_SUCCESSFULLY_INSTALLED"
 	}
 
 	payload := struct {
@@ -454,7 +679,11 @@ func runHeadlessUpdate() {
 		Timestamp:       time.Now().UTC().Format(time.RFC3339),
 	}
 
-	data, _ := json.MarshalIndent(payload, "", "  ")
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error encoding update status: %v\n", err)
+		os.Exit(1)
+	}
 	fmt.Println(string(data))
 }
 

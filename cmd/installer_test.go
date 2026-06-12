@@ -3,7 +3,6 @@ package cmd
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 
@@ -116,13 +115,7 @@ func TestScanInstallersCrawler(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	// Create Downloads structure
-	var downloadsDir string
-	if runtime.GOOS == "windows" {
-		downloadsDir = filepath.Join(tempDir, "Downloads")
-	} else {
-		// Mock home Downloads path
-		downloadsDir = filepath.Join(tempDir, "Downloads")
-	}
+	downloadsDir := filepath.Join(tempDir, "Downloads")
 	if err := os.MkdirAll(downloadsDir, 0755); err != nil {
 		t.Fatalf("failed to create downloads directory: %v", err)
 	}
@@ -135,11 +128,7 @@ func TestScanInstallersCrawler(t *testing.T) {
 		os.Setenv("USERPROFILE", origUserProfile)
 	}()
 
-	if runtime.GOOS == "windows" {
-		os.Setenv("USERPROFILE", tempDir)
-	} else {
-		os.Setenv("HOME", tempDir)
-	}
+	os.Setenv("USERPROFILE", tempDir)
 
 	// Create mock installer files:
 	// 1. Bulky outdated installer: SHOULD BE DISCOVERED

@@ -63,7 +63,11 @@ type DoctorSnapshot struct {
 func executeDoctor(cmd *cobra.Command, args []string) {
 	if doctorJSON || isPiped() {
 		snapshot := runDoctorDiagnostics()
-		data, _ := json.MarshalIndent(snapshot, "", "  ")
+		data, err := json.MarshalIndent(snapshot, "", "  ")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error encoding JSON: %v\n", err)
+			os.Exit(1)
+		}
 		fmt.Println(string(data))
 		return
 	}
@@ -119,18 +123,13 @@ func runDoctorDiagnostics() DoctorSnapshot {
 		Name:        "PowerShell Execution Boundaries",
 		Description: "Audits if powershell.exe is available and what its execution policy is.",
 	}
-	if runtime.GOOS == "windows" {
-		policy, err := queryPowerShellExecutionPolicy()
-		if err == nil {
-			psRes.Status = "PASS"
-			psRes.Message = fmt.Sprintf("Active. Script Execution Policy: %s", policy)
-		} else {
-			psRes.Status = "WARN"
-			psRes.Message = "PowerShell script engine is restricted or unavailable."
-		}
-	} else {
+	policy, err := queryPowerShellExecutionPolicy()
+	if err == nil {
 		psRes.Status = "PASS"
-		psRes.Message = "Simulation: PowerShell available and healthy."
+		psRes.Message = fmt.Sprintf("Active. Script Execution Policy: %s", policy)
+	} else {
+		psRes.Status = "WARN"
+		psRes.Message = "PowerShell script engine is restricted or unavailable."
 	}
 	results = append(results, psRes)
 
@@ -140,25 +139,23 @@ func runDoctorDiagnostics() DoctorSnapshot {
 		Name:        "Windows Build Compatibility",
 		Description: "Checks if the operating system meets the minimum required Windows build 19041.",
 	}
-	if runtime.GOOS == "windows" {
-		build, prodName, err := getWindowsBuildInfo()
-		if err == nil {
-			buildNum := 0
-			_, _ = fmt.Sscanf(build, "%d", &buildNum)
-			if buildNum >= 19041 || buildNum == 0 { // Allow 0 for unexpected format strings
-				buildRes.Status = "PASS"
-				buildRes.Message = fmt.Sprintf("%s (Build %s) is fully supported.", prodName, build)
-			} else {
-				buildRes.Status = "FAIL"
-				buildRes.Message = fmt.Sprintf("Unsupported build: %s. Minimum required Windows 10 Build 19041.", build)
-			}
-		} else {
+	build, prodName, err := getWindowsBuildInfo()
+	if err == nil {
+		buildNum := 0
+		_, _ = fmt.Sscanf(build, "%d", &buildNum)
+		if buildNum == 0 {
 			buildRes.Status = "WARN"
-			buildRes.Message = "Unable to verify Windows version registry flags."
+			buildRes.Message = fmt.Sprintf("Unable to parse build number from: %q", build)
+		} else if buildNum >= 19041 {
+			buildRes.Status = "PASS"
+			buildRes.Message = fmt.Sprintf("%s (Build %s) is fully supported.", prodName, build)
+		} else {
+			buildRes.Status = "FAIL"
+			buildRes.Message = fmt.Sprintf("Unsupported build: %s. Minimum required Windows 10 Build 19041.", build)
 		}
 	} else {
-		buildRes.Status = "PASS"
-		buildRes.Message = "Simulation: Windows 11 Build 22631 is fully supported."
+		buildRes.Status = "WARN"
+		buildRes.Message = "Unable to verify Windows version registry flags."
 	}
 	results = append(results, buildRes)
 
@@ -184,9 +181,13 @@ func runDoctorDiagnostics() DoctorSnapshot {
 		Name:        "Caches Readability",
 		Description: "Verifies system prefetch and update download directories are not corrupted.",
 	}
-	if runtime.GOOS == "windows" && isAdmin {
-		prefetchDir := `C:\Windows\Prefetch`
-		updateDir := `C:\Windows\SoftwareDistribution\Download`
+	if isAdmin {
+		winDir := os.Getenv("WINDIR")
+		if winDir == "" {
+			winDir = `C:\Windows`
+		}
+		prefetchDir := filepath.Join(winDir, "Prefetch")
+		updateDir := filepath.Join(winDir, "SoftwareDistribution", "Download")
 		pErr := testDirReadable(prefetchDir)
 		uErr := testDirReadable(updateDir)
 		if pErr == nil && uErr == nil {
@@ -196,9 +197,6 @@ func runDoctorDiagnostics() DoctorSnapshot {
 			cacheRes.Status = "WARN"
 			cacheRes.Message = fmt.Sprintf("Some caches inaccessible. Prefetch: %v, SoftwareDistribution: %v", pErr, uErr)
 		}
-	} else if runtime.GOOS != "windows" {
-		cacheRes.Status = "PASS"
-		cacheRes.Message = "Simulation: Caches are readable and uncorrupted."
 	} else {
 		cacheRes.Status = "SKIPPED"
 		cacheRes.Message = "Requires Admin privileges to scan system caches."
@@ -211,18 +209,13 @@ func runDoctorDiagnostics() DoctorSnapshot {
 		Name:        "Windows Long-Paths Enablement",
 		Description: "Checks if the 260-character NTFS path limit has been unlocked.",
 	}
-	if runtime.GOOS == "windows" {
-		enabled, err := queryLongPathsEnabled()
-		if err == nil && enabled {
-			longRes.Status = "PASS"
-			longRes.Message = "Long paths are unlocked in the registry."
-		} else {
-			longRes.Status = "WARN"
-			longRes.Message = "Long path support is disabled. Extremely nested developer caches might fail scan."
-		}
-	} else {
+	enabled, lpErr := queryLongPathsEnabled()
+	if lpErr == nil && enabled {
 		longRes.Status = "PASS"
-		longRes.Message = "Long paths supported by default on this operating system."
+		longRes.Message = "Long paths are unlocked in the registry."
+	} else {
+		longRes.Status = "WARN"
+		longRes.Message = "Long path support is disabled. Extremely nested developer caches might fail scan."
 	}
 	results = append(results, longRes)
 
@@ -421,7 +414,6 @@ func initialDoctorModel() doctorModel {
 
 func runDoctorAuditCmd() tea.Cmd {
 	return func() tea.Msg {
-		time.Sleep(300 * time.Millisecond) // Let UI render initialization
 		snapshot := runDoctorDiagnostics()
 		return doctorCompleteMsg(snapshot)
 	}

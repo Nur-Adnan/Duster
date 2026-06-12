@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -243,8 +242,10 @@ func scanItemCmd(itemIdx int, item *cleanTuiItem) tea.Cmd {
 
 			size = size1 + size2
 			files = files1 + files2
-			if err1 != nil && err2 != nil {
+			if err1 != nil {
 				err = err1
+			} else if err2 != nil {
+				err = err2
 			}
 		default:
 			var matchedCat *CleanCategory
@@ -281,7 +282,6 @@ func scanItemCmd(itemIdx int, item *cleanTuiItem) tea.Cmd {
 func cleanItemCmd(itemIdx int, item *cleanTuiItem, isSimulation bool) tea.Cmd {
 	return func() tea.Msg {
 		if isSimulation {
-			time.Sleep(100 * time.Millisecond) // smooth micro-delay for dry-run
 			return cleanDeletionProgressMsg{
 				ItemIdx:    itemIdx,
 				SizeFreed:  item.Size,
@@ -345,8 +345,10 @@ func cleanItemCmd(itemIdx int, item *cleanTuiItem, isSimulation bool) tea.Cmd {
 
 			sizeFreed = size1 + size2
 			filesFreed = files1 + files2
-			if err1 != nil && err2 != nil {
+			if err1 != nil {
 				err = err1
+			} else if err2 != nil {
+				err = err2
 			}
 		default:
 			var matchedCat *CleanCategory
@@ -408,7 +410,7 @@ func initialCleanModel(startDryRun bool) cleanModel {
 
 	// Set dynamic stats
 	stats, err := sysinfo.GetSystemStats()
-	osVer := "Windows 11 Pro"
+	osVer := "Windows"
 	if err == nil && stats.OSVersion != "" {
 		osVer = stats.OSVersion
 	}
@@ -424,9 +426,9 @@ func initialCleanModel(startDryRun bool) cleanModel {
 	m.isAdmin = elevation.IsAdmin()
 
 	// Gather stats for Elevation screen cogs
-	ramGB := "3/16 GB"
-	diskGB := "881/926 GB"
-	uptimeStr := "1d"
+	ramGB := "N/A"
+	diskGB := "N/A"
+	uptimeStr := "N/A"
 
 	if err == nil {
 		if stats.RAMTotal > 0 {
@@ -481,14 +483,16 @@ type elevationVerificationMsg struct {
 	Err     string
 }
 
-func verifyElevationCmd(password string) tea.Cmd {
+func verifyElevationCmd(_ string) tea.Cmd {
 	return func() tea.Msg {
-		// Mock verification process with 800ms delay
-		time.Sleep(800 * time.Millisecond)
-		if len(password) < 4 {
-			return elevationVerificationMsg{Success: false, Err: "Invalid password format or insufficient privileges"}
+		err := elevation.RequestElevation()
+		if err != nil {
+			return elevationVerificationMsg{Success: false, Err: fmt.Sprintf("Elevation failed: %v", err)}
 		}
-		return elevationVerificationMsg{Success: true}
+		// A new elevated process has been launched via ShellExecuteW "runas".
+		// This (non-elevated) process must exit so only the elevated instance runs.
+		os.Exit(0)
+		return nil
 	}
 }
 
@@ -567,16 +571,6 @@ func (m cleanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case rollbackProgressMsg:
-		if m.state == cleanStateRollback && m.rollbackVerifying {
-			m.rollbackProgress += 10
-			if m.rollbackProgress >= 100 {
-				m.rollbackProgress = 100
-				m.rollbackVerifying = false
-				m.rollbackStatus = fmt.Sprintf("✓ Successfully restored backup placeholders for %s!", m.rollbackActiveEntry.Target)
-			} else {
-				return m, rollbackTickCmd()
-			}
-		}
 		return m, nil
 
 	case cleanScanProgressMsg:
@@ -659,26 +653,15 @@ func (m cleanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if !m.verifyingElevation {
 					m.verifyingElevation = true
 					m.elevationError = ""
-					return m, verifyElevationCmd(m.passwordInput)
-				}
-			case "backspace":
-				if len(m.passwordInput) > 0 {
-					m.passwordInput = m.passwordInput[:len(m.passwordInput)-1]
+					return m, verifyElevationCmd("")
 				}
 			case "esc":
 				return m, tea.Quit
-			default:
-				if len(keyStr) == 1 && keyStr[0] >= 32 && keyStr[0] <= 126 {
-					m.passwordInput += keyStr
-				}
 			}
 			return m, nil
 		}
 
 		if m.state == cleanStateRollback {
-			if m.rollbackVerifying {
-				return m, nil
-			}
 			switch keyStr {
 			case "up", "k":
 				if m.rollbackCursor > 0 {
@@ -687,15 +670,6 @@ func (m cleanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "down", "j":
 				if m.rollbackCursor < len(m.rollbackLog)-1 {
 					m.rollbackCursor++
-				}
-			case "enter":
-				if len(m.rollbackLog) > 0 {
-					entry := m.rollbackLog[m.rollbackCursor]
-					m.rollbackVerifying = true
-					m.rollbackProgress = 0
-					m.rollbackActiveEntry = entry
-					m.rollbackStatus = "Restoring folder structures..."
-					return m, rollbackTickCmd()
 				}
 			case "esc", "b", "B":
 				m.state = cleanStateReady
@@ -714,11 +688,24 @@ func (m cleanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.cursor++
 				}
 
-			case "space", "enter":
+			case "space":
 				if m.cursor >= 0 && m.cursor < len(m.items) {
 					item := m.items[m.cursor]
 					item.Checked = !item.Checked
 					m.recalculateReclaim()
+				}
+
+			case "enter":
+				m.dryRun = false
+				m.startCleanup()
+				nextIdx, nextItem := m.getNextItemToClean()
+				if nextItem != nil {
+					nextItem.Status = "cleaning"
+					nextItem.Progress = 0.0
+					m.activeItemIdx = nextIdx
+					return m, animateTickCmd()
+				} else {
+					m.state = cleanStateDone
 				}
 
 			case "m", "M":
@@ -1067,6 +1054,7 @@ func (m cleanModel) View() string {
 		}
 	} else {
 		hints = []string{
+			formatShortcut("Space", "Toggle"),
 			formatShortcut("Enter", "Clean"),
 			formatShortcut("D", "Dry Run"),
 			formatShortcut("R", "Rescan"),
@@ -1273,17 +1261,12 @@ func stripAnsi(str string) string {
 }
 
 func getOperationsLogPath() string {
-	var logDir string
-	if runtime.GOOS == "windows" {
-		logDir = os.Getenv("LOCALAPPDATA")
-		if logDir == "" {
-			logDir = os.Getenv("USERPROFILE")
-		}
-		if logDir != "" {
-			logDir = filepath.Join(logDir, "Duster")
-		}
-	} else {
-		logDir = filepath.Clean("./")
+	logDir := os.Getenv("LOCALAPPDATA")
+	if logDir == "" {
+		logDir = os.Getenv("USERPROFILE")
+	}
+	if logDir != "" {
+		logDir = filepath.Join(logDir, "Duster")
 	}
 	if logDir == "" {
 		logDir = filepath.Clean("./")

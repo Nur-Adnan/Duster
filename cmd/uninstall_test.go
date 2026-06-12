@@ -3,7 +3,6 @@ package cmd
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 )
 
@@ -104,23 +103,10 @@ func TestScanAppLeftovers(t *testing.T) {
 		os.Setenv("ProgramFiles(x86)", origProgX86)
 	}()
 
-	// Override environment variables to point to our temp directory so scanAppLeftovers works platform-agnostically
-	if runtime.GOOS == "windows" {
-		os.Setenv("APPDATA", tempDir)
-		os.Setenv("LOCALAPPDATA", tempDir)
-		os.Setenv("ProgramFiles", tempDir)
-		os.Setenv("ProgramFiles(x86)", tempDir)
-	} else {
-		// Mock home so scan dirs fall under the temp directory
-		// Mock path construction: HOME/.config and HOME/.local/share
-		// We'll create those specific subfolders under our temp directory
-		mockConfig := filepath.Join(tempDir, ".config")
-		mockLocalShare := filepath.Join(tempDir, ".local", "share")
-		_ = os.MkdirAll(filepath.Join(mockConfig, "Slack"), 0755)
-		_ = os.MkdirAll(filepath.Join(mockLocalShare, "Google"), 0755)
-
-		os.Setenv("HOME", tempDir)
-	}
+	os.Setenv("APPDATA", tempDir)
+	os.Setenv("LOCALAPPDATA", tempDir)
+	os.Setenv("ProgramFiles", tempDir)
+	os.Setenv("ProgramFiles(x86)", tempDir)
 
 	// 1. Search for Slack
 	slackLeftovers := scanAppLeftovers("Slack", "Slack Technologies LLC")
