@@ -54,7 +54,11 @@ type BenchmarkMetrics struct {
 func executeBenchmark(cmd *cobra.Command, args []string) {
 	if benchmarkJSON || isPiped() {
 		metrics := runSystemBenchmark()
-		data, _ := json.MarshalIndent(metrics, "", "  ")
+		data, err := json.MarshalIndent(metrics, "", "  ")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: failed to marshal benchmark data: %v\n", err)
+			os.Exit(1)
+		}
 		fmt.Println(string(data))
 		return
 	}
@@ -158,8 +162,20 @@ func runSystemBenchmark() BenchmarkMetrics {
 		m.JsonSpeedPerSec = 10000.0 / durJson.Seconds()
 	}
 
-	// 5. CPU Utilization (MOCKED or dynamically computed)
-	m.CPUUsagePercent = 4.2 // Lightweight Go runtime profile
+	// 5. CPU Utilization — measure Go process CPU time over a short interval
+	startCPU := time.Now()
+	var startUser, startSys time.Duration
+	if rusage, rErr := getProcessCPUTime(); rErr == nil {
+		startUser = rusage.user
+		startSys = rusage.sys
+	}
+	time.Sleep(200 * time.Millisecond)
+	elapsed := time.Since(startCPU)
+	if rusage, rErr := getProcessCPUTime(); rErr == nil {
+		cpuDelta := (rusage.user - startUser) + (rusage.sys - startSys)
+		cores := float64(runtime.NumCPU())
+		m.CPUUsagePercent = (float64(cpuDelta) / float64(elapsed)) * 100.0 / cores
+	}
 
 	return m
 }
@@ -183,7 +199,6 @@ func initialBenchmarkModel() benchmarkModel {
 
 func runBenchmarkSuiteCmd() tea.Cmd {
 	return func() tea.Msg {
-		time.Sleep(300 * time.Millisecond) // Smooth TUI transition load
 		metrics := runSystemBenchmark()
 		return benchmarkCompleteMsg(metrics)
 	}

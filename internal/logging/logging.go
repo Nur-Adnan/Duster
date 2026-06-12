@@ -5,14 +5,14 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"runtime"
 	"time"
 )
+
+const maxLogSize = 10 * 1024 * 1024 // 10 MB
 
 var Logger *slog.Logger
 
 func init() {
-	// Initialize standard structured logger to Stderr with level Info
 	Logger = slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))
@@ -24,25 +24,25 @@ func LogDestructiveOperation(command, action, target string, size int64, success
 		return
 	}
 
-	var logDir string
-	if runtime.GOOS == "windows" {
-		logDir = os.Getenv("LOCALAPPDATA")
-		if logDir == "" {
-			logDir = os.Getenv("USERPROFILE")
-		}
-		if logDir != "" {
-			logDir = filepath.Join(logDir, "Duster")
-		}
-	} else {
-		logDir = filepath.Clean("./")
+	logDir := os.Getenv("LOCALAPPDATA")
+	if logDir == "" {
+		logDir = os.Getenv("USERPROFILE")
+	}
+	if logDir != "" {
+		logDir = filepath.Join(logDir, "Duster")
 	}
 
 	if logDir == "" {
 		logDir = filepath.Clean("./")
 	}
 
-	_ = os.MkdirAll(logDir, 0755)
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		Logger.Error("failed to create log directory", "error", err)
+		return
+	}
 	logPath := filepath.Join(logDir, "operations.log")
+
+	rotateIfNeeded(logPath)
 
 	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
@@ -60,4 +60,14 @@ func LogDestructiveOperation(command, action, target string, size int64, success
 	entry := fmt.Sprintf("%s | Command: %s | Action: %s | Target: %s | Size: %d bytes | Status: %s\n",
 		timestamp, command, action, target, size, status)
 	_, _ = f.WriteString(entry)
+}
+
+func rotateIfNeeded(logPath string) {
+	info, err := os.Stat(logPath)
+	if err != nil || info.Size() < maxLogSize {
+		return
+	}
+	prev := logPath + ".old"
+	_ = os.Remove(prev)
+	_ = os.Rename(logPath, prev)
 }

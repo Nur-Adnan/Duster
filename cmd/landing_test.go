@@ -99,14 +99,14 @@ func TestViewSmokeRenders(t *testing.T) {
 
 	// Sub-TUI smoke tests
 	m.subTui = tuiDrivers
-	m.subTuiState = initialDriversState()
+	m.subTuiState = &driversState{scanning: true}
 	view = m.View()
 	if len(view) == 0 {
 		t.Error("Expected Drivers sub-TUI View to render non-empty string")
 	}
 
 	m.subTui = tuiStartup
-	m.subTuiState = initialStartupState()
+	m.subTuiState = &startupState{}
 	view = m.View()
 	if len(view) == 0 {
 		t.Error("Expected Startup sub-TUI View to render non-empty string")
@@ -120,7 +120,7 @@ func TestViewSmokeRenders(t *testing.T) {
 	}
 
 	m.subTui = tuiSecurity
-	m.subTuiState = initialSecurityState()
+	m.subTuiState = &securityState{scanning: true}
 	view = m.View()
 	if len(view) == 0 {
 		t.Error("Expected Security sub-TUI View to render non-empty string")

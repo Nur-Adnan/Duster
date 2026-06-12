@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Nur-Adnan/duster/lib/sysinfo"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -113,23 +114,23 @@ func (m landingModel) runItem(item menuItem) (landingModel, tea.Cmd) {
 		})
 	}
 
-	// For special sub-TUI items: enter corresponding sub-TUI state directly
 	switch item.label {
 	case "Drivers":
 		m.subTui = tuiDrivers
-		m.subTuiState = initialDriversState()
-		return m, driversScanTickCmd()
+		m.subTuiState = &driversState{scanning: true}
+		return m, scanDriversAsyncCmd()
 	case "Startup":
 		m.subTui = tuiStartup
-		m.subTuiState = initialStartupState()
+		m.subTuiState = &startupState{}
+		return m, loadStartupAsyncCmd()
 	case "Network":
 		m.subTui = tuiNetwork
 		m.subTuiState = initialNetworkState()
 		return m, networkTickCmd()
 	case "Security":
 		m.subTui = tuiSecurity
-		m.subTuiState = initialSecurityState()
-		return m, securityScanTickCmd()
+		m.subTuiState = &securityState{scanning: true}
+		return m, runSecurityAuditAsyncCmd()
 	}
 
 	return m, nil
@@ -146,40 +147,53 @@ func (m landingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.runningSub = false
 		return m, nil
 
-	case driversScanTickMsg:
+	case driversScanDoneMsg:
 		if m.subTui == tuiDrivers {
 			ds := m.subTuiState.(*driversState)
-			if ds.scanning {
-				ds.scanProgress += 0.08
-				if ds.scanProgress >= 1.0 {
-					ds.scanProgress = 1.0
-					ds.scanning = false
-				} else {
-					return m, driversScanTickCmd()
+			ds.scanning = false
+			if msg.err != nil {
+				ds.err = msg.err.Error()
+			} else {
+				ds.drivers = msg.drivers
+			}
+		}
+		return m, nil
+
+	case startupLoadDoneMsg:
+		if m.subTui == tuiStartup {
+			ss := m.subTuiState.(*startupState)
+			if msg.err != nil {
+				ss.err = msg.err.Error()
+			} else {
+				ss.items = msg.entries
+			}
+		}
+		return m, nil
+
+	case startupMutationDoneMsg:
+		if m.subTui == tuiStartup {
+			ss := m.subTuiState.(*startupState)
+			if msg.err != nil {
+				ss.msg = fmt.Sprintf("Error: %v", msg.err)
+			} else {
+				ss.msg = msg.msg
+				ss.items = msg.entries
+				if ss.cursor >= len(ss.items) && ss.cursor > 0 {
+					ss.cursor = len(ss.items) - 1
 				}
 			}
 		}
 		return m, nil
 
-	case driversUpdateTickMsg:
-		if m.subTui == tuiDrivers {
-			ds := m.subTuiState.(*driversState)
-			if ds.updating {
-				ds.updateProgress += 0.05
-				if ds.updateProgress >= 1.0 {
-					ds.updateProgress = 1.0
-					ds.updating = false
-					ds.updated = true
-					// Mark all outdated drivers as Up to Date
-					for i := range ds.items {
-						if ds.items[i].status == "Outdated" {
-							ds.items[i].current = ds.items[i].latest
-							ds.items[i].status = "Up to Date"
-						}
-					}
-				} else {
-					return m, driversUpdateTickCmd()
-				}
+	case securityAuditDoneMsg:
+		if m.subTui == tuiSecurity {
+			sc := m.subTuiState.(*securityState)
+			sc.scanning = false
+			if msg.err != nil {
+				sc.err = msg.err.Error()
+			} else {
+				sc.checks = msg.checks
+				sc.score = msg.score
 			}
 		}
 		return m, nil
@@ -188,35 +202,8 @@ func (m landingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.subTui == tuiNetwork {
 			ns := m.subTuiState.(*networkState)
 			ns.tickCount++
-			// Simulated activity shifts
-			ns.downSpeed = 1.2 + 4.5*(0.4+0.6*float64(ns.tickCount%8)/8.0)
-			ns.upSpeed = 0.08 + 0.9*(0.2+0.8*float64((ns.tickCount*2)%10)/10.0)
-
-			// Shuffle socket connections to create visual dynamism
-			if ns.tickCount%3 == 0 {
-				if len(ns.connections) > 5 {
-					ns.connections = ns.connections[:5]
-				} else {
-					ns.connections = append(ns.connections, netConn{"explorer.exe", "TCP", "23.211.25.109:443", "TIME_WAIT"})
-				}
-			}
+			ns.refreshNetworkData()
 			return m, networkTickCmd()
-		}
-		return m, nil
-
-	case securityScanTickMsg:
-		if m.subTui == tuiSecurity {
-			ss := m.subTuiState.(*securityState)
-			if ss.scanning {
-				ss.progress += 0.08
-				if ss.progress >= 1.0 {
-					ss.progress = 1.0
-					ss.scanning = false
-					ss.score = 94
-				} else {
-					return m, securityScanTickCmd()
-				}
-			}
 		}
 		return m, nil
 
@@ -239,58 +226,49 @@ func (m landingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch m.subTui {
 			case tuiDrivers:
 				ds := m.subTuiState.(*driversState)
-				if keyStr == "u" && !ds.scanning && !ds.updating && !ds.updated {
-					ds.updating = true
-					ds.updateProgress = 0.0
-					return m, driversUpdateTickCmd()
-				}
-				if keyStr == "up" || keyStr == "k" {
-					if ds.cursor > 0 {
-						ds.cursor--
-					}
-				}
-				if keyStr == "down" || keyStr == "j" {
-					if ds.cursor < len(ds.items)-1 {
-						ds.cursor++
+				if !ds.scanning && ds.err == "" {
+					switch keyStr {
+					case "up", "k":
+						if ds.cursor > 0 {
+							ds.cursor--
+						}
+					case "down", "j":
+						if ds.cursor < len(ds.drivers)-1 {
+							ds.cursor++
+						}
 					}
 				}
 			case tuiStartup:
 				ss := m.subTuiState.(*startupState)
-				if keyStr == "up" || keyStr == "k" {
-					if ss.cursor > 0 {
-						ss.cursor--
-					}
-				}
-				if keyStr == "down" || keyStr == "j" {
-					if ss.cursor < len(ss.items)-1 {
-						ss.cursor++
-					}
-				}
-				if keyStr == "space" {
-					ss.items[ss.cursor].enabled = !ss.items[ss.cursor].enabled
-					if ss.items[ss.cursor].enabled {
-						ss.msg = fmt.Sprintf("Enabled startup for %s", ss.items[ss.cursor].name)
-					} else {
-						ss.msg = fmt.Sprintf("Disabled startup for %s", ss.items[ss.cursor].name)
-					}
-				}
-				if keyStr == "d" {
-					var active []startupItem
-					for _, item := range ss.items {
-						if item.enabled {
-							active = append(active, item)
+				if ss.err == "" && len(ss.items) > 0 {
+					switch keyStr {
+					case "up", "k":
+						if ss.cursor > 0 {
+							ss.cursor--
 						}
-					}
-					removedCount := len(ss.items) - len(active)
-					ss.items = active
-					ss.cursor = 0
-					if removedCount > 0 {
-						ss.msg = fmt.Sprintf("Successfully removed %d disabled startup shortcuts/registry entries!", removedCount)
-					} else {
-						ss.msg = "No disabled startup items to clean."
+					case "down", "j":
+						if ss.cursor < len(ss.items)-1 {
+							ss.cursor++
+						}
+					case "space":
+						entry := ss.items[ss.cursor]
+						return m, toggleStartupAsyncCmd(entry)
+					case "d":
+						var toRemove []startupEntry
+						for _, item := range ss.items {
+							if !item.Enabled {
+								toRemove = append(toRemove, item)
+							}
+						}
+						if len(toRemove) > 0 {
+							return m, removeStartupAsyncCmd(toRemove)
+						} else {
+							ss.msg = "No disabled startup items to remove."
+						}
 					}
 				}
 			}
+
 			return m, nil
 		}
 
@@ -369,23 +347,6 @@ func (m landingModel) View() string {
 	// Render the high-fidelity responsive header matching the screenshot
 	sb.WriteString(RenderHeader(m.width, "duster"))
 
-	// Dynamic update notification
-	currentVer := AppVersion
-	if currentVer == "" || currentVer == "0.0.0" {
-		currentVer = "1.0.1"
-	}
-	nextVer := "1.0.2"
-	if currentVer == "1.0.2" {
-		nextVer = "1.0.3"
-	}
-
-	updateNotice := fmt.Sprintf("  Update available: %s %s %s, run %s\n",
-		lipgloss.NewStyle().Foreground(colorWhite).Render(currentVer),
-		lipgloss.NewStyle().Foreground(colorDimGray).Render("→"),
-		lipgloss.NewStyle().Foreground(colorWhite).Render(nextVer),
-		lipgloss.NewStyle().Foreground(colorLimeGreen).Render("du update"),
-	)
-	sb.WriteString(updateNotice)
 	sb.WriteString("\n")
 
 	// Interactive two-column menu
@@ -443,139 +404,177 @@ func (m landingModel) View() string {
 }
 
 // ─────────────────────────────────────────────
-// Drivers Sub-TUI View Rendering
+// Drivers Sub-TUI
 // ─────────────────────────────────────────────
 
 type driversState struct {
-	scanning       bool
-	scanProgress   float64
-	updating       bool
-	updateProgress float64
-	updated        bool
-	items          []driverItem
-	cursor         int
+	scanning bool
+	drivers  []driverInfo
+	err      string
+	cursor   int
 }
 
-type driverItem struct {
-	name    string
-	current string
-	latest  string
-	status  string // "Outdated", "Up to Date"
+type driversScanDoneMsg struct {
+	drivers []driverInfo
+	err     error
 }
 
-func initialDriversState() *driversState {
-	return &driversState{
-		scanning:     true,
-		scanProgress: 0.0,
-		items: []driverItem{
-			{"Realtek PCIe GbE Family Controller", "10.43.723.2020", "10.60.615.2023", "Outdated"},
-			{"Intel(R) Wireless-AC 9560 160MHz", "22.40.0.7", "22.160.0.4", "Outdated"},
-			{"NVIDIA GeForce GTX 1650", "511.79", "511.79", "Up to Date"},
-			{"Realtek High Definition Audio", "6.0.8924.1", "6.0.8924.1", "Up to Date"},
-			{"Intel(R) UHD Graphics 630", "27.20.100.9466", "27.20.100.9466", "Up to Date"},
-		},
+func scanDriversAsyncCmd() tea.Cmd {
+	return func() tea.Msg {
+		drivers, err := scanInstalledDrivers()
+		return driversScanDoneMsg{drivers: drivers, err: err}
 	}
-}
-
-type driversScanTickMsg int
-type driversUpdateTickMsg int
-
-func driversScanTickCmd() tea.Cmd {
-	return tea.Tick(120*time.Millisecond, func(t time.Time) tea.Msg {
-		return driversScanTickMsg(1)
-	})
-}
-
-func driversUpdateTickCmd() tea.Cmd {
-	return tea.Tick(80*time.Millisecond, func(t time.Time) tea.Msg {
-		return driversUpdateTickMsg(1)
-	})
 }
 
 func (m landingModel) renderDriversView() string {
 	ds := m.subTuiState.(*driversState)
 	var sb strings.Builder
 
-	sb.WriteString("\n  " + styleTitle.Render("Drivers Scanner & Optimizer") + "\n")
+	sb.WriteString("\n  " + styleTitle.Render("Installed Drivers Scanner") + "\n")
 	sb.WriteString("  " + styleMuted.Render(strings.Repeat("═", 76)) + "\n\n")
 
 	if ds.scanning {
-		sb.WriteString("  🔍 Scanning Windows kernel and Win32 hardware driver registry...\n\n")
-		sb.WriteString("  " + progressBar(ds.scanProgress*100, 40) + fmt.Sprintf("  %.0f%%\n\n", ds.scanProgress*100))
+		sb.WriteString("  Scanning PnP signed drivers via WMI...\n\n")
 		sb.WriteString("  Please wait...")
 		return sb.String()
 	}
 
-	sb.WriteString("  Scanning complete! Detect outdated kernel driver signatures:\n\n")
+	if ds.err != "" {
+		sb.WriteString("  " + styleDanger.Render("Error: "+ds.err) + "\n\n")
+		sb.WriteString("  " + kbHints("ESC Back"))
+		return sb.String()
+	}
 
-	for i, d := range ds.items {
-		cursorStr := "  "
-		if i == ds.cursor && !ds.updating {
-			cursorStr = "➤ "
+	if len(ds.drivers) == 0 {
+		sb.WriteString("  No signed PnP drivers found.\n\n")
+		sb.WriteString("  " + kbHints("ESC Back"))
+		return sb.String()
+	}
+
+	unsigned := 0
+	for _, d := range ds.drivers {
+		if !d.Signed {
+			unsigned++
+		}
+	}
+
+	sb.WriteString(fmt.Sprintf("  Found %d installed drivers", len(ds.drivers)))
+	if unsigned > 0 {
+		sb.WriteString(fmt.Sprintf(" (%s)", styleWarning.Render(fmt.Sprintf("%d unsigned", unsigned))))
+	}
+	sb.WriteString("\n\n")
+
+	maxVisible := 15
+	if m.height > 20 {
+		maxVisible = m.height - 10
+	}
+
+	start := 0
+	if ds.cursor >= maxVisible {
+		start = ds.cursor - maxVisible + 1
+	}
+	end := start + maxVisible
+	if end > len(ds.drivers) {
+		end = len(ds.drivers)
+	}
+
+	for i := start; i < end; i++ {
+		d := ds.drivers[i]
+		cursor := "  "
+		if i == ds.cursor {
+			cursor = ">"
 		}
 
-		statusStr := styleSuccess.Render("Up to Date")
-		if d.status == "Outdated" {
-			statusStr = styleWarning.Render(fmt.Sprintf("Update Available (v%s)", d.latest))
+		signedStr := styleSuccess.Render("Signed")
+		if !d.Signed {
+			signedStr = styleWarning.Render("Unsigned")
 		}
 
-		nameStr := padRight(d.name, 36)
+		nameStr := padRight(truncateString(d.Name, 34), 35)
 		nameRendered := styleLabel.Render(nameStr)
-		if i == ds.cursor && !ds.updating {
+		if i == ds.cursor {
 			nameRendered = styleAccent.Render(nameStr)
 		}
 
-		sb.WriteString(fmt.Sprintf("  %s %s  v%-14s  %s\n",
-			lipgloss.NewStyle().Foreground(colorMint).Render(cursorStr),
+		verStr := padRight(truncateString(d.Version, 16), 17)
+
+		sb.WriteString(fmt.Sprintf("  %s %s v%-17s %s\n",
+			lipgloss.NewStyle().Foreground(colorMint).Render(cursor),
 			nameRendered,
-			d.current,
-			statusStr,
+			verStr,
+			signedStr,
 		))
 	}
 
-	sb.WriteString("\n")
-
-	if ds.updating {
-		sb.WriteString("  ⚡ Downloading and applying driver updates...\n\n")
-		sb.WriteString("  " + progressBar(ds.updateProgress*100, 40) + fmt.Sprintf("  %.0f%%\n\n", ds.updateProgress*100))
-		sb.WriteString("  Do NOT terminate this terminal or power off your machine.")
-	} else if ds.updated {
-		sb.WriteString("  ✓ " + styleSuccess.Render("All drivers have been successfully updated to latest signatures!") + "\n\n")
-		sb.WriteString("  " + kbHints("ESC Back"))
-	} else {
-		sb.WriteString("  " + styleWarning.Render("Action Recommended:") + " 2 drivers are outdated and may affect system stability.\n\n")
-		sb.WriteString("  " + kbHints("U Update Outdated", "ESC Back"))
+	if len(ds.drivers) > maxVisible {
+		sb.WriteString(fmt.Sprintf("\n  %s",
+			styleMuted.Render(fmt.Sprintf("Showing %d-%d of %d", start+1, end, len(ds.drivers)))))
 	}
 
+	sb.WriteString("\n\n  " + kbHints("↑↓ Navigate", "ESC Back"))
 	return sb.String()
 }
 
 // ─────────────────────────────────────────────
-// Startup Sub-TUI View Rendering
+// Startup Sub-TUI
 // ─────────────────────────────────────────────
 
 type startupState struct {
-	items  []startupItem
+	items  []startupEntry
 	cursor int
 	msg    string
+	err    string
 }
 
-type startupItem struct {
-	name    string
-	path    string
-	enabled bool
-	impact  string // "High", "Medium", "Low"
+type startupLoadDoneMsg struct {
+	entries []startupEntry
+	err     error
 }
 
-func initialStartupState() *startupState {
-	return &startupState{
-		items: []startupItem{
-			{"OneDrive", "%USERPROFILE%\\AppData\\Local\\Microsoft\\OneDrive\\OneDrive.exe", true, "High"},
-			{"Discord", "%USERPROFILE%\\AppData\\Local\\Discord\\Update.exe", true, "Medium"},
-			{"Spotify", "%USERPROFILE%\\AppData\\Roaming\\Spotify\\Spotify.exe", false, "Low"},
-			{"Steam Client Bootstrapper", "C:\\Program Files (x86)\\Steam\\steam.exe", true, "High"},
-			{"Microsoft Teams", "%USERPROFILE%\\AppData\\Local\\Microsoft\\Teams\\Update.exe", false, "Medium"},
-		},
+type startupMutationDoneMsg struct {
+	entries []startupEntry
+	msg     string
+	err     error
+}
+
+func loadStartupAsyncCmd() tea.Cmd {
+	return func() tea.Msg {
+		entries, err := getStartupEntries()
+		return startupLoadDoneMsg{entries: entries, err: err}
+	}
+}
+
+func toggleStartupAsyncCmd(entry startupEntry) tea.Cmd {
+	return func() tea.Msg {
+		err := toggleStartupApproval(entry)
+		if err != nil {
+			return startupMutationDoneMsg{err: err}
+		}
+		entries, _ := getStartupEntries()
+		action := "Disabled"
+		if !entry.Enabled {
+			action = "Enabled"
+		}
+		return startupMutationDoneMsg{
+			entries: entries,
+			msg:     fmt.Sprintf("%s startup for %s", action, entry.Name),
+		}
+	}
+}
+
+func removeStartupAsyncCmd(toRemove []startupEntry) tea.Cmd {
+	return func() tea.Msg {
+		removed := 0
+		for _, entry := range toRemove {
+			if err := removeStartupEntry(entry); err == nil {
+				removed++
+			}
+		}
+		entries, _ := getStartupEntries()
+		return startupMutationDoneMsg{
+			entries: entries,
+			msg:     fmt.Sprintf("Removed %d disabled startup entries", removed),
+		}
 	}
 }
 
@@ -585,38 +584,46 @@ func (m landingModel) renderStartupView() string {
 
 	sb.WriteString("\n  " + styleTitle.Render("Startup Applications Manager") + "\n")
 	sb.WriteString("  " + styleMuted.Render(strings.Repeat("═", 76)) + "\n\n")
-	sb.WriteString("  Configure items running automatically at user logon to optimize boot time:\n\n")
+
+	if ss.err != "" {
+		sb.WriteString("  " + styleDanger.Render("Error: "+ss.err) + "\n\n")
+		sb.WriteString("  " + kbHints("ESC Back"))
+		return sb.String()
+	}
+
+	if len(ss.items) == 0 {
+		sb.WriteString("  No startup entries found.\n\n")
+		sb.WriteString("  " + kbHints("ESC Back"))
+		return sb.String()
+	}
+
+	sb.WriteString("  Manage applications that run at user logon:\n\n")
 
 	for i, s := range ss.items {
-		cursorStr := "  "
+		cursor := "  "
 		if i == ss.cursor {
-			cursorStr = "➤ "
+			cursor = ">"
 		}
 
 		checkbox := "[ ]"
-		if s.enabled {
+		if s.Enabled {
 			checkbox = styleSuccess.Render("[x]")
 		}
 
-		impactStr := styleMuted.Render("Low")
-		if s.impact == "High" {
-			impactStr = styleDanger.Render("High")
-		} else if s.impact == "Medium" {
-			impactStr = styleWarning.Render("Medium")
-		}
-
-		nameStr := padRight(s.name, 26)
+		nameStr := padRight(truncateString(s.Name, 22), 23)
 		nameRendered := styleLabel.Render(nameStr)
 		if i == ss.cursor {
 			nameRendered = styleAccent.Render(nameStr)
 		}
 
-		sb.WriteString(fmt.Sprintf("  %s %s %s   Impact: %-6s   %s\n",
-			lipgloss.NewStyle().Foreground(colorMint).Render(cursorStr),
+		locStr := padRight(s.Location, 16)
+
+		sb.WriteString(fmt.Sprintf("  %s %s %s %s %s\n",
+			lipgloss.NewStyle().Foreground(colorMint).Render(cursor),
 			checkbox,
 			nameRendered,
-			impactStr,
-			styleMuted.Render(truncateString(s.path, 34)),
+			styleMuted.Render(locStr),
+			styleMuted.Render(truncateString(s.Command, 30)),
 		))
 	}
 
@@ -625,7 +632,7 @@ func (m landingModel) renderStartupView() string {
 		sb.WriteString("  " + styleSuccess.Render(ss.msg) + "\n\n")
 	}
 
-	sb.WriteString("  " + kbHints("Space Toggle", "D Clean Disabled Items", "ESC Back"))
+	sb.WriteString("  " + kbHints("Space Toggle", "D Remove Disabled", "ESC Back"))
 	return sb.String()
 }
 
@@ -648,17 +655,18 @@ type netConn struct {
 }
 
 func initialNetworkState() *networkState {
-	return &networkState{
-		downSpeed: 2.4,
-		upSpeed:   0.3,
-		connections: []netConn{
-			{"chrome.exe", "TCP", "172.217.16.142:443", "ESTABLISHED"},
-			{"discord.exe", "TCP", "162.159.135.234:443", "ESTABLISHED"},
-			{"duster.exe", "TCP", "140.82.121.4:443", "ESTABLISHED"},
-			{"svchost.exe", "TCP", "52.113.194.132:443", "ESTABLISHED"},
-			{"spotify.exe", "TCP", "35.186.224.25:443", "ESTABLISHED"},
-		},
+	ns := &networkState{}
+	ns.refreshNetworkData()
+	return ns
+}
+
+func (ns *networkState) refreshNetworkData() {
+	stats, err := sysinfo.GetSystemStats()
+	if err != nil {
+		return
 	}
+	ns.downSpeed = float64(stats.NetDownSec) / (1024 * 1024)
+	ns.upSpeed = float64(stats.NetUpSec) / (1024 * 1024)
 }
 
 type networkTickMsg time.Time
@@ -723,84 +731,77 @@ func (m landingModel) renderNetworkView() string {
 }
 
 // ─────────────────────────────────────────────
-// Security Sub-TUI View Rendering
+// Security Sub-TUI
 // ─────────────────────────────────────────────
 
 type securityState struct {
 	scanning bool
-	progress float64
-	checks   []securityCheck
+	checks   []securityCheckResult
 	score    int
+	err      string
 }
 
-type securityCheck struct {
-	name   string
-	desc   string
-	status string // "secure", "warning"
+type securityAuditDoneMsg struct {
+	checks []securityCheckResult
+	score  int
+	err    error
 }
 
-func initialSecurityState() *securityState {
-	return &securityState{
-		scanning: true,
-		progress: 0.0,
-		score:    0,
-		checks: []securityCheck{
-			{"Windows Defender Antivirus", "Real-time threat protection and cloud delivery active", "secure"},
-			{"Windows Defender Firewall", "Inbound and outbound filtering active on all profiles", "secure"},
-			{"User Account Control (UAC)", "Set to notify on system change requests (standard)", "secure"},
-			{"System Windows Update Status", "Last security definition scan: 12 days ago", "warning"},
-			{"Remote Desktop (RDP) Ports", "Port 3389 blocking rule verified in advanced firewall", "secure"},
-		},
+func runSecurityAuditAsyncCmd() tea.Cmd {
+	return func() tea.Msg {
+		checks, score, err := runSecurityAudit()
+		return securityAuditDoneMsg{checks: checks, score: score, err: err}
 	}
 }
 
-type securityScanTickMsg int
-
-func securityScanTickCmd() tea.Cmd {
-	return tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
-		return securityScanTickMsg(1)
-	})
-}
-
 func (m landingModel) renderSecurityView() string {
-	ss := m.subTuiState.(*securityState)
+	sc := m.subTuiState.(*securityState)
 	var sb strings.Builder
 
 	sb.WriteString("\n  " + styleTitle.Render("Windows Security & Privacy Shield") + "\n")
 	sb.WriteString("  " + styleMuted.Render(strings.Repeat("═", 76)) + "\n\n")
 
-	if ss.scanning {
-		sb.WriteString("  🛡 Auditing local system security descriptors and firewall status...\n\n")
-		sb.WriteString("  " + progressBar(ss.progress*100, 40) + fmt.Sprintf("  %.0f%%\n\n", ss.progress*100))
+	if sc.scanning {
+		sb.WriteString("  Auditing system security via WMI, registry, and firewall rules...\n\n")
 		sb.WriteString("  Please wait...")
 		return sb.String()
 	}
 
+	if sc.err != "" {
+		sb.WriteString("  " + styleDanger.Render("Error: "+sc.err) + "\n\n")
+		sb.WriteString("  " + kbHints("ESC Back"))
+		return sb.String()
+	}
+
 	scoreStyle := styleSuccess
-	if ss.score < 80 {
+	if sc.score < 70 {
+		scoreStyle = styleDanger
+	} else if sc.score < 90 {
 		scoreStyle = styleWarning
 	}
-	sb.WriteString(fmt.Sprintf("  Windows Security Shield Score:  %s\n\n",
-		scoreStyle.Render(fmt.Sprintf("%d/100", ss.score)),
+	sb.WriteString(fmt.Sprintf("  Windows Security Score:  %s\n\n",
+		scoreStyle.Render(fmt.Sprintf("%d/100", sc.score)),
 	))
 
-	for _, c := range ss.checks {
-		statusSymbol := styleSuccess.Render("✓")
+	for _, c := range sc.checks {
+		statusSymbol := styleSuccess.Render("OK")
 		statusText := styleSuccess.Render("Secure")
-		if c.status == "warning" {
-			statusSymbol = styleWarning.Render("⚠")
-			statusText = styleWarning.Render("Action Recommended")
+		if c.Status == "warning" {
+			statusSymbol = styleWarning.Render("!!")
+			statusText = styleWarning.Render("Warning")
+		} else if c.Status == "critical" {
+			statusSymbol = styleDanger.Render("XX")
+			statusText = styleDanger.Render("Critical")
 		}
 
-		sb.WriteString(fmt.Sprintf("  %s  %-28s  %-18s\n",
+		sb.WriteString(fmt.Sprintf("  %s  %-30s  %s\n",
 			statusSymbol,
-			styleValue.Render(c.name),
+			styleValue.Render(c.Name),
 			statusText,
 		))
-		sb.WriteString(fmt.Sprintf("     %s\n\n", styleLabel.Render(c.desc)))
+		sb.WriteString(fmt.Sprintf("      %s\n\n", styleLabel.Render(c.Details)))
 	}
 
-	sb.WriteString("\n")
 	sb.WriteString("  " + kbHints("ESC Back"))
 	return sb.String()
 }

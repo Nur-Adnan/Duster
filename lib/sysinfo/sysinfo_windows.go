@@ -3,7 +3,6 @@
 package sysinfo
 
 import (
-	"math"
 	"runtime"
 	"sort"
 	"sync"
@@ -55,9 +54,14 @@ type SYSTEM_POWER_STATUS struct {
 	BatteryFullLifeTime uint32
 }
 
-var lastNetDown, lastNetUp uint64
-var lastDiskRead, lastDiskWrite uint64
-var lastTime time.Time
+var (
+	ioMu          sync.Mutex
+	lastNetDown   uint64
+	lastNetUp     uint64
+	lastDiskRead  uint64
+	lastDiskWrite uint64
+	lastTime      time.Time
+)
 
 func init() {
 	lastTime = time.Now()
@@ -126,7 +130,8 @@ func GetSystemStats() (SystemStats, error) {
 	// 5. Native Windows Disk scanning via GetLogicalDrives & GetDiskFreeSpaceExW
 	stats.Disks = getWindowsDisks()
 
-	// 6. Network speeds (I/O counters rates)
+	// 6. Network speeds and 7. Disk speeds (I/O counter rates)
+	ioMu.Lock()
 	now := time.Now()
 	deltaSec := now.Sub(lastTime).Seconds()
 	if deltaSec <= 0 {
@@ -138,26 +143,34 @@ func GetSystemStats() (SystemStats, error) {
 		currentDown := ioNets[0].BytesRecv
 		currentUp := ioNets[0].BytesSent
 
-		stats.NetDownSec = uint64(math.Max(0, float64(currentDown-lastNetDown)/deltaSec))
-		stats.NetUpSec = uint64(math.Max(0, float64(currentUp-lastNetUp)/deltaSec))
+		if currentDown >= lastNetDown {
+			stats.NetDownSec = uint64(float64(currentDown-lastNetDown) / deltaSec)
+		}
+		if currentUp >= lastNetUp {
+			stats.NetUpSec = uint64(float64(currentUp-lastNetUp) / deltaSec)
+		}
 
 		lastNetDown = currentDown
 		lastNetUp = currentUp
 	}
 
-	// 7. Disk speeds
 	if ioDisks, err := disk.IOCounters(); err == nil {
 		var currentRead, currentWrite uint64
 		for _, io := range ioDisks {
 			currentRead += io.ReadBytes
 			currentWrite += io.WriteBytes
 		}
-		stats.DiskReadSec = uint64(math.Max(0, float64(currentRead-lastDiskRead)/deltaSec))
-		stats.DiskWriteSec = uint64(math.Max(0, float64(currentWrite-lastDiskWrite)/deltaSec))
+		if currentRead >= lastDiskRead {
+			stats.DiskReadSec = uint64(float64(currentRead-lastDiskRead) / deltaSec)
+		}
+		if currentWrite >= lastDiskWrite {
+			stats.DiskWriteSec = uint64(float64(currentWrite-lastDiskWrite) / deltaSec)
+		}
 
 		lastDiskRead = currentRead
 		lastDiskWrite = currentWrite
 	}
+	ioMu.Unlock()
 
 	// 8. Process metrics (Top 5 CPU-hungry)
 	stats.TopProcesses = getTopProcesses()

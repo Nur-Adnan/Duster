@@ -3,24 +3,22 @@ package config
 import (
 	"os"
 	"path/filepath"
-	"runtime"
+	"strings"
 )
 
-// GetConfigDir returns the OS-native application directory for Duster.
+// GetConfigDir returns the Windows application directory for Duster.
 func GetConfigDir() string {
-	var configDir string
-	if runtime.GOOS == "windows" {
-		configDir = os.Getenv("LOCALAPPDATA")
-		if configDir == "" {
-			configDir = os.Getenv("USERPROFILE")
-		}
-		if configDir != "" {
-			configDir = filepath.Join(configDir, "Duster")
-		}
-	} else {
-		home := os.Getenv("HOME")
-		if home != "" {
-			configDir = filepath.Join(home, ".config", "duster")
+	configDir := os.Getenv("LOCALAPPDATA")
+	if configDir == "" {
+		configDir = os.Getenv("USERPROFILE")
+	}
+	if configDir != "" {
+		resolved := filepath.Clean(configDir)
+		lower := strings.ToLower(resolved)
+		if strings.HasPrefix(lower, `c:\windows`) || strings.HasPrefix(lower, `c:\program files`) {
+			configDir = ""
+		} else {
+			configDir = filepath.Join(resolved, "Duster")
 		}
 	}
 	if configDir == "" {

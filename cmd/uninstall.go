@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -740,23 +739,11 @@ func scanAppLeftovers(appName, publisher string) []string {
 	}
 
 	// Roaming/Local AppData + standard Program folders
-	var scanDirs []string
-	if runtime.GOOS == "windows" {
-		scanDirs = []string{
-			os.Getenv("APPDATA"),
-			os.Getenv("LOCALAPPDATA"),
-			os.Getenv("ProgramFiles"),
-			os.Getenv("ProgramFiles(x86)"),
-		}
-	} else {
-		// Fallback testing directories for non-Windows platforms
-		home := os.Getenv("HOME")
-		if home != "" {
-			scanDirs = []string{
-				filepath.Join(home, ".config"),
-				filepath.Join(home, ".local", "share"),
-			}
-		}
+	scanDirs := []string{
+		os.Getenv("APPDATA"),
+		os.Getenv("LOCALAPPDATA"),
+		os.Getenv("ProgramFiles"),
+		os.Getenv("ProgramFiles(x86)"),
 	}
 
 	var cleanedDirs []string
@@ -810,17 +797,12 @@ func logUninstOperation(action, target string, size int64, success bool) {
 		return
 	}
 
-	var logDir string
-	if runtime.GOOS == "windows" {
-		logDir = os.Getenv("LOCALAPPDATA")
-		if logDir == "" {
-			logDir = os.Getenv("USERPROFILE")
-		}
-		if logDir != "" {
-			logDir = filepath.Join(logDir, "Duster")
-		}
-	} else {
-		logDir = filepath.Clean("./")
+	logDir := os.Getenv("LOCALAPPDATA")
+	if logDir == "" {
+		logDir = os.Getenv("USERPROFILE")
+	}
+	if logDir != "" {
+		logDir = filepath.Join(logDir, "Duster")
 	}
 
 	if logDir == "" {
@@ -854,7 +836,11 @@ func runHeadlessUninstall() {
 		os.Exit(1)
 	}
 
-	data, _ := json.MarshalIndent(apps, "", "  ")
+	data, err := json.MarshalIndent(apps, "", "  ")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: failed to marshal uninstall data: %v\n", err)
+		os.Exit(1)
+	}
 	fmt.Println(string(data))
 }
 

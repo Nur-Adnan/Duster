@@ -203,8 +203,10 @@ func getCategories() []CleanCategory {
 			Name:        "Docker Temp Files",
 			Description: "Docker Desktop temporary build files",
 			Paths: []string{
+				// SAFETY: never include Docker\wsl\data here — it holds ext4.vhdx,
+				// the WSL2 VM disk containing all Docker images, containers, and volumes.
 				filepath.Join(localAppData, `Docker\tmp`),
-				filepath.Join(localAppData, `Docker\wsl\data`),
+				filepath.Join(localAppData, `Docker\log`),
 			},
 		},
 		{
@@ -1050,66 +1052,6 @@ func scanJetBrainsCaches(dryRun bool, debugMode bool) (int64, int, error) {
 	}
 
 	return totalSize, totalFiles, nil
-}
-
-// scanResult holds the outcome of a single category scan.
-type scanResult struct {
-	idx       int
-	size      int64
-	fileCount int
-	err       error
-	status    string
-}
-
-// scanCategoriesConcurrent scans multiple categories in parallel using a bounded worker pool.
-// Used during the scan phase to dramatically accelerate category enumeration.
-func scanCategoriesConcurrent(categories []CleanCategory, whitelistMap map[string]bool) []scanResult {
-	results := make([]scanResult, len(categories))
-	var wg sync.WaitGroup
-
-	// Bounded semaphore: limit parallel filesystem walks
-	const maxWorkers = 4
-	sem := make(chan struct{}, maxWorkers)
-
-	for i, cat := range categories {
-		if whitelistMap[cat.ID] {
-			results[i] = scanResult{idx: i, status: "skipped"}
-			continue
-		}
-		if cat.ID == "prefetch" && !elevation.IsAdmin() {
-			results[i] = scanResult{idx: i, status: "adminonly"}
-			continue
-		}
-
-		wg.Add(1)
-		go func(idx int, c CleanCategory) {
-			defer wg.Done()
-			sem <- struct{}{}        // acquire
-			defer func() { <-sem }() // release
-
-			var size int64
-			var files int
-			var err error
-			if c.CustomScan != nil {
-				size, files, err = c.CustomScan(true, false)
-			} else {
-				size, files, err = scanDirCategory(c)
-			}
-
-			if err != nil {
-				results[idx] = scanResult{idx: idx, err: err, status: "noaccess"}
-			} else {
-				results[idx] = scanResult{idx: idx, size: size, fileCount: files, status: "ok"}
-			}
-		}(i, cat)
-	}
-
-	wg.Wait()
-
-	// The scanResult type and results are used internally;
-	// callers currently don't use this function yet (wired in Phase 4 follow-up).
-	_ = results
-	return nil
 }
 
 type cliSpinner struct {

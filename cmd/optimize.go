@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -20,7 +19,8 @@ import (
 )
 
 var (
-	optCtx, optCancel = context.WithCancel(context.Background())
+	optCtx    context.Context
+	optCancel context.CancelFunc
 )
 
 // Flags
@@ -96,6 +96,8 @@ func init() {
 }
 
 func executeOptimize(cmd *cobra.Command, args []string) {
+	optCtx, optCancel = context.WithCancel(context.Background())
+
 	// Headless / JSON snapshot execution
 	if optJSON || isPiped() {
 		runHeadlessOptimize()
@@ -170,43 +172,27 @@ func runTaskCmd(idx int, task optimizeTask, dry bool, isAdmin bool) tea.Cmd {
 		var runErr error
 
 		if dry {
-			time.Sleep(800 * time.Millisecond) // Simulate delay
 			return optTaskProgressMsg{idx: idx, status: statusSkipped, reclaimed: 0}
 		}
 
 		switch task.ID {
 		case "dns":
-			time.Sleep(600 * time.Millisecond)
-			if runtime.GOOS == "windows" {
-				c := exec.CommandContext(optCtx, "ipconfig", "/flushdns")
-				setProcessGroup(c)
-				runErr = c.Run()
-			}
+			c := exec.CommandContext(optCtx, "ipconfig", "/flushdns")
+			setProcessGroup(c)
+			runErr = c.Run()
 			if runErr != nil {
 				status = statusFailed
 			}
 			logOptOperation("flushdns", "DNS Resolver Cache", 0, runErr == nil)
 
 		case "delivery_opt":
-			time.Sleep(800 * time.Millisecond)
-			var cacheDir string
-			if runtime.GOOS == "windows" {
-				windir := os.Getenv("WINDIR")
-				if windir == "" {
-					windir = `C:\Windows`
-				}
-				cacheDir = filepath.Join(windir, "SoftwareDistribution", "DeliveryOptimization", "Download")
-			} else {
-				// Mock for local support
-				home := os.Getenv("HOME")
-				if home != "" {
-					cacheDir = filepath.Join(home, ".duster_mock_delivery_opt")
-					_ = os.MkdirAll(cacheDir, 0755)
-				}
+			windir := os.Getenv("WINDIR")
+			if windir == "" {
+				windir = `C:\Windows`
 			}
+			cacheDir := filepath.Join(windir, "SoftwareDistribution", "DeliveryOptimization", "Download")
 
-			if cacheDir != "" && fs.IsValidPath(cacheDir) {
-				// Calculate size first
+			if fs.IsValidPath(cacheDir) {
 				_ = filepath.WalkDir(cacheDir, func(path string, d os.DirEntry, err error) error {
 					if err == nil && !d.IsDir() {
 						info, err := d.Info()
@@ -232,21 +218,15 @@ func runTaskCmd(idx int, task optimizeTask, dry bool, isAdmin bool) tea.Cmd {
 			logOptOperation("purge", cacheDir, reclaimed, runErr == nil)
 
 		case "ssd_trim":
-			if runtime.GOOS == "windows" {
-				if !isAdmin {
-					status = statusSkipped
-				} else {
-					// Trigger standard volume defrag optimization tool (SSD TRIM and HDD Defrag)
-					time.Sleep(1200 * time.Millisecond)
-					c := exec.CommandContext(optCtx, "defrag.exe", "/O", "/C")
-					setProcessGroup(c)
-					runErr = c.Run()
-					if runErr != nil {
-						status = statusFailed
-					}
-				}
+			if !isAdmin {
+				status = statusSkipped
 			} else {
-				time.Sleep(1000 * time.Millisecond) // Simulated run on Unix
+				c := exec.CommandContext(optCtx, "defrag.exe", "/O", "/C")
+				setProcessGroup(c)
+				runErr = c.Run()
+				if runErr != nil {
+					status = statusFailed
+				}
 			}
 			logOptOperation("trim", "All Fixed Volumes", 0, runErr == nil && status != statusSkipped)
 		}
@@ -325,7 +305,7 @@ func (m optimizeModel) View() string {
 			boxLayout.WriteString(fmt.Sprintf("    %-40s  %s\n", optWhiteText(task.Name), optGrayText(task.Description)))
 		}
 		boxLayout.WriteString("\n")
-		if !m.isAdmin && runtime.GOOS == "windows" {
+		if !m.isAdmin {
 			boxLayout.WriteString(optWarnStyle.Render("  ⚠️  Notice: Duster is running in Standard user mode.\n"))
 			boxLayout.WriteString(optGrayText("      Volume SSD TRIM optimization requires Administrative privileges and will be skipped.\n\n"))
 		}
@@ -432,10 +412,8 @@ func runHeadlessOptimize() {
 		var runErr error
 		switch task.ID {
 		case "dns":
-			if runtime.GOOS == "windows" {
-				c := exec.Command("ipconfig", "/flushdns")
-				runErr = c.Run()
-			}
+			c := exec.Command("ipconfig", "/flushdns")
+			runErr = c.Run()
 			if runErr != nil {
 				tasks[i].Status = statusFailed
 				tasks[i].ErrorMsg = runErr.Error()
@@ -445,22 +423,14 @@ func runHeadlessOptimize() {
 			logOptOperation("flushdns", "DNS Resolver Cache", 0, runErr == nil)
 
 		case "delivery_opt":
-			var cacheDir string
-			if runtime.GOOS == "windows" {
-				windir := os.Getenv("WINDIR")
-				if windir == "" {
-					windir = `C:\Windows`
-				}
-				cacheDir = filepath.Join(windir, "SoftwareDistribution", "DeliveryOptimization", "Download")
-			} else {
-				home := os.Getenv("HOME")
-				if home != "" {
-					cacheDir = filepath.Join(home, ".duster_mock_delivery_opt")
-				}
+			windir := os.Getenv("WINDIR")
+			if windir == "" {
+				windir = `C:\Windows`
 			}
+			cacheDir := filepath.Join(windir, "SoftwareDistribution", "DeliveryOptimization", "Download")
 
 			var reclaimed int64
-			if cacheDir != "" && fs.IsValidPath(cacheDir) {
+			if fs.IsValidPath(cacheDir) {
 				_ = filepath.WalkDir(cacheDir, func(path string, d os.DirEntry, err error) error {
 					if err == nil && !d.IsDir() {
 						info, err := d.Info()
@@ -485,26 +455,22 @@ func runHeadlessOptimize() {
 					runErr = err
 				}
 			} else {
-				tasks[i].Status = statusCompleted
+				tasks[i].Status = statusSkipped
 			}
 			logOptOperation("purge", cacheDir, reclaimed, runErr == nil)
 
 		case "ssd_trim":
-			if runtime.GOOS == "windows" {
-				if !isAdmin {
-					tasks[i].Status = statusSkipped
-				} else {
-					c := exec.Command("defrag.exe", "/O", "/C")
-					runErr = c.Run()
-					if runErr != nil {
-						tasks[i].Status = statusFailed
-						tasks[i].ErrorMsg = runErr.Error()
-					} else {
-						tasks[i].Status = statusCompleted
-					}
-				}
+			if !isAdmin {
+				tasks[i].Status = statusSkipped
 			} else {
-				tasks[i].Status = statusCompleted
+				c := exec.Command("defrag.exe", "/O", "/C")
+				runErr = c.Run()
+				if runErr != nil {
+					tasks[i].Status = statusFailed
+					tasks[i].ErrorMsg = runErr.Error()
+				} else {
+					tasks[i].Status = statusCompleted
+				}
 			}
 			logOptOperation("trim", "All Fixed Volumes", 0, runErr == nil && tasks[i].Status != statusSkipped)
 		}
@@ -522,7 +488,11 @@ func runHeadlessOptimize() {
 		Timestamp:      time.Now().UTC().Format(time.RFC3339),
 	}
 
-	data, _ := json.MarshalIndent(payload, "", "  ")
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error encoding JSON: %v\n", err)
+		os.Exit(1)
+	}
 	fmt.Println(string(data))
 }
 

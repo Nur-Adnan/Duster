@@ -57,8 +57,14 @@ func RequestElevation() error {
 		var escapedArgs []string
 		for _, arg := range args {
 			if strings.ContainsAny(arg, " \t\"") {
-				escaped := strings.ReplaceAll(arg, "\"", "\\\"")
-				escapedArgs = append(escapedArgs, "\""+escaped+"\"")
+				escaped := strings.ReplaceAll(arg, `"`, `\"`)
+				// Double trailing backslashes so they don't escape the closing quote
+				trailingBS := 0
+				for i := len(escaped) - 1; i >= 0 && escaped[i] == '\\'; i-- {
+					trailingBS++
+				}
+				escaped += strings.Repeat(`\`, trailingBS)
+				escapedArgs = append(escapedArgs, `"`+escaped+`"`)
 			} else {
 				escapedArgs = append(escapedArgs, arg)
 			}

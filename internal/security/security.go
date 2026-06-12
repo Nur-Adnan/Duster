@@ -1,12 +1,6 @@
 package security
 
 import (
-	"crypto"
-	"crypto/rsa"
-	"crypto/sha256"
-	"crypto/x509"
-	"encoding/pem"
-	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -48,42 +42,7 @@ func IsPathSafe(path string) bool {
 	return true
 }
 
-// DusterPublicKeyPEM represents the embedded public key used to verify self-update release packages.
-//
-// ╔══════════════════════════════════════════════════════════════════════╗
-// ║  ⚠️  TODO: REPLACE WITH PRODUCTION RSA-2048 KEY BEFORE SHIPPING   ║
-// ║                                                                    ║
-// ║  Generate a real keypair:                                          ║
-// ║    openssl genrsa -out duster_private.pem 2048                     ║
-// ║    openssl rsa -in duster_private.pem -pubout -out duster_pub.pem  ║
-// ║                                                                    ║
-// ║  The key below is a PLACEHOLDER and will fail any real             ║
-// ║  signature verification. It must NOT ship in production.           ║
-// ╚══════════════════════════════════════════════════════════════════════╝
-const DusterPublicKeyPEM = `-----BEGIN PUBLIC KEY-----
-MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAzqWfI3R3PzQp7Qy6Kz1m
-9n/c/9mYmP5NfG3G+vH/8Xw2Bf8zFq4J2kPj7R7cKjT1h1ZqjT1h1ZqjT1h1ZqjT
-1h1ZqjT1h1ZqjT1h1ZqjT1h1ZqjT1h1ZqjT1h1ZqjT1h1ZqjT1h1ZqjT1h1ZqjT1
-h1ZqjT1h1ZqjT1h1ZqjT1h1ZqjT1h1ZqjT1h1ZqjT1h1ZqjT1h1ZqjT1h1ZqjT1h
-1ZqjT1h1ZqjT1h1ZqjT1h1ZqjT1h1ZqjT1h1ZqjT1h1ZqjT1h1ZqjT1h1ZqjT1h1
-ZqjT1h1ZqjT1h1ZqjT1h1ZqjT1h1ZqjT1h1ZqjT1h1ZqjT1h1ZqjT1h1ZqjT1h1Z
-wIDAQAB
------END PUBLIC KEY-----`
-
-// VerifyPayloadSignature checks if the binary matches the cryptographic RSA-2048 public key signature.
-func VerifyPayloadSignature(payload []byte, signature []byte) error {
-	block, _ := pem.Decode([]byte(DusterPublicKeyPEM))
-	if block == nil {
-		return fmt.Errorf("failed to decode public key PEM")
-	}
-	pub, err := x509.ParsePKIXPublicKey(block.Bytes)
-	if err != nil {
-		return err
-	}
-	rsaPub, ok := pub.(*rsa.PublicKey)
-	if !ok {
-		return fmt.Errorf("not an RSA public key")
-	}
-	hashed := sha256.Sum256(payload)
-	return rsa.VerifyPKCS1v15(rsaPub, crypto.SHA256, hashed[:], signature)
-}
+// Self-update integrity model: release archives are downloaded over HTTPS and
+// verified against the SHA-256 digests published in the release's
+// checksums-sha256.txt asset (see cmd/update.go). Authenticode code signing of
+// the binary itself is handled at release time by scripts/sign.ps1.

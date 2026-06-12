@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -146,19 +145,11 @@ func scanInstallersCmd(minSizeMB int64, ch chan []installerItem) tea.Cmd {
 		minSizeBytes := minSizeMB * 1024 * 1024
 		now := time.Now()
 
-		var downloadsDir string
-		if runtime.GOOS == "windows" {
-			userProfile := os.Getenv("USERPROFILE")
-			if userProfile == "" {
-				userProfile = `C:\Users\Default`
-			}
-			downloadsDir = filepath.Join(userProfile, "Downloads")
-		} else {
-			home := os.Getenv("HOME")
-			if home != "" {
-				downloadsDir = filepath.Join(home, "Downloads")
-			}
+		userProfile := os.Getenv("USERPROFILE")
+		if userProfile == "" {
+			userProfile = `C:\Users\Default`
 		}
+		downloadsDir := filepath.Join(userProfile, "Downloads")
 
 		if downloadsDir == "" {
 			return installerScanCompleteMsg{items: nil}
@@ -237,8 +228,6 @@ func runSetupSweepCmd(items []installerItem, dry bool) tea.Cmd {
 				reclaimed += item.Size
 			}
 		}
-		// Brief delay for visuals
-		time.Sleep(500 * time.Millisecond)
 		return setupSweepCompleteMsg{reclaimed: reclaimed}
 	}
 }
@@ -503,17 +492,12 @@ func logInstOperation(action, target string, size int64, success bool) {
 		return
 	}
 
-	var logDir string
-	if runtime.GOOS == "windows" {
-		logDir = os.Getenv("LOCALAPPDATA")
-		if logDir == "" {
-			logDir = os.Getenv("USERPROFILE")
-		}
-		if logDir != "" {
-			logDir = filepath.Join(logDir, "Duster")
-		}
-	} else {
-		logDir = filepath.Clean("./")
+	logDir := os.Getenv("LOCALAPPDATA")
+	if logDir == "" {
+		logDir = os.Getenv("USERPROFILE")
+	}
+	if logDir != "" {
+		logDir = filepath.Join(logDir, "Duster")
 	}
 
 	if logDir == "" {
@@ -545,19 +529,11 @@ func runHeadlessInstaller() {
 	now := time.Now()
 	var list []installerItem
 
-	var downloadsDir string
-	if runtime.GOOS == "windows" {
-		userProfile := os.Getenv("USERPROFILE")
-		if userProfile == "" {
-			userProfile = `C:\Users\Default`
-		}
-		downloadsDir = filepath.Join(userProfile, "Downloads")
-	} else {
-		home := os.Getenv("HOME")
-		if home != "" {
-			downloadsDir = filepath.Join(home, "Downloads")
-		}
+	userProfile := os.Getenv("USERPROFILE")
+	if userProfile == "" {
+		userProfile = `C:\Users\Default`
 	}
+	downloadsDir := filepath.Join(userProfile, "Downloads")
 
 	if downloadsDir != "" {
 		_ = filepath.WalkDir(downloadsDir, func(path string, d os.DirEntry, err error) error {
@@ -604,35 +580,21 @@ func runHeadlessInstaller() {
 		})
 	}
 
-	var reclaimed int64
-	var actualList []installerItem
-
-	for _, item := range list {
-		var err error
-		if !instDryRun {
-			err = removeFileSafe(item.Path)
-		}
-		success := err == nil
-		logInstOperation("sweep", item.Path, item.Size, success)
-		if success {
-			reclaimed += item.Size
-			actualList = append(actualList, item)
-		}
-	}
-
 	payload := struct {
 		DiscoveredSetups []installerItem `json:"discovered_setups"`
-		ReclaimedBytes   int64           `json:"reclaimed_bytes"`
-		DryRun           bool            `json:"dry_run"`
+		TotalBytes       int64           `json:"total_bytes"`
 		Timestamp        string          `json:"timestamp"`
 	}{
-		DiscoveredSetups: actualList,
-		ReclaimedBytes:   reclaimed,
-		DryRun:           instDryRun,
+		DiscoveredSetups: list,
+		TotalBytes:       func() int64 { var s int64; for _, i := range list { s += i.Size }; return s }(),
 		Timestamp:        time.Now().UTC().Format(time.RFC3339),
 	}
 
-	data, _ := json.MarshalIndent(payload, "", "  ")
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: failed to marshal installer data: %v\n", err)
+		os.Exit(1)
+	}
 	fmt.Println(string(data))
 }
 

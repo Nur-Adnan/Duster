@@ -5,11 +5,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"github.com/Nur-Adnan/duster/internal/logging"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -356,19 +356,31 @@ func amberText(s string) string { return styleWarning.Render(s) }
 // ─────────────────────────────────────────────
 
 func scheduleDelayedDelete(targetPath string) {
-	if runtime.GOOS == "windows" {
-		// Use PowerShell with discrete arguments — no string interpolation into a shell.
-		// PowerShell's -Command receives the script as a single argument, but we
-		// avoid any path concatenation into the script string by using $args.
-		c := exec.Command("powershell.exe",
-			"-NoProfile", "-WindowStyle", "Hidden", "-Command",
-			"Start-Sleep -Seconds 2; Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $args[0]",
-			targetPath,
-		)
-		_ = c.Start()
-	} else {
-		_ = os.Remove(targetPath)
+	c := exec.Command(systemExecutable(`WindowsPowerShell\v1.0\powershell.exe`),
+		"-NoProfile", "-WindowStyle", "Hidden", "-Command",
+		"Start-Sleep -Seconds 2; Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $args[0]",
+		targetPath,
+	)
+	if err := c.Start(); err != nil {
+		logging.Logger.Error("failed to schedule delayed delete", "target", targetPath, "error", err)
+		return
 	}
+	go func() { _ = c.Wait() }()
+}
+
+// systemExecutable returns the absolute path of a binary under System32,
+// defeating PATH-based binary planting. Falls back to the bare name (PATH
+// lookup) only if the absolute path does not exist.
+func systemExecutable(relPath string) string {
+	systemRoot := os.Getenv("SystemRoot")
+	if systemRoot == "" {
+		systemRoot = `C:\Windows`
+	}
+	abs := filepath.Join(systemRoot, "System32", relPath)
+	if _, err := os.Stat(abs); err == nil {
+		return abs
+	}
+	return filepath.Base(relPath)
 }
 
 // ─────────────────────────────────────────────

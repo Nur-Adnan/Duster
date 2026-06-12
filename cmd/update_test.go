@@ -128,6 +128,59 @@ func TestUpdateModelNoUpdateFound(t *testing.T) {
 	}
 }
 
+func TestIsNewerVersion(t *testing.T) {
+	cases := []struct {
+		latest, current string
+		want            bool
+	}{
+		{"1.0.2", "1.0.1", true},
+		{"v1.0.2", "1.0.1", true},
+		{"1.0.1", "1.0.1", false},
+		{"1.0.0", "1.0.1", false},
+		{"2.0.0", "1.9.9", true},
+		{"1.10.0", "1.9.0", true},
+		{"1.0.2-rc1", "1.0.1", true},
+		{"1.0.2", "0.0.0", true},
+		{"dev", "1.0.1", true}, // unparseable: any difference counts as an update
+	}
+	for _, c := range cases {
+		if got := isNewerVersion(c.latest, c.current); got != c.want {
+			t.Errorf("isNewerVersion(%q, %q) = %v, want %v", c.latest, c.current, got, c.want)
+		}
+	}
+}
+
+func TestExpectedChecksumFor(t *testing.T) {
+	checksums := []byte(
+		"abc123  duster-1.0.2-windows-amd64.zip\n" +
+			"def456  duster-1.0.2-windows-arm64.zip\n" +
+			"malformed line\n")
+
+	hash, err := expectedChecksumFor(checksums, "duster-1.0.2-windows-amd64.zip")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if hash != "abc123" {
+		t.Errorf("expected abc123, got %s", hash)
+	}
+
+	if _, err := expectedChecksumFor(checksums, "missing.zip"); err == nil {
+		t.Error("expected error for missing asset entry, got nil")
+	}
+}
+
+func TestSelectArchiveAssetRejectsMissingChecksums(t *testing.T) {
+	rel := releaseMetadata{
+		TagName: "v1.0.2",
+		Assets: []releaseAsset{
+			{Name: "duster-1.0.2-windows-amd64.zip", DownloadURL: "https://example.com/a.zip"},
+		},
+	}
+	if _, err := selectChecksumsAsset(rel); err == nil {
+		t.Error("expected error when release publishes no checksums file, got nil")
+	}
+}
+
 func TestUpdateModelErrorHandling(t *testing.T) {
 	m := initialUpdateModel()
 

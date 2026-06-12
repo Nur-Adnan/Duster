@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -141,8 +140,6 @@ func runUninstallCmd(currentExe, logDir string, dryRun bool) tea.Cmd {
 		// Log the uninstallation transaction first before removing the folder
 		logRmOperation("self-uninstall", currentExe, 0, true)
 
-		time.Sleep(1000 * time.Millisecond)
-
 		// 1. Safe purge configuration directory
 		if err := cleanDusterDir(logDir, dryRun); err != nil {
 			return rmUninstallCompleteMsg{err: err}
@@ -261,17 +258,12 @@ func (m removeModel) View() string {
 }
 
 func getDusterDir() string {
-	var logDir string
-	if runtime.GOOS == "windows" {
-		logDir = os.Getenv("LOCALAPPDATA")
-		if logDir == "" {
-			logDir = os.Getenv("USERPROFILE")
-		}
-		if logDir != "" {
-			logDir = filepath.Join(logDir, "Duster")
-		}
-	} else {
-		logDir = filepath.Clean("./")
+	logDir := os.Getenv("LOCALAPPDATA")
+	if logDir == "" {
+		logDir = os.Getenv("USERPROFILE")
+	}
+	if logDir != "" {
+		logDir = filepath.Join(logDir, "Duster")
 	}
 	if logDir == "" {
 		logDir = filepath.Clean("./")
@@ -280,8 +272,12 @@ func getDusterDir() string {
 }
 
 func cleanDusterDir(logDir string, simulate bool) error {
-	if logDir == "" || logDir == "." || logDir == "/" || len(logDir) <= 3 {
+	if logDir == "" || logDir == "." || logDir == "/" {
 		return fmt.Errorf("unsafe configuration path blocked: %s", logDir)
+	}
+	cleaned := filepath.Clean(logDir)
+	if fs.IsSystemProtectedPath(cleaned) {
+		return fmt.Errorf("system-protected path blocked: %s", cleaned)
 	}
 	if simulate {
 		return nil
@@ -343,7 +339,11 @@ func runHeadlessRemove(currentExe string) {
 		Timestamp:           time.Now().UTC().Format(time.RFC3339),
 	}
 
-	data, _ := json.MarshalIndent(payload, "", "  ")
+	data, jsonErr := json.MarshalIndent(payload, "", "  ")
+	if jsonErr != nil {
+		fmt.Fprintf(os.Stderr, "Error encoding JSON: %v\n", jsonErr)
+		os.Exit(1)
+	}
 	fmt.Println(string(data))
 
 	if !rmDryRun && err == nil {
