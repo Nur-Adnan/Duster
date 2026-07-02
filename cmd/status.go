@@ -58,8 +58,8 @@ func executeStatus(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	initialStats, _ := sysinfo.GetSystemStats()
-	m := statusModel{stats: initialStats}
+	initialStats, initErr := sysinfo.GetSystemStats()
+	m := statusModel{stats: initialStats, hasStats: initErr == nil}
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error running TUI dashboard: %v\n", err)
@@ -78,6 +78,7 @@ type statusModel struct {
 	height    int
 	tickCount int
 	fetching  bool
+	hasStats  bool // true once at least one fetch has succeeded
 }
 
 type statusTickMsg time.Time
@@ -127,7 +128,11 @@ func (m statusModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.fetching = false
 		if msg.err == nil {
 			m.stats = msg.stats
-		} else {
+			m.hasStats = true
+			m.err = nil // a recovered fetch must clear a prior transient error
+		} else if !m.hasStats {
+			// Only blank the dashboard if we have never had a good sample; once
+			// data exists, a transient WMI/PDH hiccup keeps the last-good view.
 			m.err = msg.err
 		}
 	}

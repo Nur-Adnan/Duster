@@ -183,8 +183,11 @@ func (m landingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				ss.msg = msg.msg
 				ss.items = msg.entries
-				if ss.cursor >= len(ss.items) && ss.cursor > 0 {
+				if ss.cursor >= len(ss.items) {
 					ss.cursor = len(ss.items) - 1
+				}
+				if ss.cursor < 0 {
+					ss.cursor = 0
 				}
 			}
 		}

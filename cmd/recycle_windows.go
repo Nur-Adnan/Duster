@@ -51,6 +51,26 @@ const (
 	SHERB_NOSOUND        = 0x00000004
 )
 
+// MAX_PATH in UTF-16 code units including the terminating NUL.
+// SHFileOperationW is a legacy shell API: it rejects longer paths even in
+// longPathAware processes (returning DE_PATHTOODEEP / DE_ERROR_MAX).
+const shellMaxPath = 260
+
+// shFileOpErrors maps SHFileOperationW's documented pre-Win32 result codes
+// (the delete-relevant subset) to readable causes. These are NOT Win32
+// error codes and must not be passed to FormatMessage/GetLastError.
+var shFileOpErrors = map[uintptr]string{
+	0x74:    "the source is a root directory",
+	0x75:    "the operation was canceled",
+	0x78:    "security settings denied access to the source",
+	0x79:    "the path exceeds MAX_PATH",
+	0x7C:    "the path was invalid",
+	0x81:    "the file name exceeds MAX_PATH",
+	0xB7:    "MAX_PATH was exceeded during the operation",
+	0x402:   "an unknown error occurred (typically an invalid path)",
+	0x10000: "an unspecified destination error occurred",
+}
+
 // recyclePathNative securely deletes a file or directory to the Windows Recycle Bin natively.
 func recyclePathNative(path string) error {
 	absPath, err := filepath.Abs(path)
@@ -65,6 +85,13 @@ func recyclePathNative(path string) error {
 	}
 	utf16Path = append(utf16Path, 0) // Append second null-terminator
 
+	// UTF16FromString's result already includes one NUL, so its length is
+	// the code-unit count MAX_PATH constrains. Fail with a clear message
+	// instead of the shell's opaque numeric code.
+	if len(utf16Path)-1 > shellMaxPath {
+		return fmt.Errorf("path is %d UTF-16 units; the Recycle Bin API (SHFileOperationW) supports at most %d (MAX_PATH) regardless of long-path awareness; delete permanently instead", len(utf16Path)-2, shellMaxPath-1)
+	}
+
 	if procSHFileOperation.Find() != nil {
 		return fmt.Errorf("SHFileOperationW native procedure not found")
 	}
@@ -76,7 +103,10 @@ func recyclePathNative(path string) error {
 
 	ret, _, _ := procSHFileOperation.Call(uintptr(unsafe.Pointer(&op)))
 	if ret != 0 {
-		return fmt.Errorf("SHFileOperationW native call failed with error code %d", ret)
+		if msg, ok := shFileOpErrors[ret]; ok {
+			return fmt.Errorf("recycle bin deletion failed: %s (SHFileOperationW code %#x)", msg, ret)
+		}
+		return fmt.Errorf("SHFileOperationW native call failed with code %#x", ret)
 	}
 	if op.fAnyOperationsAborted != 0 {
 		return fmt.Errorf("recycle bin deletion transaction was aborted")

@@ -65,7 +65,9 @@ $signed = $false
 foreach ($server in $timestampServers) {
     Write-Host "Attempting signature with timestamp server: $server..." -ForegroundColor Gray
     
-    $args = @(
+    # NB: not named $args — that is a PowerShell automatic variable and
+    # assigning it at script scope is fragile across PS versions.
+    $signtoolArgs = @(
         "sign",
         "/f", $CertPath,
         "/p", $CertPassword,
@@ -74,8 +76,8 @@ foreach ($server in $timestampServers) {
         "/td", "sha256",
         $BinaryPath
     )
-    
-    & $signtool $args 2>&1
+
+    & $signtool $signtoolArgs 2>&1
     
     if ($LASTEXITCODE -eq 0) {
         Write-Host "Successfully signed binary with timestamp server: $server" -ForegroundColor Green

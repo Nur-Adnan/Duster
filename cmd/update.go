@@ -133,6 +133,7 @@ type updateModel struct {
 	latestVersion  string
 	latestRelease  releaseMetadata
 	updateFound    bool
+	checkDone      bool // true once the version check has returned
 	statusMsg      string
 	width          int
 	height         int
@@ -288,7 +289,7 @@ func downloadAsset(asset releaseAsset, maxBytes int64) ([]byte, error) {
 	return data, nil
 }
 
-// expectedChecksumFor parses a goreleaser checksums file ("<hex>  <name>" lines)
+// expectedChecksumFor parses a sha256sum-format checksums file ("<hex>  <name>" lines)
 // and returns the SHA-256 hex digest recorded for the named asset.
 func expectedChecksumFor(checksums []byte, assetName string) (string, error) {
 	for _, line := range strings.Split(string(checksums), "\n") {
@@ -515,6 +516,7 @@ func (m updateModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.latestRelease = msg.release
 		m.latestVersion = strings.TrimPrefix(msg.release.TagName, "v")
 		m.updateFound = isNewerVersion(m.latestVersion, m.currentVersion) || upForce
+		m.checkDone = true
 
 		m.state = stateUpChecking // transition display state within checking card
 		if m.updateFound {
@@ -594,9 +596,12 @@ func (m updateModel) View() string {
 			} else {
 				boxLayout.WriteString("  Do you wish to install the update? [y to Swap / n to Cancel]")
 			}
-		} else {
+		} else if m.checkDone {
 			boxLayout.WriteString("  ✓ Duster is fully optimized and up-to-date!\n\n")
 			boxLayout.WriteString("  Press [q] or [esc] to exit.")
+		} else {
+			boxLayout.WriteString("  Contacting GitHub for the latest release...\n\n")
+			boxLayout.WriteString("  Please wait.")
 		}
 
 	case stateUpDownloading:

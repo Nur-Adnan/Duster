@@ -42,16 +42,47 @@ jobs:
       - name: Run Tests
         env:
           CGO_ENABLED: 0
+          DU_NO_OPLOG: "1"  # suppress operations.log so tests stay hermetic
         run: go test -count=1 -v ./...
 
       - name: Static Analysis
         run: go vet ./...
 
+  # ── Stage 1b: Windows Test Gate ────────────────────────────────────
+  # The product is Windows-only; the ubuntu job only exercises !windows
+  # stubs. A release must not ship code the real platform never ran.
+  test-windows:
+    name: Windows Test Suite
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Run Tests (Windows)
+        env:
+          CGO_ENABLED: 0
+          DU_NO_OPLOG: "1"
+        run: go test -count=1 -v ./...
+
   # ── Stage 2: Build ─────────────────────────────────────────────────
   build:
     name: Build Windows Binaries
-    needs: test
+    needs: [test, test-windows]
     runs-on: ubuntu-latest
+    env:
+      # Optional Authenticode signing: set both WINDOWS_CODESIGN_* repo
+      # secrets to enable. secrets.* is not available in step-level `if`,
+      # so the gate is bridged through job env.
+      CODESIGN_PFX_BASE64: ${{ secrets.WINDOWS_CODESIGN_PFX_BASE64 }}
     strategy:
       matrix:
         include:
@@ -91,6 +122,28 @@ jobs:
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
+      - name: Generate Windows Version Resources
+        # Embeds VERSIONINFO (Explorer Properties dialog), the app icon,
+        # and the longPathAware/DPI manifest into the PE via a .syso the Go
+        # linker picks up (the *_windows_<arch>.syso suffix gates it per arch).
+        # GOARCH is set ONLY on the goversioninfo invocation (which chooses the
+        # resource machine type) — never on `go install`, or the tool would be
+        # cross-compiled for the target arch and be unrunnable on the runner.
+        env:
+          MATRIX_GOARCH: ${{ matrix.goarch }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          go install github.com/josephspurrier/goversioninfo/cmd/goversioninfo@v1.7.0
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+          MINOR="${MINOR:-0}"
+          PATCH="${PATCH%%[-+]*}"
+          PATCH="${PATCH:-0}"
+          GOARCH="$MATRIX_GOARCH" "$(go env GOPATH)/bin/goversioninfo" \
+            -ver-major "$MAJOR" -ver-minor "$MINOR" -ver-patch "$PATCH" -ver-build 0 \
+            -product-ver-major "$MAJOR" -product-ver-minor "$MINOR" -product-ver-patch "$PATCH" -product-ver-build 0 \
+            -file-version "$VERSION" -product-version "$VERSION" \
+            -o "resource_windows_${MATRIX_GOARCH}.syso"
+
       - name: Compile Binary
         env:
           GOOS: ${{ matrix.goos }}
@@ -105,6 +158,27 @@ jobs:
               -X main.BuildDate=${BUILD_DATE} \
               -X main.Commit=${COMMIT}" \
             -o duster-windows-${{ matrix.suffix }}.exe .
+
+      - name: Sign Binary (Authenticode)
+        # No-op until the WINDOWS_CODESIGN_* secrets are configured.
+        # Signing runs BEFORE artifact upload so the ZIPs, checksums,
+        # and installer all package the signed exe.
+        if: env.CODESIGN_PFX_BASE64 != ''
+        env:
+          CODESIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PFX_PASSWORD }}
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq osslsigncode
+          umask 077
+          printf '%s' "$CODESIGN_PFX_BASE64" | base64 -d > "$RUNNER_TEMP/codesign.pfx"
+          osslsigncode sign \
+            -pkcs12 "$RUNNER_TEMP/codesign.pfx" -pass "$CODESIGN_PFX_PASSWORD" \
+            -n "Duster" -i "https://github.com/Nur-Adnan/Duster" \
+            -t http://timestamp.digicert.com \
+            -in "duster-windows-${{ matrix.suffix }}.exe" \
+            -out "duster-windows-${{ matrix.suffix }}-signed.exe"
+          mv "duster-windows-${{ matrix.suffix }}-signed.exe" "duster-windows-${{ matrix.suffix }}.exe"
+          rm -f "$RUNNER_TEMP/codesign.pfx"
 
       - name: Upload Binary Artifact
         uses: actions/upload-artifact@v4
@@ -122,7 +196,6 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Full history for changelog
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref }}
 
       - name: Extract Version from Tag
@@ -176,19 +249,6 @@ jobs:
             Duster-${{ steps.version.outputs.version }}-Portable-arm64.zip \
             > checksums-sha256.txt
 
-      - name: Generate Changelog
-        id: changelog
-        run: |
-          # Get commits since last tag
-          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
-          if [ -n "$PREV_TAG" ]; then
-            CHANGELOG=$(git log --oneline --no-merges ${PREV_TAG}..HEAD)
-          else
-            CHANGELOG=$(git log --oneline --no-merges -20)
-          fi
-          # Write to file for the release body
-          echo "$CHANGELOG" > dist/CHANGELOG.txt
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
@@ -235,6 +295,7 @@ jobs:
             | `duster-windows-arm64.exe` | ARM64 | Standalone binary (Surface Pro X, etc.) |
             | `Duster-...-Portable-x64.zip` | x64 | Portable ZIP with launcher + docs |
             | `Duster-...-Portable-arm64.zip` | ARM64 | Portable ZIP with launcher + docs |
+            | `Duster-Setup-...-x64.exe` | x64 | Guided installer (Start Menu, PATH); attached a few minutes after the other assets |
             | `install.ps1` | Any | PowerShell installer script |
             | `install.cmd` | Any | CMD installer script |
             | `uninstall.ps1` | Any | PowerShell uninstaller |
@@ -264,6 +325,9 @@ jobs:
     name: Build Inno Setup Installer
     needs: [build, release]
     runs-on: windows-latest
+    env:
+      # Same optional-signing gate as the build job (see comment there).
+      CODESIGN_PFX_BASE64: ${{ secrets.WINDOWS_CODESIGN_PFX_BASE64 }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -307,6 +371,24 @@ jobs:
           name: duster-installer
           path: dist/installer/Duster-Setup-*.exe
           retention-days: 5
+
+      - name: Sign Installer (Authenticode)
+        # No-op until the WINDOWS_CODESIGN_* secrets are configured.
+        # Must run before upload and before the checksum append below.
+        if: env.CODESIGN_PFX_BASE64 != ''
+        shell: powershell
+        env:
+          CODESIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PFX_PASSWORD }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $pfx = Join-Path $env:RUNNER_TEMP "codesign.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CODESIGN_PFX_BASE64))
+          try {
+            $setup = Get-ChildItem dist/installer/Duster-Setup-*.exe | Select-Object -First 1
+            ./scripts/sign.ps1 -CertPath $pfx -CertPassword $env:CODESIGN_PFX_PASSWORD -BinaryPath $setup.FullName
+          } finally {
+            Remove-Item $pfx -Force
+          }
 
       - name: Upload Installer to Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2

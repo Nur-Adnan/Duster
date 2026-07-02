@@ -161,8 +161,13 @@ func (m removeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "q", "ctrl+c", "esc", "n", "N":
-			if m.state == stateRmIdle {
+		case "ctrl+c":
+			// Emergency exit is always available, even mid-uninstall.
+			return m, tea.Quit
+		case "q", "esc", "n", "N":
+			// Quit from the confirm screen (cancel) or the finished screen
+			// (both advertise [q]/[esc]); ignored only while work is in flight.
+			if m.state == stateRmIdle || m.state == stateRmFinished {
 				return m, tea.Quit
 			}
 		case "y", "Y", "enter":
@@ -285,7 +290,7 @@ func cleanDusterDir(logDir string, simulate bool) error {
 	if simulate {
 		return nil
 	}
-	return removeAllSafe(logDir)
+	return removeAllSafe(cleaned)
 }
 
 // logRmOperation delegates to the shared structured logging system.

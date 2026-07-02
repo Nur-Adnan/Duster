@@ -692,7 +692,10 @@ func (m cleanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.startTime = time.Now()
 
 				var cmds []tea.Cmd
-				cmds = append(cmds, timerTickCmd(), animateTickCmd())
+				// The timer chain from Init() is immortal (timerTickMsg always
+				// re-arms), so only restart the animation here; re-adding
+				// timerTickCmd would spawn a parallel forever-ticking chain.
+				cmds = append(cmds, animateTickCmd())
 				for iIdx, item := range m.items {
 					item.Status = "scanning"
 					item.Scanning = true
@@ -729,7 +732,9 @@ func (m cleanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor = 0
 
 				var cmds []tea.Cmd
-				cmds = append(cmds, timerTickCmd(), animateTickCmd())
+				// See the Ready-state rescan: reuse the immortal timer chain,
+				// restart only the animation to avoid a duplicate ticker.
+				cmds = append(cmds, animateTickCmd())
 				for iIdx, item := range m.items {
 					item.Status = "scanning"
 					item.Scanning = true
@@ -995,6 +1000,7 @@ func (m cleanModel) View() string {
 			formatShortcut("Space", "Toggle"),
 			formatShortcut("Enter", "Clean"),
 			formatShortcut("D", "Dry Run"),
+			formatShortcut("C", "Force real"),
 			formatShortcut("R", "Rescan"),
 			formatShortcut("V", "History"),
 			formatShortcut("B", "Back to menu"),

@@ -39,6 +39,64 @@ func ResolveEnvPath(path string) string {
 	return filepath.Clean(result)
 }
 
+// isDriveLetter reports whether b is an ASCII drive letter.
+func isDriveLetter(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
+}
+
+// isDriveRootOrRelative reports whether p is a bare drive root or a
+// drive-relative reference, both of which are always protected.
+//
+// filepath.Clean("C:") returns "C:." on Windows and "C:" on POSIX; a bare or
+// dotted drive ("C:", "C:."), a drive root ("C:\", "C:/"), or a drive-relative
+// path ("C:foo", with no separator after the colon) all resolve against that
+// drive's *current directory* — an unpredictable, dangerous deletion target.
+func isDriveRootOrRelative(p string) bool {
+	if len(p) < 2 || p[1] != ':' || !isDriveLetter(p[0]) {
+		return false
+	}
+	rest := p[2:]
+	switch rest {
+	case "", ".", "\\", "/":
+		return true // bare drive, dotted drive, or drive root
+	}
+	// A separator here means a real absolute path under the drive (e.g.
+	// C:\Users\...), which is judged by the specific stem rules elsewhere.
+	// No separator means a drive-relative path — always unsafe.
+	return rest[0] != '\\' && rest[0] != '/'
+}
+
+// isUNCShareRoot reports whether p is a bare UNC share root (\\server\share
+// with no deeper path), which must be protected like a drive root.
+func isUNCShareRoot(p string) bool {
+	if !strings.HasPrefix(p, "\\\\") {
+		return false
+	}
+	segs := make([]string, 0, 4)
+	for _, s := range strings.Split(p[2:], "\\") {
+		if s != "" {
+			segs = append(segs, s)
+		}
+	}
+	return len(segs) <= 2 // \\server or \\server\share
+}
+
+// stripExtendedPrefix removes the \\?\ and \\.\ extended-length / device
+// prefixes (including the \\?\UNC\ form) so they cannot be used to slip a
+// protected path past the string comparisons in IsSystemProtectedPath.
+func stripExtendedPrefix(p string) string {
+	for _, pfx := range []string{"\\\\?\\", "\\\\.\\"} {
+		if strings.HasPrefix(p, pfx) {
+			p = p[len(pfx):]
+			if strings.HasPrefix(p, "unc\\") { // \\?\UNC\server\share
+				p = "\\\\" + p[len("unc\\"):]
+			}
+			break
+		}
+	}
+	return p
+}
+
 // IsSystemProtectedPath checks if a path falls under protected Windows directories.
 // Non-negotiable safety rules: C:\Windows\System32, C:\Program Files, and roots of drives are protected.
 func IsSystemProtectedPath(path string) bool {
@@ -47,6 +105,23 @@ func IsSystemProtectedPath(path string) bool {
 	// Normalize slashes to backslashes for Windows standard auditing
 	resolved = strings.ReplaceAll(resolved, "/", "\\")
 
+	// Strip \\?\ / \\.\ device prefixes before any comparison; otherwise
+	// "\\?\C:\Windows" would defeat every stem check below.
+	resolved = stripExtendedPrefix(resolved)
+
+	// Canonicalize 8.3 short names (e.g. PROGRA~1 -> program files) so they
+	// cannot alias past the long-form protected stems. No-op off Windows and
+	// for paths that don't exist on disk.
+	if long := getLongPathName(resolved); long != "" {
+		resolved = strings.ToLower(strings.ReplaceAll(filepath.Clean(long), "/", "\\"))
+	}
+
+	// Bare drive roots, dotted/relative drives, and UNC share roots are
+	// always protected, regardless of the specific stem rules below.
+	if isDriveRootOrRelative(resolved) || isUNCShareRoot(resolved) {
+		return true
+	}
+
 	// Get system directory locations (normalized to lowercase)
 	winDir := strings.ToLower(strings.ReplaceAll(filepath.Clean(ResolveEnvPath("%WINDIR%")), "/", "\\"))
 	sysDrive := strings.ToLower(strings.ReplaceAll(filepath.Clean(ResolveEnvPath("%SYSTEMDRIVE%")), "/", "\\"))
@@ -54,6 +129,11 @@ func IsSystemProtectedPath(path string) bool {
 	// Native Windows API overrides to completely defeat environment spoofing
 	if secureWin, err := GetSecureWindowsDirectory(); err == nil && secureWin != "" {
 		winDir = strings.ToLower(strings.ReplaceAll(filepath.Clean(secureWin), "/", "\\"))
+		// Derive the system drive from the kernel-provided Windows dir so a
+		// spoofed %SYSTEMDRIVE% cannot unprotect Program Files / Boot / EFI.
+		if len(winDir) >= 2 && winDir[1] == ':' {
+			sysDrive = winDir[:2]
+		}
 	}
 
 	system32 := winDir + "\\system32"
@@ -115,16 +195,8 @@ func IsSystemProtectedPath(path string) bool {
 		}
 	}
 
-	// 5. Never delete root drives (e.g. C:\ or D:\)
-	// Volume paths are typically 3 chars long (e.g., C:\)
-	if len(resolved) <= 3 && strings.HasSuffix(resolved, "\\") {
-		return true
-	}
-	// Check for raw drive letters
-	if len(resolved) == 2 && strings.HasSuffix(resolved, ":") {
-		return true
-	}
-
+	// Root drives and drive-relative paths were already handled up front by
+	// isDriveRootOrRelative / isUNCShareRoot.
 	return false
 }
 

@@ -20,7 +20,7 @@ LDFLAGS     = -ldflags="-s -w \
 # Environment
 export CGO_ENABLED = 0
 
-.PHONY: all build build-amd64 build-arm64 build-all test vet lint \
+.PHONY: all build build-amd64 build-arm64 build-all resources test vet lint \
         clean release portable installer verify help hooks
 
 # ── Default target ───────────────────────────────────────────────────
@@ -38,6 +38,7 @@ help:
 	@echo "    build-amd64    Build Windows AMD64 binary to dist/"
 	@echo "    build-arm64    Build Windows ARM64 binary to dist/"
 	@echo "    build-all      Build both architectures"
+	@echo "    resources      Generate Windows PE version resources (.syso)"
 	@echo ""
 	@echo "  Release Targets:"
 	@echo "    release        Full production release (test + build + package)"
@@ -56,18 +57,32 @@ help:
 	@echo ""
 
 # ── Build ────────────────────────────────────────────────────────────
-build:
+# Generate Windows PE resources (VERSIONINFO, icon, longPathAware manifest)
+# from versioninfo.json. Optional locally: builds proceed without them.
+# The .syso filenames carry GOOS/GOARCH suffixes, so both can coexist and
+# the Go linker picks the matching one per target architecture.
+resources:
+	@if command -v goversioninfo > /dev/null 2>&1; then \
+		GOARCH=amd64 goversioninfo -o resource_windows_amd64.syso; \
+		GOARCH=arm64 goversioninfo -o resource_windows_arm64.syso; \
+		echo "✓ Windows version resources generated."; \
+	else \
+		echo "⚠ goversioninfo not found; building without PE version resources."; \
+		echo "  Install: go install github.com/josephspurrier/goversioninfo/cmd/goversioninfo@v1.7.0"; \
+	fi
+
+build: resources
 	@echo "Building Duster $(VERSION) for Windows AMD64..."
 	GOOS=windows GOARCH=amd64 $(GO) build $(GOFLAGS) $(LDFLAGS) -o $(BINARY_NAME) .
 	@echo "✓ Built: $(BINARY_NAME)"
 
-build-amd64:
+build-amd64: resources
 	@mkdir -p $(DIST_DIR)
 	@echo "Building Duster $(VERSION) for Windows AMD64..."
 	GOOS=windows GOARCH=amd64 $(GO) build $(GOFLAGS) $(LDFLAGS) -o $(DIST_DIR)/duster-windows-amd64.exe .
 	@echo "✓ Built: $(DIST_DIR)/duster-windows-amd64.exe"
 
-build-arm64:
+build-arm64: resources
 	@mkdir -p $(DIST_DIR)
 	@echo "Building Duster $(VERSION) for Windows ARM64..."
 	GOOS=windows GOARCH=arm64 $(GO) build $(GOFLAGS) $(LDFLAGS) -o $(DIST_DIR)/duster-windows-arm64.exe .

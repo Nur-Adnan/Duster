@@ -41,7 +41,7 @@ The Duster self-update engine verifies release integrity with **SHA-256 checksum
 3. The downloaded archive's SHA-256 digest must match the published entry exactly, or the update aborts before anything is written.
 4. The new binary is swapped in atomically on the same volume, with the previous binary preserved for rollback if any step fails.
 
-> **Trust model:** integrity is rooted in GitHub's TLS and the release checksums file. This protects against corrupted or man-in-the-middle-tampered downloads, but not against a compromised release-publishing account (which could publish a matching checksum). Authenticode signing of the binaries is not yet wired into the release pipeline; treat SmartScreen prompts as expected for unsigned builds.
+> **Trust model:** integrity is rooted in GitHub's TLS and the release checksums file. This protects against corrupted or man-in-the-middle-tampered downloads, but not against a compromised release-publishing account (which could publish a matching checksum). The release pipeline includes an optional Authenticode signing stage for both binaries and the installer, activated by configuring the `WINDOWS_CODESIGN_PFX_BASE64` / `WINDOWS_CODESIGN_PFX_PASSWORD` repository secrets; until a certificate is provisioned, releases ship unsigned and SmartScreen prompts are expected.
 
 ---
 

@@ -251,7 +251,11 @@ func (m optimizeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "q", "ctrl+c", "esc":
-			optCancel()
+			// optCancel is nil until executeOptimize wires the context; guard
+			// so a stray key in a non-running model never panics.
+			if optCancel != nil {
+				optCancel()
+			}
 			return m, tea.Quit
 		case "enter", "y", "Y":
 			if !m.running && m.currentIdx == 0 {

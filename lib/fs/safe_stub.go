@@ -20,3 +20,8 @@ func GetSecureWindowsDirectory() (string, error) {
 func IsOfflineFile(string) bool {
 	return false
 }
+
+// getLongPathName is Windows-only (8.3 short-name expansion); a no-op elsewhere.
+func getLongPathName(string) string {
+	return ""
+}

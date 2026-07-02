@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/Nur-Adnan/duster/internal/logging"
 	"github.com/Nur-Adnan/duster/lib/fs"
@@ -189,6 +188,10 @@ type analyzeModel struct {
 	confirmRecycle bool
 	errorMsg       string
 	width, height  int
+	// Cached once at scan completion: counting walks the whole tree, and
+	// View runs on every keystroke, so recomputing there lagged large scans.
+	fileCount   int
+	folderCount int
 }
 
 type scanProgressInfo struct {
@@ -394,6 +397,12 @@ func (m analyzeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case analyzeScanProgressMsg:
+		// Ignore progress that arrives after the scan has finished (or after a
+		// drill-down swapped scanning off): a stale frame would overwrite the
+		// live view and re-attach a second listener to the channel.
+		if !m.scanning {
+			return m, nil
+		}
 		m.progress = scanProgressInfo(msg)
 		return m, analyzeListenToScanProgress(m.scanChan)
 
@@ -405,6 +414,7 @@ func (m analyzeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.tree = msg.Root
 			m.largeFiles = msg.LargeFiles
 			m.errorMsg = ""
+			m.fileCount, m.folderCount = countFilesAndFolders(m.tree)
 		}
 		// The new tree may be smaller than the cursor position from the old
 		// one; an unclamped index panics on the next o/d/enter keypress.
@@ -440,10 +450,7 @@ func (m analyzeModel) View() string {
 		s.WriteString(fmt.Sprintf("  %-16s: %s\n", styleSilverText("Files Scanned"), styleValue.Render(formatInt(m.progress.FilesScanned))))
 		s.WriteString(fmt.Sprintf("  %-16s: %s\n\n", styleSilverText("Total Size"), styleWarning.Render(formatSize(m.progress.TotalSize))))
 
-		currPath := m.progress.CurrentPath
-		if len(currPath) > 80 {
-			currPath = "..." + currPath[len(currPath)-77:]
-		}
+		currPath := clampTail(m.progress.CurrentPath, 80)
 		s.WriteString("  " + styleMuted.Render(currPath) + "\n\n")
 
 		s.WriteString("  " + styleWarning.Render("[q] Abort Scan") + "\n\n")
@@ -493,9 +500,8 @@ func (m analyzeModel) View() string {
 		s.WriteString("  " + styleDanger.Render(" "+m.errorMsg+" ") + "\n\n")
 	}
 
-	// Part 2: Path Analysis Summary
-	filesCount, foldersCount := countFilesAndFolders(m.tree)
-	s.WriteString(renderPathSummary(formatSize(m.tree.Size), filesCount, foldersCount))
+	// Part 2: Path Analysis Summary (counts cached at scan completion)
+	s.WriteString(renderPathSummary(formatSize(m.tree.Size), m.fileCount, m.folderCount))
 
 	// Solid cyan divider line
 	s.WriteString(lipgloss.NewStyle().Foreground(colorSkyBlue).Render(strings.Repeat("─", width)) + "\n\n")
@@ -594,9 +600,6 @@ func scanDirectory(root string, progressChan chan<- scanProgressInfo) (*FolderNo
 	scannedDirs := 0
 	scannedFiles := 0
 	var totalSize int64
-
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
 
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {

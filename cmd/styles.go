@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Nur-Adnan/duster/internal/logging"
+	"github.com/Nur-Adnan/duster/lib/fs"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -191,6 +192,33 @@ func truncateString(s string, maxLen int) string {
 	return string(runes[:maxLen-1]) + "…"
 }
 
+// clampHead shortens s to at most `width` display columns, appending "..." when
+// it was longer. Rune-aware, so a multi-byte path/name never truncates
+// mid-character (byte slicing produced a � at the cut on non-ASCII input).
+func clampHead(s string, width int) string {
+	if width < 4 {
+		return s
+	}
+	r := []rune(s)
+	if len(r) <= width {
+		return s
+	}
+	return string(r[:width-3]) + "..."
+}
+
+// clampTail keeps the tail of s within `width` columns, prepending "..." when it
+// was longer — used for long paths where the leaf segment matters most.
+func clampTail(s string, width int) string {
+	if width < 4 {
+		return s
+	}
+	r := []rune(s)
+	if len(r) <= width {
+		return s
+	}
+	return "..." + string(r[len(r)-(width-3):])
+}
+
 // ─────────────────────────────────────────────
 // padRight — right-pad a string to width
 // ─────────────────────────────────────────────
@@ -245,19 +273,19 @@ func scheduleDelayedDelete(targetPath string) {
 	go func() { _ = c.Wait() }()
 }
 
-// systemExecutable returns the absolute path of a binary under System32,
-// defeating PATH-based binary planting. Falls back to the bare name (PATH
-// lookup) only if the absolute path does not exist.
+// systemExecutable returns the absolute System32 path of a Windows system
+// binary. It resolves System32 from the kernel API (defeating %SystemRoot%
+// spoofing) and always returns a fully-qualified path — never a bare name that
+// would fall back to a PATH lookup a planted binary could hijack.
 func systemExecutable(relPath string) string {
+	if secure, err := fs.GetSecureSystemDirectory(); err == nil && secure != "" {
+		return filepath.Join(secure, relPath)
+	}
 	systemRoot := os.Getenv("SystemRoot")
 	if systemRoot == "" {
 		systemRoot = `C:\Windows`
 	}
-	abs := filepath.Join(systemRoot, "System32", relPath)
-	if _, err := os.Stat(abs); err == nil {
-		return abs
-	}
-	return filepath.Base(relPath)
+	return filepath.Join(systemRoot, "System32", relPath)
 }
 
 // ─────────────────────────────────────────────

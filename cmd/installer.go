@@ -402,10 +402,7 @@ func (m installerModel) View() string {
 					chk = instCyanText(chk)
 				}
 
-				shortName := item.Name
-				if len(shortName) > 42 {
-					shortName = shortName[:39] + "..."
-				}
+				shortName := clampHead(item.Name, 42)
 
 				line := fmt.Sprintf("%s%s  %-44s %12s  %4d days\n",
 					prefix,
