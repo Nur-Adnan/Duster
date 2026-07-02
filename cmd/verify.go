@@ -110,22 +110,28 @@ func runIntegrityVerification() VerifyReport {
 	benchSandbox := filepath.Join(tempDir, "duster-symlink-verif")
 	_ = os.MkdirAll(benchSandbox, 0755)
 
-	// Create a simulated nested structure
-	subDir := filepath.Join(benchSandbox, "nested")
-	_ = os.MkdirAll(subDir, 0755)
+	// Real check: a link inside the walked tree points at a directory with a
+	// payload file. The safe walker must NOT follow the link, so the measured
+	// size must exclude the payload. (The old check asserted size >= 0, which
+	// can never fail.)
+	linkTarget := filepath.Join(benchSandbox, "target")
+	_ = os.MkdirAll(linkTarget, 0755)
+	_ = os.WriteFile(filepath.Join(linkTarget, "payload.dat"), make([]byte, 4096), 0644)
+	walkRoot := filepath.Join(benchSandbox, "walkroot")
+	_ = os.MkdirAll(walkRoot, 0755)
 
-	// We calculate directory size recursively using our safe calculateDirSize helper
-	// which is designed to skip symlinks and junctions
-	size := calculateDirSize(benchSandbox)
-	_ = os.RemoveAll(benchSandbox)
-
-	if size >= 0 {
+	if err := os.Symlink(linkTarget, filepath.Join(walkRoot, "loop")); err != nil {
+		// Creating symlinks needs privileges/dev-mode on some Windows setups.
 		symCase.Passed = true
-		symCase.Details = "Valid: Path walker checks NTFS link metadata successfully."
+		symCase.Details = "Skipped: this environment cannot create test links (privilege-restricted)."
+	} else if size := calculateDirSize(walkRoot); size == 0 {
+		symCase.Passed = true
+		symCase.Details = "Valid: walker refused to traverse through the link (0 bytes counted)."
 	} else {
 		symCase.Passed = false
-		symCase.Details = "Failure in walker junction auditing."
+		symCase.Details = fmt.Sprintf("Failed: walker followed a link and counted %s behind it.", formatBytes(size))
 	}
+	_ = os.RemoveAll(benchSandbox)
 	cases = append(cases, symCase)
 
 	// 3. Dry-Run Safety Correctness
@@ -194,9 +200,13 @@ func runIntegrityVerification() VerifyReport {
 	hasher := sha256.New()
 	hasher.Write([]byte("duster-integrity-check"))
 	sum := fmt.Sprintf("%x", hasher.Sum(nil))
-	if len(sum) == 64 && sum != "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" {
+	// Precomputed digest of "duster-integrity-check" — comparing against the
+	// actual known answer (the old check only excluded the empty-string hash,
+	// which could never fail).
+	const wantDigest = "0b81402c7827cfe0bd7dce6f79fa241b259e470089a6d9a44a4cca9c50e90826"
+	if sum == wantDigest {
 		sigCase.Passed = true
-		sigCase.Details = fmt.Sprintf("Valid: SHA256 produces correct 256-bit digest (%s...).", sum[:12])
+		sigCase.Details = fmt.Sprintf("Valid: SHA256 matches the known test vector (%s...).", sum[:12])
 	} else {
 		sigCase.Passed = false
 		sigCase.Details = "SHA256 produced unexpected output."

@@ -8,20 +8,22 @@ import (
 )
 
 func queryPowerShellExecutionPolicy() (string, error) {
-	k, err := registry.OpenKey(registry.LOCAL_MACHINE, `SOFTWARE\Microsoft\PowerShell\1\ShellIds\Microsoft.PowerShell`, registry.QUERY_VALUE)
-	if err != nil {
-		k, err = registry.OpenKey(registry.CURRENT_USER, `SOFTWARE\Microsoft\PowerShell\1\ShellIds\Microsoft.PowerShell`, registry.QUERY_VALUE)
+	const psKey = `SOFTWARE\Microsoft\PowerShell\1\ShellIds\Microsoft.PowerShell`
+	// PowerShell resolves CurrentUser scope before LocalMachine, so query HKCU
+	// first. (The HKLM key exists on every install, so an "HKLM-then-fallback"
+	// order would make the HKCU branch unreachable and invert the precedence.)
+	for _, hive := range []registry.Key{registry.CURRENT_USER, registry.LOCAL_MACHINE} {
+		k, err := registry.OpenKey(hive, psKey, registry.QUERY_VALUE)
+		if err != nil {
+			continue
+		}
+		policy, _, valErr := k.GetStringValue("ExecutionPolicy")
+		k.Close()
+		if valErr == nil && policy != "" {
+			return policy, nil
+		}
 	}
-	if err != nil {
-		return "", fmt.Errorf("cannot open PowerShell registry key: %w", err)
-	}
-	defer k.Close()
-
-	policy, _, err := k.GetStringValue("ExecutionPolicy")
-	if err != nil {
-		return "Undefined", nil
-	}
-	return policy, nil
+	return "Undefined", nil
 }
 
 func getWindowsBuildInfo() (string, string, error) {

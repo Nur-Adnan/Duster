@@ -21,7 +21,7 @@ LDFLAGS     = -ldflags="-s -w \
 export CGO_ENABLED = 0
 
 .PHONY: all build build-amd64 build-arm64 build-all test vet lint \
-        clean release portable installer verify help
+        clean release portable installer verify help hooks
 
 # ── Default target ───────────────────────────────────────────────────
 all: test build
@@ -52,6 +52,7 @@ help:
 	@echo ""
 	@echo "  Maintenance:"
 	@echo "    clean          Remove build artifacts"
+	@echo "    hooks          Install the repo's git pre-commit hooks"
 	@echo ""
 
 # ── Build ────────────────────────────────────────────────────────────
@@ -91,8 +92,13 @@ lint:
 		golangci-lint run ./...; \
 		echo "✓ Lint passed."; \
 	else \
-		echo "⚠ golangci-lint not installed. Run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest"; \
+		echo "⚠ golangci-lint not installed. Run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest"; \
 	fi
+
+# Install the repo's git hooks (pre-commit mirrors CI's gofmt/vet gates)
+hooks:
+	git config core.hooksPath .githooks
+	@echo "✓ Git hooks installed (core.hooksPath = .githooks)."
 
 verify:
 	@echo "Running build verification..."

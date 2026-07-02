@@ -73,16 +73,25 @@ func IsSystemProtectedPath(path string) bool {
 		return true
 	}
 	if strings.HasPrefix(resolved, winDir+"\\") {
-		// Exceptions allowed: Temp, SoftwareDistribution\Download, Prefetch
-		allowedTemp := winDir + "\\temp"
-		allowedDownload := winDir + "\\softwaredistribution\\download"
-		allowedDeliveryOpt := winDir + "\\softwaredistribution\\deliveryoptimization\\download"
-		allowedPrefetch := winDir + "\\prefetch"
+		// Exceptions allowed: the cache/log subtrees Duster's clean categories
+		// legitimately target. Everything else under the Windows dir is blocked.
+		allowedSubtrees := []string{
+			winDir + "\\temp",
+			winDir + "\\softwaredistribution\\download",
+			winDir + "\\softwaredistribution\\deliveryoptimization",
+			winDir + "\\prefetch",
+			winDir + "\\minidump",
+			winDir + "\\logs\\cbs",
+			winDir + "\\logs\\dism",
+		}
 
-		isAllowed := resolved == allowedTemp || strings.HasPrefix(resolved, allowedTemp+"\\") ||
-			resolved == allowedDownload || strings.HasPrefix(resolved, allowedDownload+"\\") ||
-			resolved == allowedDeliveryOpt || strings.HasPrefix(resolved, allowedDeliveryOpt+"\\") ||
-			resolved == allowedPrefetch || strings.HasPrefix(resolved, allowedPrefetch+"\\")
+		isAllowed := false
+		for _, allowed := range allowedSubtrees {
+			if resolved == allowed || strings.HasPrefix(resolved, allowed+"\\") {
+				isAllowed = true
+				break
+			}
+		}
 
 		if !isAllowed {
 			return true
@@ -97,7 +106,16 @@ func IsSystemProtectedPath(path string) bool {
 		return true
 	}
 
-	// 4. Never delete root drives (e.g. C:\ or D:\)
+	// 4. Never delete boot, recovery, or volume-metadata structures
+	// (documented protections in docs/security.md §4)
+	for _, stem := range []string{"\\boot", "\\recovery", "\\efi", "\\system volume information", "\\$winreagent"} {
+		p := sysDrive + stem
+		if resolved == p || strings.HasPrefix(resolved, p+"\\") {
+			return true
+		}
+	}
+
+	// 5. Never delete root drives (e.g. C:\ or D:\)
 	// Volume paths are typically 3 chars long (e.g., C:\)
 	if len(resolved) <= 3 && strings.HasSuffix(resolved, "\\") {
 		return true

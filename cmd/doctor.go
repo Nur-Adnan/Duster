@@ -384,8 +384,10 @@ func checkJunctionLoops() bool {
 	appDataLoop := filepath.Join(localAppData, "Application Data")
 	info, err := os.Lstat(appDataLoop)
 	if err == nil {
-		// If it exists and is a symlink or has NTFS reparse points, it's a known junction point loop risk
-		if info.Mode()&os.ModeSymlink != 0 {
+		// Junction loop risk: since Go 1.23 NTFS junctions report as
+		// ModeIrregular, not ModeSymlink — both bits must be checked
+		// (same rule as removeAllSafe in utils.go).
+		if info.Mode()&(os.ModeSymlink|os.ModeIrregular) != 0 {
 			return true
 		}
 	}

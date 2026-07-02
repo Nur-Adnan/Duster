@@ -6,9 +6,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/Nur-Adnan/duster/internal/logging"
 	"github.com/Nur-Adnan/duster/lib/fs"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -108,7 +110,7 @@ func runHeadlessAnalyze(target string) {
 			Name:     entry.Name,
 			Path:     entry.Path,
 			Size:     entry.Size,
-			SizeText: formatBytes(entry.Size),
+			SizeText: formatSize(entry.Size),
 			IsDir:    entry.IsDir,
 			Percent:  percent,
 			SubItems: entry.Items,
@@ -133,7 +135,7 @@ func runHeadlessAnalyze(target string) {
 	output := AnalyzeJSONOutput{
 		Path:          target,
 		TotalSize:     root.Size,
-		TotalSizeText: formatBytes(root.Size),
+		TotalSizeText: formatSize(root.Size),
 		DirsCount:     dirsCount,
 		FilesCount:    filesCount,
 		Entries:       jsonEntries,
@@ -284,6 +286,16 @@ func (m analyzeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// While a (re)scan is in flight the tree/largeFiles are about to be
+		// replaced; navigating or acting against the stale tree can index out
+		// of range and also spawn concurrent scans. Only quitting is allowed.
+		if m.scanning {
+			if msg.String() == "q" || msg.String() == "ctrl+c" {
+				return m, tea.Quit
+			}
+			return m, nil
+		}
+
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
@@ -296,7 +308,12 @@ func (m analyzeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "down", "j":
 			limit := 0
 			if m.showLargeFiles {
+				// The Largest Files panel renders at most 5 rows; navigating
+				// past them would act on items the user cannot see.
 				limit = len(m.largeFiles)
+				if limit > 5 {
+					limit = 5
+				}
 			} else if m.tree != nil {
 				limit = len(m.tree.Entries)
 			}
@@ -323,7 +340,7 @@ func (m analyzeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
-		case "backspace", "h", "left":
+		case "backspace", "h", "left", "b", "B":
 			if m.showLargeFiles {
 				m.showLargeFiles = false
 				m.selectedIdx = 0
@@ -388,6 +405,17 @@ func (m analyzeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.tree = msg.Root
 			m.largeFiles = msg.LargeFiles
 			m.errorMsg = ""
+		}
+		// The new tree may be smaller than the cursor position from the old
+		// one; an unclamped index panics on the next o/d/enter keypress.
+		limit := 0
+		if m.showLargeFiles {
+			limit = len(m.largeFiles)
+		} else if m.tree != nil {
+			limit = len(m.tree.Entries)
+		}
+		if m.selectedIdx >= limit {
+			m.selectedIdx = 0
 		}
 		return m, nil
 	}
@@ -641,13 +669,9 @@ func scanDirectory(root string, progressChan chan<- scanProgressInfo) (*FolderNo
 	}
 
 	// Sort paths descending by length to compute node sizes from bottom up
-	for i := 0; i < len(paths); i++ {
-		for j := i + 1; j < len(paths); j++ {
-			if len(paths[i]) < len(paths[j]) {
-				paths[i], paths[j] = paths[j], paths[i]
-			}
-		}
-	}
+	sort.Slice(paths, func(i, j int) bool {
+		return len(paths[i]) > len(paths[j])
+	})
 
 	for _, p := range paths {
 		node := folderMap[p]
@@ -680,24 +704,16 @@ func scanDirectory(root string, progressChan chan<- scanProgressInfo) (*FolderNo
 		}
 
 		// Sort items inside folder by size descending
-		for i := 0; i < len(entries); i++ {
-			for j := i + 1; j < len(entries); j++ {
-				if entries[i].Size < entries[j].Size {
-					entries[i], entries[j] = entries[j], entries[i]
-				}
-			}
-		}
+		sort.Slice(entries, func(i, j int) bool {
+			return entries[i].Size > entries[j].Size
+		})
 		node.Entries = entries
 	}
 
-	// Sort large files list globally
-	for i := 0; i < len(allFiles); i++ {
-		for j := i + 1; j < len(allFiles); j++ {
-			if allFiles[i].Size < allFiles[j].Size {
-				allFiles[i], allFiles[j] = allFiles[j], allFiles[i]
-			}
-		}
-	}
+	// Sort large files list globally (descending by size, keep top 10)
+	sort.Slice(allFiles, func(i, j int) bool {
+		return allFiles[i].Size > allFiles[j].Size
+	})
 	if len(allFiles) > 10 {
 		allFiles = allFiles[:10]
 	}
@@ -731,41 +747,10 @@ func recyclePath(path string, size int64) error {
 	return err
 }
 
+// logDestructiveOperation delegates to the shared structured logging system,
+// which also rotates the log; the old local copy grew operations.log unbounded.
 func logDestructiveOperation(action, target string, size int64, success bool) {
-	if os.Getenv("DU_NO_OPLOG") == "1" {
-		return
-	}
-
-	logDir := os.Getenv("LOCALAPPDATA")
-	if logDir == "" {
-		logDir = os.Getenv("USERPROFILE")
-	}
-	if logDir != "" {
-		logDir = filepath.Join(logDir, "Duster")
-	}
-
-	if logDir == "" {
-		logDir = filepath.Clean("./")
-	}
-
-	_ = os.MkdirAll(logDir, 0755)
-	logPath := filepath.Join(logDir, "operations.log")
-
-	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-
-	status := "SUCCESS"
-	if !success {
-		status = "FAILED"
-	}
-
-	timestamp := time.Now().UTC().Format(time.RFC3339)
-	entry := fmt.Sprintf("%s | Command: analyze | Action: %s | Target: %s | Size: %d bytes | Status: %s\n",
-		timestamp, action, target, size, status)
-	_, _ = f.WriteString(entry)
+	logging.LogDestructiveOperation("analyze", action, target, size, success)
 }
 
 // ── Redesigned Disk Usage Explorer Layout Helpers ─────────────────────────────

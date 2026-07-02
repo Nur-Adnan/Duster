@@ -29,6 +29,7 @@ type CleanCategory struct {
 var (
 	dryRun    bool
 	debug     bool
+	assumeYes bool
 	whitelist []string
 
 	onScanProgress  func(path string, info os.FileInfo)
@@ -53,12 +54,46 @@ var CleanCmd = &cobra.Command{
 func init() {
 	CleanCmd.Flags().BoolVarP(&dryRun, "dry-run", "d", false, "Preview what files will be deleted and sizes without actual modifications")
 	CleanCmd.Flags().BoolVar(&debug, "debug", false, "Print verbose execution logs and scanned file targets")
+	CleanCmd.Flags().BoolVarP(&assumeYes, "yes", "y", false, "Skip confirmation and delete in non-interactive (piped/--debug) mode")
 	CleanCmd.Flags().StringSliceVarP(&whitelist, "whitelist", "w", []string{}, "Categories to protect/skip from scanning (e.g. browsers,prefetch)")
+}
+
+// firefoxCachePaths returns the cache subdirectories inside each local Firefox
+// profile. Firefox keeps caches under %LOCALAPPDATA%\Mozilla\Firefox\Profiles\<p>\,
+// while the Roaming profile root holds bookmarks, passwords, and history —
+// deleting a profile root would destroy user data, so only cache subdirs qualify.
+func firefoxCachePaths(localAppData string) []string {
+	profilesRoot := filepath.Join(localAppData, `Mozilla`, `Firefox`, `Profiles`)
+	entries, err := os.ReadDir(profilesRoot)
+	if err != nil {
+		return nil
+	}
+	var paths []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		paths = append(paths,
+			filepath.Join(profilesRoot, e.Name(), "cache2"),
+			filepath.Join(profilesRoot, e.Name(), "startupCache"),
+		)
+	}
+	return paths
 }
 
 func getCategories() []CleanCategory {
 	localAppData := fs.ResolveEnvPath("%LOCALAPPDATA%")
 	appData := fs.ResolveEnvPath("%APPDATA%")
+
+	browserPaths := []string{
+		filepath.Join(localAppData, `Google\Chrome\User Data\Default\Cache\Cache_Data`),
+		filepath.Join(localAppData, `Google\Chrome\User Data\Default\Code Cache`),
+		filepath.Join(localAppData, `Microsoft\Edge\User Data\Default\Cache\Cache_Data`),
+		filepath.Join(localAppData, `Microsoft\Edge\User Data\Default\Code Cache`),
+		filepath.Join(localAppData, `BraveSoftware\Brave-Browser\User Data\Default\Cache\Cache_Data`),
+		filepath.Join(localAppData, `BraveSoftware\Brave-Browser\User Data\Default\Code Cache`),
+	}
+	browserPaths = append(browserPaths, firefoxCachePaths(localAppData)...)
 
 	return []CleanCategory{
 		{
@@ -90,15 +125,7 @@ func getCategories() []CleanCategory {
 			ID:          "browsers",
 			Name:        "Browser Caches",
 			Description: "Caches from Chrome, Edge, Firefox, and Brave",
-			Paths: []string{
-				filepath.Join(localAppData, `Google\Chrome\User Data\Default\Cache\Cache_Data`),
-				filepath.Join(localAppData, `Google\Chrome\User Data\Default\Code Cache`),
-				filepath.Join(localAppData, `Microsoft\Edge\User Data\Default\Cache\Cache_Data`),
-				filepath.Join(localAppData, `Microsoft\Edge\User Data\Default\Code Cache`),
-				filepath.Join(localAppData, `BraveSoftware\Brave-Browser\User Data\Default\Cache\Cache_Data`),
-				filepath.Join(localAppData, `BraveSoftware\Brave-Browser\User Data\Default\Code Cache`),
-				filepath.Join(appData, `Mozilla\Firefox\Profiles`), // Custom scanner handles profiles recursion
-			},
+			Paths:       browserPaths,
 		},
 		{
 			ID:          "thumbs",
@@ -244,9 +271,9 @@ func getCategories() []CleanCategory {
 			Name:        "Crash Dumps & Logs",
 			Description: "Application crash minidumps and diagnostic logs",
 			Paths: []string{
+				// WER paths live in the "wer" category; listing them here too
+				// double-counted their size in scan totals.
 				filepath.Join(localAppData, `CrashDumps`),
-				filepath.Join(localAppData, `Microsoft\Windows\WER`),
-				fs.ResolveEnvPath(`%PROGRAMDATA%\Microsoft\Windows\WER`),
 			},
 		},
 		// ── Application caches ──────────────────────────────────────────
@@ -387,7 +414,9 @@ func getCategories() []CleanCategory {
 }
 
 func executeClean(cmd *cobra.Command, args []string) {
-	if isPiped() || debug {
+	// --yes must bypass the interactive TUI: its whole point is unattended
+	// cleaning, and the TUI never consults it.
+	if isPiped() || debug || assumeYes {
 		executeCleanCLI(cmd, args)
 		return
 	}
@@ -405,14 +434,9 @@ func executeCleanCLI(cmd *cobra.Command, args []string) {
 		whitelistMap[strings.ToLower(strings.TrimSpace(id))] = true
 	}
 
-	// Setup spinner usage detection
-	useSpinner := !debug
-	if isPiped() {
-		stat, err := os.Stdout.Stat()
-		if err != nil || stat.Mode().IsRegular() || os.Getenv("TERM") == "" {
-			useSpinner = false
-		}
-	}
+	// Spinners only make sense on a live terminal; carriage-return animation
+	// frames would corrupt piped or redirected output.
+	useSpinner := !debug && !isPiped()
 
 	// ── Category group definitions ───────────────────────────────────────
 	type categoryGroup struct {
@@ -640,7 +664,17 @@ func executeCleanCLI(cmd *cobra.Command, args []string) {
 	fmt.Println()
 
 	// ── Dry run path ──────────────────────────────────────────────────────
-	if dryRun {
+	// Non-interactive runs (piped stdout or --debug) never show the TUI's
+	// Enter-to-confirm gate, so require an explicit --yes before deleting.
+	// Without it, fall back to a preview so `du clean | tee log` cannot wipe
+	// 35 categories silently.
+	if dryRun || !assumeYes {
+		if !dryRun {
+			fmt.Printf("  %s  Preview only — pass %s to actually delete.\n\n",
+				styleWarning.Render("!"),
+				styleAccent.Render("--yes"),
+			)
+		}
 		freeNow := getDiskFreeBytes(os.TempDir())
 		printCleanupBanner(true, totalSize, freeNow, totalFiles, len(rows))
 		return
@@ -819,6 +853,7 @@ func scanDirCategory(cat CleanCategory) (int64, int, error) {
 func cleanDirCategory(cat CleanCategory) (int64, int, error) {
 	var sizeFreed int64
 	var filesFreed int
+	anyFailed := false
 
 	for _, root := range cat.Paths {
 		if !fs.IsValidPath(root) {
@@ -863,6 +898,8 @@ func cleanDirCategory(cat CleanCategory) (int64, int, error) {
 						if removeFileSafe(path) == nil {
 							sizeFreed += fileSize
 							filesFreed++
+						} else {
+							anyFailed = true
 						}
 					}
 				}
@@ -914,22 +951,26 @@ func cleanDirCategory(cat CleanCategory) (int64, int, error) {
 					if removeErr == nil {
 						sizeFreed += entrySize
 						filesFreed += entryFiles
+					} else {
+						anyFailed = true
 					}
 				}
 			}
 		}
 	}
 
-	// Log the destructive operation
-	logging.LogDestructiveOperation("clean", "purge", cat.Name, sizeFreed, true)
+	// Log the destructive operation with the real outcome
+	logging.LogDestructiveOperation("clean", "purge", cat.Name, sizeFreed, !anyFailed)
 
 	return sizeFreed, filesFreed, nil
 }
 
 func scanAndEmptyRecycleBin(dryRunOnly bool, debug bool) (int64, int, error) {
 	size, count, err := queryRecycleBinNative()
-	if err != nil || (size == 0 && count == 0) {
-		// Dynamic Fallback in case of non-Windows testing or WinAPI failure
+	if err != nil {
+		// Fallback walk only when the WinAPI itself failed (or on non-Windows
+		// test hosts). A successful "0 items" answer must NOT trigger it: the
+		// walk counts $I metadata and desktop.ini as phantom reclaimable junk.
 		recycleBinPath := `C:\$Recycle.Bin`
 		if fs.IsValidPath(recycleBinPath) {
 			_ = filepath.WalkDir(recycleBinPath, func(path string, d os.DirEntry, walkErr error) error {
@@ -953,6 +994,10 @@ func scanAndEmptyRecycleBin(dryRunOnly bool, debug bool) (int64, int, error) {
 
 	if dryRunOnly {
 		return size, int(count), nil
+	}
+
+	if err == nil && size == 0 && count == 0 {
+		return 0, 0, nil // already empty — nothing to do
 	}
 
 	err = emptyRecycleBinNative()

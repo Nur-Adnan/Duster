@@ -142,6 +142,46 @@ Filename: "{cmd}"; Parameters: "/C rmdir /S /Q ""{localappdata}\Duster"" 2>nul";
 const
   EnvironmentKey = 'Environment';
 
+// Normalize a PATH entry for comparison: uppercase, no trailing backslash.
+function NormalizePathEntry(const Entry: string): string;
+begin
+  Result := Uppercase(Trim(Entry));
+  if (Result <> '') and (Result[Length(Result)] = '\') then
+    Result := Copy(Result, 1, Length(Result) - 1);
+end;
+
+// True if Dir exists in Path as a COMPLETE semicolon-delimited entry.
+// A plain substring test would match inside unrelated entries
+// (e.g. "...\DusterX") and corrupt them on removal.
+function PathEntryExists(const Path, Dir: string): Boolean;
+var
+  Rest, Entry, NormDir: string;
+  P: Integer;
+begin
+  Result := False;
+  NormDir := NormalizePathEntry(Dir);
+  Rest := Path;
+  while Rest <> '' do
+  begin
+    P := Pos(';', Rest);
+    if P > 0 then
+    begin
+      Entry := Copy(Rest, 1, P - 1);
+      Rest := Copy(Rest, P + 1, Length(Rest));
+    end
+    else
+    begin
+      Entry := Rest;
+      Rest := '';
+    end;
+    if NormalizePathEntry(Entry) = NormDir then
+    begin
+      Result := True;
+      Exit;
+    end;
+  end;
+end;
+
 procedure AddToPath(const Dir: string);
 var
   Path: string;
@@ -149,8 +189,7 @@ begin
   if not RegQueryStringValue(HKEY_CURRENT_USER, EnvironmentKey, 'Path', Path) then
     Path := '';
 
-  // Check if directory is already in PATH (case-insensitive)
-  if Pos(Uppercase(Dir), Uppercase(Path)) > 0 then
+  if PathEntryExists(Path, Dir) then
     Exit;
 
   // Append with semicolon separator
@@ -158,7 +197,10 @@ begin
     Path := Path + ';';
   Path := Path + Dir;
 
-  RegWriteStringValue(HKEY_CURRENT_USER, EnvironmentKey, 'Path', Path);
+  // Write REG_EXPAND_SZ: the user Path value is conventionally expandable,
+  // and RegWriteStringValue would silently convert it to REG_SZ, breaking
+  // any pre-existing %VAR% entries the user relies on.
+  RegWriteExpandStringValue(HKEY_CURRENT_USER, EnvironmentKey, 'Path', Path);
 
   // Notify Windows of the environment change
   // SendMessage(HWND_BROADCAST, WM_SETTINGCHANGE ...) is handled by Inno automatically
@@ -166,27 +208,40 @@ end;
 
 procedure RemoveFromPath(const Dir: string);
 var
-  Path, UpperDir: string;
+  Path, Rest, Entry, NewPath, NormDir: string;
   P: Integer;
 begin
   if not RegQueryStringValue(HKEY_CURRENT_USER, EnvironmentKey, 'Path', Path) then
     Exit;
 
-  UpperDir := Uppercase(Dir);
+  // Rebuild the PATH keeping every entry except exact matches for Dir.
+  NormDir := NormalizePathEntry(Dir);
+  NewPath := '';
+  Rest := Path;
+  while Rest <> '' do
+  begin
+    P := Pos(';', Rest);
+    if P > 0 then
+    begin
+      Entry := Copy(Rest, 1, P - 1);
+      Rest := Copy(Rest, P + 1, Length(Rest));
+    end
+    else
+    begin
+      Entry := Rest;
+      Rest := '';
+    end;
 
-  // Find and remove the directory from PATH
-  P := Pos(UpperDir, Uppercase(Path));
-  if P = 0 then
-    Exit;
+    if (Entry <> '') and (NormalizePathEntry(Entry) <> NormDir) then
+    begin
+      if NewPath <> '' then
+        NewPath := NewPath + ';';
+      NewPath := NewPath + Entry;
+    end;
+  end;
 
-  // Remove the entry and any trailing semicolon
-  Delete(Path, P, Length(Dir));
-  if (P <= Length(Path)) and (Path[P] = ';') then
-    Delete(Path, P, 1)
-  else if (P > 1) and (Path[P - 1] = ';') then
-    Delete(Path, P - 1, 1);
-
-  RegWriteStringValue(HKEY_CURRENT_USER, EnvironmentKey, 'Path', Path);
+  if NewPath <> Path then
+    RegWriteExpandStringValue(HKEY_CURRENT_USER, EnvironmentKey, 'Path', NewPath);
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);

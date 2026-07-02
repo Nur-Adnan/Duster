@@ -69,9 +69,19 @@ func readRunKey(hive registry.Key, path, label string, isAdmin bool) []startupEn
 }
 
 func isStartupApproved(hive registry.Key, name string) bool {
-	k, err := registry.OpenKey(hive,
-		`SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run`,
-		registry.QUERY_VALUE)
+	return startupApprovedIn(hive, `SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run`, name)
+}
+
+// isStartupFolderApproved reports the Task Manager enable/disable state of a
+// Startup-folder item; the value name is the shortcut's file name (with
+// extension) under the per-user StartupFolder approval key.
+func isStartupFolderApproved(fileName string) bool {
+	return startupApprovedIn(registry.CURRENT_USER,
+		`SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\StartupFolder`, fileName)
+}
+
+func startupApprovedIn(hive registry.Key, keyPath, name string) bool {
+	k, err := registry.OpenKey(hive, keyPath, registry.QUERY_VALUE)
 	if err != nil {
 		return true
 	}
@@ -104,7 +114,7 @@ func readStartupFolder(dir string) ([]startupEntry, error) {
 				Name:     clean,
 				Command:  filepath.Join(dir, name),
 				Location: "Startup Folder",
-				Enabled:  true,
+				Enabled:  isStartupFolderApproved(name),
 				IsAdmin:  false,
 			})
 		}

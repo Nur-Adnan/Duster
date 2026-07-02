@@ -26,7 +26,7 @@ BOLD='\033[1m'
 NC='\033[0m'
 
 # ── Configuration ────────────────────────────────────────────────────
-VERSION="${DUSTER_VERSION:-1.0.1}"
+VERSION="${DUSTER_VERSION:-1.0.2}"
 BUILD_DATE=$(date +%Y-%m-%d)
 COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "dev")
 DIST_DIR="dist"
@@ -86,6 +86,7 @@ echo -e "${GREEN}✓ Dependencies verified.${NC}"
 echo ""
 echo -e "${YELLOW}[2/6] Running test suite...${NC}"
 
+# pipefail makes a test failure abort here; no need to run the suite twice.
 CGO_ENABLED=0 go test -count=1 ./... 2>&1 | while IFS= read -r line; do
     if echo "$line" | grep -q "^ok"; then
         echo -e "  ${GREEN}✓${NC} $line"
@@ -93,9 +94,6 @@ CGO_ENABLED=0 go test -count=1 ./... 2>&1 | while IFS= read -r line; do
         echo -e "  ${RED}✗${NC} $line"
     fi
 done
-
-# Check test exit code
-CGO_ENABLED=0 go test -count=1 ./... > /dev/null 2>&1
 echo -e "${GREEN}✓ All tests passed.${NC}"
 
 # ── Step 3: Vet ──────────────────────────────────────────────────────

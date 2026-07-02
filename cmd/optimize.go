@@ -25,8 +25,9 @@ var (
 
 // Flags
 var (
-	optJSON   bool
-	optDryRun bool
+	optJSON      bool
+	optDryRun    bool
+	optAssumeYes bool
 )
 
 // Premium Lipgloss Styles (Zero-Allocation, prefixed to avoid package conflicts)
@@ -34,7 +35,6 @@ var (
 	optTealColor   = lipgloss.Color("#008080")
 	optCyanColor   = lipgloss.Color("#00FFFF")
 	optGrayColor   = lipgloss.Color("#666666")
-	optWhiteColor  = lipgloss.Color("#FFFFFF")
 	optRedColor    = lipgloss.Color("#FF0000")
 	optGreenColor  = lipgloss.Color("#00FF00")
 	optYellowColor = lipgloss.Color("#FFFF00")
@@ -93,6 +93,7 @@ var OptimizeCmd = &cobra.Command{
 func init() {
 	OptimizeCmd.Flags().BoolVar(&optJSON, "json", false, "Output optimization task list and statistics as JSON and exit immediately")
 	OptimizeCmd.Flags().BoolVarP(&optDryRun, "dry-run", "d", false, "Simulate system optimizations without applying changes")
+	OptimizeCmd.Flags().BoolVarP(&optAssumeYes, "yes", "y", false, "Actually run optimizations in non-interactive (piped/--json) mode")
 }
 
 func executeOptimize(cmd *cobra.Command, args []string) {
@@ -214,8 +215,16 @@ func runTaskCmd(idx int, task optimizeTask, dry bool, isAdmin bool) tea.Cmd {
 					runErr = err
 					status = statusFailed
 				}
+			} else {
+				// Path blocked by the safety policy — report it as skipped rather
+				// than the default "completed", which would claim a no-op succeeded.
+				status = statusSkipped
 			}
-			logOptOperation("purge", cacheDir, reclaimed, runErr == nil)
+			// Only log when the task actually ran; a skipped no-op must not be
+			// recorded as a successful purge in the audit trail.
+			if status != statusSkipped {
+				logOptOperation("purge", cacheDir, reclaimed, runErr == nil)
+			}
 
 		case "ssd_trim":
 			if !isAdmin {
@@ -227,8 +236,10 @@ func runTaskCmd(idx int, task optimizeTask, dry bool, isAdmin bool) tea.Cmd {
 				if runErr != nil {
 					status = statusFailed
 				}
+				// Only log when the task actually ran; a skipped task must not be
+				// recorded as FAILED in the audit trail.
+				logOptOperation("trim", "All Fixed Volumes", 0, runErr == nil)
 			}
-			logOptOperation("trim", "All Fixed Volumes", 0, runErr == nil && status != statusSkipped)
 		}
 
 		return optTaskProgressMsg{idx: idx, status: status, reclaimed: reclaimed, err: runErr}
@@ -335,8 +346,10 @@ func (m optimizeModel) View() string {
 			case statusSkipped:
 				if task.ID == "ssd_trim" && !m.isAdmin {
 					stateStr = optWarnStyle.Render("⚠ Skipped (Needs Administrator)")
-				} else {
+				} else if optDryRun {
 					stateStr = optWarnStyle.Render("⚠ Skipped (Simulation)")
+				} else {
+					stateStr = optWarnStyle.Render("⚠ Skipped (Protected path)")
 				}
 			}
 
@@ -347,10 +360,20 @@ func (m optimizeModel) View() string {
 
 		if m.currentIdx == len(m.tasks) {
 			boxLayout.WriteString(optDividerStyle.Render("  ───────────────────────────────────────────────────────────────────────\n"))
-			if totalReclaimed > 0 {
+			failed := 0
+			for _, t := range m.tasks {
+				if t.Status == statusFailed {
+					failed++
+				}
+			}
+			switch {
+			case failed > 0:
+				boxLayout.WriteString(fmt.Sprintf("  %s %d task(s) failed — see statuses above.\n\n",
+					optFailStyle.Render("✗"), failed))
+			case totalReclaimed > 0:
 				boxLayout.WriteString(fmt.Sprintf("  %s All operations completed successfully! Reclaimed: %s\n\n",
 					optSuccessStyle.Render("✓"), optSuccessStyle.Render(formatBytes(totalReclaimed))))
-			} else {
+			default:
 				boxLayout.WriteString(fmt.Sprintf("  %s All operations completed successfully!\n\n", optSuccessStyle.Render("✓")))
 			}
 			boxLayout.WriteString("  Press [q] or [esc] to exit to CLI shell.")
@@ -402,9 +425,14 @@ func runHeadlessOptimize() {
 		},
 	}
 
+	// Non-interactive runs have no confirmation step, so require --yes before
+	// applying changes (SSD ReTrim runs defrag.exe /O /C on every volume, which
+	// can take a long time). Otherwise emit the task list as a preview.
+	previewOnly := optDryRun || !optAssumeYes
+
 	var totalReclaimed int64
 	for i, task := range tasks {
-		if optDryRun {
+		if previewOnly {
 			tasks[i].Status = statusSkipped
 			continue
 		}
@@ -412,7 +440,10 @@ func runHeadlessOptimize() {
 		var runErr error
 		switch task.ID {
 		case "dns":
-			c := exec.Command("ipconfig", "/flushdns")
+			// Same cancellation/process-group behavior as the TUI path, so an
+			// interrupted pipeline can't orphan child processes.
+			c := exec.CommandContext(optCtx, "ipconfig", "/flushdns")
+			setProcessGroup(c)
 			runErr = c.Run()
 			if runErr != nil {
 				tasks[i].Status = statusFailed
@@ -457,13 +488,16 @@ func runHeadlessOptimize() {
 			} else {
 				tasks[i].Status = statusSkipped
 			}
-			logOptOperation("purge", cacheDir, reclaimed, runErr == nil)
+			if tasks[i].Status != statusSkipped {
+				logOptOperation("purge", cacheDir, reclaimed, runErr == nil)
+			}
 
 		case "ssd_trim":
 			if !isAdmin {
 				tasks[i].Status = statusSkipped
 			} else {
-				c := exec.Command("defrag.exe", "/O", "/C")
+				c := exec.CommandContext(optCtx, "defrag.exe", "/O", "/C")
+				setProcessGroup(c)
 				runErr = c.Run()
 				if runErr != nil {
 					tasks[i].Status = statusFailed
@@ -471,8 +505,8 @@ func runHeadlessOptimize() {
 				} else {
 					tasks[i].Status = statusCompleted
 				}
+				logOptOperation("trim", "All Fixed Volumes", 0, runErr == nil)
 			}
-			logOptOperation("trim", "All Fixed Volumes", 0, runErr == nil && tasks[i].Status != statusSkipped)
 		}
 	}
 

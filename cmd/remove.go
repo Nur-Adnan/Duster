@@ -24,7 +24,6 @@ var (
 
 // Premium Lipgloss Styles (Zero-Allocation, prefixed for remove)
 var (
-	rmTealColor  = lipgloss.Color("#008080")
 	rmCyanColor  = lipgloss.Color("#00FFFF")
 	rmGrayColor  = lipgloss.Color("#666666")
 	rmWhiteColor = lipgloss.Color("#FFFFFF")
@@ -123,6 +122,9 @@ type rmUninstallCompleteMsg struct {
 	err error
 }
 
+// rmExitMsg fires after the final success screen has been visible briefly.
+type rmExitMsg struct{}
+
 func initialRemoveModel(currentExe string) removeModel {
 	return removeModel{
 		state:      stateRmIdle,
@@ -188,16 +190,17 @@ func (m removeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.statusMsg = "Dry-run uninstallation completed successfully! (No files deleted)"
 			} else {
 				m.statusMsg = "Duster has been completely uninstalled. This window will now exit."
-				return m, tea.Sequence(
-					tea.Tick(800*time.Millisecond, func(t time.Time) tea.Msg {
-						os.Exit(0)
-						return nil
-					}),
-					tea.Quit,
-				)
+				// Never os.Exit inside a running Bubble Tea program: it skips
+				// terminal restore and leaves the console in alt-screen raw mode.
+				return m, tea.Tick(800*time.Millisecond, func(time.Time) tea.Msg {
+					return rmExitMsg{}
+				})
 			}
 		}
 		return m, nil
+
+	case rmExitMsg:
+		return m, tea.Quit
 	}
 
 	return m, nil
@@ -292,9 +295,9 @@ func logRmOperation(action, target string, size int64, success bool) {
 
 func runSilentRemove(currentExe string) {
 	logDir := getDusterDir()
-	logRmOperation("silent-uninstall", currentExe, 0, true)
 
-	_ = cleanDusterDir(logDir, rmDryRun)
+	err := cleanDusterDir(logDir, rmDryRun)
+	logRmOperation("silent-uninstall", currentExe, 0, err == nil)
 
 	if !rmDryRun {
 		// SECURITY: Uses safe delayed delete instead of cmd.exe /C shell injection
@@ -307,21 +310,29 @@ func runSilentRemove(currentExe string) {
 
 func runHeadlessRemove(currentExe string) {
 	logDir := getDusterDir()
-	logRmOperation("headless-uninstall", currentExe, 0, true)
+
+	// The --json / piped path emits a plan by default and must NOT delete unless
+	// the caller explicitly opts in with --force. This matches the flag's
+	// documented "plan" semantics and prevents `du remove | tee log` — where the
+	// interactive confirmation is bypassed — from silently uninstalling.
+	performDelete := rmForce && !rmDryRun
 
 	var err error
-	if !rmDryRun {
+	if performDelete {
 		err = cleanDusterDir(logDir, false)
 		if err == nil {
 			// SECURITY: Uses safe delayed delete instead of cmd.exe /C shell injection
 			scheduleDelayedDelete(currentExe)
 		}
 	}
+	// Log after the work with the real outcome (a success logged up front would
+	// also be written into the directory we are about to delete).
+	logRmOperation("headless-uninstall", currentExe, 0, err == nil)
 
 	statusStr := "SUCCESS"
 	if err != nil {
 		statusStr = fmt.Sprintf("FAILED: %v", err)
-	} else if rmDryRun {
+	} else if !performDelete {
 		statusStr = "DRY_RUN_SUCCESS"
 	}
 
@@ -346,7 +357,10 @@ func runHeadlessRemove(currentExe string) {
 	}
 	fmt.Println(string(data))
 
-	if !rmDryRun && err == nil {
+	if err != nil {
+		os.Exit(1) // scripts must be able to detect a failed uninstall
+	}
+	if !rmDryRun {
 		os.Exit(0)
 	}
 }

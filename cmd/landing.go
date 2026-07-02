@@ -41,6 +41,7 @@ type landingModel struct {
 	width       int
 	height      int
 	runningSub  bool
+	subErr      string
 }
 
 type menuItem struct {
@@ -126,7 +127,7 @@ func (m landingModel) runItem(item menuItem) (landingModel, tea.Cmd) {
 	case "Network":
 		m.subTui = tuiNetwork
 		m.subTuiState = initialNetworkState()
-		return m, networkTickCmd()
+		return m, tea.Batch(networkTickCmd(), fetchNetworkStatsCmd())
 	case "Security":
 		m.subTui = tuiSecurity
 		m.subTuiState = &securityState{scanning: true}
@@ -145,6 +146,10 @@ func (m landingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case subprocessFinishedMsg:
 		m.runningSub = false
+		m.subErr = ""
+		if msg.err != nil {
+			m.subErr = fmt.Sprintf("Failed to launch subcommand: %v", msg.err)
+		}
 		return m, nil
 
 	case driversScanDoneMsg:
@@ -202,8 +207,25 @@ func (m landingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.subTui == tuiNetwork {
 			ns := m.subTuiState.(*networkState)
 			ns.tickCount++
-			ns.refreshNetworkData()
-			return m, networkTickCmd()
+			cmds := []tea.Cmd{networkTickCmd()}
+			// Fetch stats off the update loop; GetSystemStats can take hundreds
+			// of milliseconds on busy machines and must never block keystrokes.
+			if !ns.fetching {
+				ns.fetching = true
+				cmds = append(cmds, fetchNetworkStatsCmd())
+			}
+			return m, tea.Batch(cmds...)
+		}
+		return m, nil
+
+	case networkStatsMsg:
+		if m.subTui == tuiNetwork {
+			ns := m.subTuiState.(*networkState)
+			ns.fetching = false
+			if msg.ok {
+				ns.downSpeed = msg.down
+				ns.upSpeed = msg.up
+			}
 		}
 		return m, nil
 
@@ -250,7 +272,8 @@ func (m landingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						if ss.cursor < len(ss.items)-1 {
 							ss.cursor++
 						}
-					case "space":
+					case " ", "space":
+						// Bubble Tea reports the space key as " ", never "space"
 						entry := ss.items[ss.cursor]
 						return m, toggleStartupAsyncCmd(entry)
 					case "d":
@@ -389,6 +412,10 @@ func (m landingModel) View() string {
 	}
 
 	sb.WriteString("\n")
+
+	if m.subErr != "" {
+		sb.WriteString("  " + styleDanger.Render("✗ "+m.subErr) + "\n\n")
+	}
 
 	// Center-balanced footer
 	sb.WriteString("  " + kbHints(
@@ -641,32 +668,34 @@ func (m landingModel) renderStartupView() string {
 // ─────────────────────────────────────────────
 
 type networkState struct {
-	downSpeed   float64
-	upSpeed     float64
-	tickCount   int
-	connections []netConn
-}
-
-type netConn struct {
-	proc  string
-	proto string
-	dest  string
-	state string
+	downSpeed float64
+	upSpeed   float64
+	tickCount int
+	fetching  bool
 }
 
 func initialNetworkState() *networkState {
-	ns := &networkState{}
-	ns.refreshNetworkData()
-	return ns
+	return &networkState{fetching: true}
 }
 
-func (ns *networkState) refreshNetworkData() {
-	stats, err := sysinfo.GetSystemStats()
-	if err != nil {
-		return
+type networkStatsMsg struct {
+	down float64
+	up   float64
+	ok   bool
+}
+
+func fetchNetworkStatsCmd() tea.Cmd {
+	return func() tea.Msg {
+		stats, err := sysinfo.GetSystemStats()
+		if err != nil {
+			return networkStatsMsg{ok: false}
+		}
+		return networkStatsMsg{
+			down: float64(stats.NetDownSec) / (1024 * 1024),
+			up:   float64(stats.NetUpSec) / (1024 * 1024),
+			ok:   true,
+		}
 	}
-	ns.downSpeed = float64(stats.NetDownSec) / (1024 * 1024)
-	ns.upSpeed = float64(stats.NetUpSec) / (1024 * 1024)
 }
 
 type networkTickMsg time.Time
@@ -681,7 +710,7 @@ func (m landingModel) renderNetworkView() string {
 	ns := m.subTuiState.(*networkState)
 	var sb strings.Builder
 
-	sb.WriteString("\n  " + styleTitle.Render("Real-time Network Traffic & Connections") + "\n")
+	sb.WriteString("\n  " + styleTitle.Render("Real-time Network Traffic") + "\n")
 	sb.WriteString("  " + styleMuted.Render(strings.Repeat("═", 76)) + "\n\n")
 
 	const maxSpeed = 10.0
@@ -693,37 +722,11 @@ func (m landingModel) renderNetworkView() string {
 		progressBar(downPct, 20),
 		styleAccent.Render(fmt.Sprintf("%.1f MB", ns.downSpeed)),
 	))
-	sb.WriteString(fmt.Sprintf("  %-10s  %s  %s/s\n\n",
+	sb.WriteString(fmt.Sprintf("  %-10s  %s  %s/s\n",
 		styleLabel.Render("Upload"),
 		progressBar(upPct, 20),
-		styleAccent.Render(fmt.Sprintf("%.1f KB", ns.upSpeed*100)),
+		styleAccent.Render(fmt.Sprintf("%.1f KB", ns.upSpeed*1024)),
 	))
-
-	sb.WriteString("  Active TCP/UDP Sockets & Socket Ownership:\n\n")
-	sb.WriteString(fmt.Sprintf("    %-14s %-6s %-26s %-14s\n",
-		styleHeader.Render("Process"),
-		styleHeader.Render("Proto"),
-		styleHeader.Render("Remote Endpoint"),
-		styleHeader.Render("State"),
-	))
-	sb.WriteString("    " + styleMuted.Render(strings.Repeat("─", 68)) + "\n")
-
-	for _, c := range ns.connections {
-		procStr := styleAccent.Render(c.proc)
-		protoStr := styleLabel.Render(c.proto)
-		destStr := styleValue.Render(c.dest)
-		stateStr := styleSuccess.Render(c.state)
-		if c.state == "TIME_WAIT" {
-			stateStr = styleMuted.Render(c.state)
-		}
-
-		sb.WriteString(fmt.Sprintf("    %-14s %-6s %-26s %-14s\n",
-			procStr,
-			protoStr,
-			destStr,
-			stateStr,
-		))
-	}
 
 	sb.WriteString("\n")
 	sb.WriteString("  " + kbHints("ESC Back"))

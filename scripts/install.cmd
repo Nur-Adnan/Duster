@@ -61,16 +61,24 @@ if exist "%~dp0install.ps1" (
     if "%SILENT%"=="0" echo   Downloading installer from GitHub...
 )
 
-:: Build parameter string
-set "PS_PARAMS=-InstallDir '%INSTALL_DIR%'"
-if not "%VERSION%"=="" set "PS_PARAMS=!PS_PARAMS! -Version '%VERSION%'"
-if "%SILENT%"=="1"     set "PS_PARAMS=!PS_PARAMS! -Silent"
+:: Build parameter strings.
+:: -File mode passes arguments through normal Win32 argv rules, so values
+:: must use double quotes; single quotes there are passed LITERALLY into the
+:: install path (creating a garbage '...' directory). The -Command branch
+:: interpolates into PowerShell source text, where single quotes are correct.
+set "PS_FILE_PARAMS=-InstallDir ""%INSTALL_DIR%"""
+if not "%VERSION%"=="" set "PS_FILE_PARAMS=!PS_FILE_PARAMS! -Version ""%VERSION%"""
+if "%SILENT%"=="1"     set "PS_FILE_PARAMS=!PS_FILE_PARAMS! -Silent"
+
+set "PS_CMD_PARAMS=-InstallDir '%INSTALL_DIR%'"
+if not "%VERSION%"=="" set "PS_CMD_PARAMS=!PS_CMD_PARAMS! -Version '%VERSION%'"
+if "%SILENT%"=="1"     set "PS_CMD_PARAMS=!PS_CMD_PARAMS! -Silent"
 
 :: -- Execute PowerShell installer ---------------------------------
 if defined PS_SCRIPT (
-    powershell.exe %PS_ARGS% -File "!PS_SCRIPT!" !PS_PARAMS!
+    powershell.exe %PS_ARGS% -File "!PS_SCRIPT!" !PS_FILE_PARAMS!
 ) else (
-    powershell.exe %PS_ARGS% -Command "& { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $wc = New-Object Net.WebClient; $wc.Encoding = [System.Text.Encoding]::UTF8; $s = $wc.DownloadString('https://raw.githubusercontent.com/Nur-Adnan/Duster/main/scripts/install.ps1'); $sb = [ScriptBlock]::Create($s); & $sb !PS_PARAMS! }"
+    powershell.exe %PS_ARGS% -Command "& { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12; $wc = New-Object Net.WebClient; $wc.Encoding = [System.Text.Encoding]::UTF8; $s = $wc.DownloadString('https://raw.githubusercontent.com/Nur-Adnan/Duster/main/scripts/install.ps1'); $sb = [ScriptBlock]::Create($s); & $sb !PS_CMD_PARAMS! }"
 )
 
 if errorlevel 1 (

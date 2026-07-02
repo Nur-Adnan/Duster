@@ -23,9 +23,10 @@ var StatusCmd = &cobra.Command{
   - RAM usage (used, total, available)
   - Disk utilization and read/write I/O speeds
   - Network upload/download activity
-  - Top 5 CPU-hungry processes
   - Power status (battery level and charging status)
-  - System uptime and weighted health score`,
+  - System uptime
+
+Top processes and the weighted health score are included in --json output.`,
 	Run: executeStatus,
 }
 
@@ -76,6 +77,7 @@ type statusModel struct {
 	width     int
 	height    int
 	tickCount int
+	fetching  bool
 }
 
 type statusTickMsg time.Time
@@ -98,7 +100,8 @@ func statusFetchCmd() tea.Cmd {
 }
 
 func (m statusModel) Init() tea.Cmd {
-	return tea.Batch(statusFetchCmd(), statusTickCmd())
+	// executeStatus pre-seeds m.stats; the first tick starts the fetch cycle.
+	return statusTickCmd()
 }
 
 func (m statusModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -112,8 +115,16 @@ func (m statusModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 	case statusTickMsg:
 		m.tickCount++
-		return m, tea.Batch(statusFetchCmd(), statusTickCmd())
+		// Only one fetch in flight at a time: stats collection can outlast the
+		// 1s tick on busy machines, and overlapping fetches apply out of order.
+		cmds := []tea.Cmd{statusTickCmd()}
+		if !m.fetching {
+			m.fetching = true
+			cmds = append(cmds, statusFetchCmd())
+		}
+		return m, tea.Batch(cmds...)
 	case statusStatsMsg:
+		m.fetching = false
 		if msg.err == nil {
 			m.stats = msg.stats
 		} else {
@@ -144,32 +155,40 @@ func (m statusModel) View() string {
 	if cpuModel == "" {
 		cpuModel = "Unknown CPU"
 	}
+	// Only values actually measured by sysinfo are shown — the dashboard must
+	// never fabricate telemetry (temps, load averages, cache sizes) that the
+	// collector does not report.
 	cpuPercent := s.CPUPercent
 	coresCount := len(s.CPUCores)
 	if coresCount == 0 {
 		coresCount = 1
 	}
-	threadsCount := coresCount * 2
-	coresStr := fmt.Sprintf("%dC / %dT", coresCount, threadsCount)
+	coresStr := fmt.Sprintf("%d logical", coresCount)
 	baseFreqStr := "N/A"
 	if strings.Contains(s.CPUModel, "@") {
 		parts := strings.Split(s.CPUModel, "@")
 		baseFreqStr = strings.TrimSpace(parts[len(parts)-1])
 	}
-	cpuTemp := int(40 + cpuPercent*0.25)
-	tempStr := fmt.Sprintf("%d °C", cpuTemp)
-	l1 := cpuPercent / 100.0 * float64(coresCount)
-	l5 := l1 * 0.95
-	l15 := l1 * 0.9
-	loadAvgStr := fmt.Sprintf("%.2f (1m) %.2f (5m) %.2f (15m)", l1, l5, l15)
+	peakCore := 0.0
+	var sumCores float64
+	for _, c := range s.CPUCores {
+		sumCores += c
+		if c > peakCore {
+			peakCore = c
+		}
+	}
+	avgCore := 0.0
+	if len(s.CPUCores) > 0 {
+		avgCore = sumCores / float64(len(s.CPUCores))
+	}
+	peakCoreStr := fmt.Sprintf("%.0f%%", peakCore)
+	avgCoreStr := fmt.Sprintf("%.0f%%", avgCore)
 
 	// 2. RAM metrics
 	ramPercent := s.RAMPercent
 	ramTotalGB := float64(s.RAMTotal) / (1024 * 1024 * 1024)
 	ramUsedGB := float64(s.RAMUsed) / (1024 * 1024 * 1024)
 	ramAvailGB := float64(s.RAMAvail) / (1024 * 1024 * 1024)
-	committedGB := ramUsedGB * 1.3
-	cachedGB := ramTotalGB * 0.14
 
 	// 3. DISK metrics
 	diskTotalGB := 0.0
@@ -192,23 +211,12 @@ func (m statusModel) View() string {
 	readSpeedStr := fmt.Sprintf("%.1f MB/s", readSpeedMB)
 	writeSpeedStr := fmt.Sprintf("%.1f MB/s", writeSpeedMB)
 
-	diskTemp := int(35 + (diskPercent * 0.1))
-	diskTempStr := fmt.Sprintf("%d °C", diskTemp)
-	activeTime := int(5 + (readSpeedMB+writeSpeedMB)*0.05)
-	if activeTime > 100 {
-		activeTime = 100
-	}
-	activeTimeStr := fmt.Sprintf("%d%%", activeTime)
+	volumesStr := fmt.Sprintf("%d", len(s.Disks))
+	diskFreeStr := fmt.Sprintf("%.0f GB", diskTotalGB-diskUsedGB)
 
 	// 4. NETWORK metrics
-	adapterName := "Ethernet"
 	downSpeedMbps := float64(s.NetDownSec) * 8 / (1024 * 1024)
 	upSpeedMbps := float64(s.NetUpSec) * 8 / (1024 * 1024)
-
-	ipAddress := "N/A"
-
-	uploadTotalGB := 0.0
-	downloadTotalGB := 0.0
 
 	// 5. BATTERY metrics
 	batteryLevel := s.BatteryLevel
@@ -225,7 +233,6 @@ func (m statusModel) View() string {
 		batteryPowerStr = "Discharging"
 	}
 	batteryLabelLeft := fmt.Sprintf("%d%% (%s)", batteryLevel, batteryHealth)
-	batteryRemainingStr := "N/A"
 
 	// Progress bars formatted beautifully
 	pctStr := fmt.Sprintf("%3d%%", int(cpuPercent))
@@ -262,38 +269,36 @@ func (m statusModel) View() string {
 	// CPU Panel (4 lines)
 	doc.WriteString(renderPanelLine(styleAccent.Render("CPU"), "Cores", coresStr) + "\n")
 	doc.WriteString(renderPanelLine(styleValue.Render(cpuModel), "Base Freq", baseFreqStr) + "\n")
-	doc.WriteString(renderPanelLine(leftCpuProgress, "Temp", tempStr) + "\n")
-	doc.WriteString(renderPanelLine("", "Load Avg", loadAvgStr) + "\n")
+	doc.WriteString(renderPanelLine(leftCpuProgress, "Peak Core", peakCoreStr) + "\n")
+	doc.WriteString(renderPanelLine("", "Avg Core", avgCoreStr) + "\n")
 
 	doc.WriteString(sepLine + "\n")
 
-	// RAM Panel (4 lines)
+	// RAM Panel (3 lines)
 	doc.WriteString(renderPanelLine(styleAccent.Render("RAM"), "Used", fmt.Sprintf("%.1f GB", ramUsedGB)) + "\n")
 	doc.WriteString(renderPanelLine(styleValue.Render(fmt.Sprintf("%.1f GB / %.1f GB", ramUsedGB, ramTotalGB)), "Available", fmt.Sprintf("%.1f GB", ramAvailGB)) + "\n")
-	doc.WriteString(renderPanelLine(leftRamProgress, "Committed", fmt.Sprintf("%.1f GB", committedGB)) + "\n")
-	doc.WriteString(renderPanelLine("", "Cached", fmt.Sprintf("%.1f GB", cachedGB)) + "\n")
+	doc.WriteString(renderPanelLine(leftRamProgress, "Total", fmt.Sprintf("%.1f GB", ramTotalGB)) + "\n")
 
 	doc.WriteString(sepLine + "\n")
 
 	// DISK Panel (4 lines)
 	doc.WriteString(renderPanelLine(styleAccent.Render("DISK"), "Read Speed", readSpeedStr) + "\n")
 	doc.WriteString(renderPanelLine(styleValue.Render(diskLabel), "Write Speed", writeSpeedStr) + "\n")
-	doc.WriteString(renderPanelLine(leftDiskProgress, "Active Time", activeTimeStr) + "\n")
-	doc.WriteString(renderPanelLine("", "Disk Temp", diskTempStr) + "\n")
+	doc.WriteString(renderPanelLine(leftDiskProgress, "Volumes", volumesStr) + "\n")
+	doc.WriteString(renderPanelLine("", "Free", diskFreeStr) + "\n")
 
 	doc.WriteString(sepLine + "\n")
 
-	// NETWORK Panel (3 lines)
-	doc.WriteString(renderPanelLine(styleAccent.Render("NETWORK"), "IP Address", ipAddress) + "\n")
-	doc.WriteString(renderPanelLine(styleValue.Render(adapterName), "Upload Total", fmt.Sprintf("%.1f GB", uploadTotalGB)) + "\n")
-	doc.WriteString(renderPanelLine(netSpeedLine, "Download Total", fmt.Sprintf("%.1f GB", downloadTotalGB)) + "\n")
+	// NETWORK Panel (2 lines)
+	doc.WriteString(renderPanelLine(styleAccent.Render("NETWORK"), "Download", fmt.Sprintf("%.1f Mbps", downSpeedMbps)) + "\n")
+	doc.WriteString(renderPanelLine(netSpeedLine, "Upload", fmt.Sprintf("%.1f Mbps", upSpeedMbps)) + "\n")
 
 	doc.WriteString(sepLine + "\n")
 
 	// BATTERY Panel (3 lines)
 	doc.WriteString(renderPanelLine(styleAccent.Render("BATTERY"), "Status", batteryStatus) + "\n")
 	doc.WriteString(renderPanelLine(styleValue.Render(batteryPowerStr), "Health", batteryHealth) + "\n")
-	doc.WriteString(renderPanelLine(styleSuccess.Render(batteryLabelLeft), "Remaining", batteryRemainingStr) + "\n")
+	doc.WriteString(renderPanelLine(styleSuccess.Render(batteryLabelLeft), "Level", fmt.Sprintf("%d%%", batteryLevel)) + "\n")
 
 	doc.WriteString(sepLine + "\n\n")
 

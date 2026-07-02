@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
+	"github.com/Nur-Adnan/duster/internal/logging"
 	"github.com/Nur-Adnan/duster/lib/fs"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -27,6 +27,53 @@ var developerArtifacts = map[string]string{
 	"vendor":       "Vendor Cache",
 	".serverless":  "Serverless",
 	".sst":         "SST Framework",
+}
+
+// artifactMarkers lists the project manifests that must sit next to an ambiguous
+// directory before it is treated as build output. Generic names like bin/build/
+// dist/target/vendor are also perfectly ordinary user folders (e.g.
+// %USERPROFILE%\go\bin holds installed tools, Documents\build may be real data),
+// so without this check `purge -y` would permanently delete them. Entries
+// starting with "." are matched against a file extension; others against the
+// full file name. Names absent from this map (node_modules, .m2, .gradle, ...)
+// are unambiguous enough to match on name alone.
+var artifactMarkers = map[string][]string{
+	"target": {"Cargo.toml"},
+	"bin":    {".csproj", ".sln", ".vbproj", ".fsproj"},
+	"obj":    {".csproj", ".sln", ".vbproj", ".fsproj"},
+	"build":  {"package.json", "build.gradle", "build.gradle.kts", "pom.xml", "CMakeLists.txt"},
+	"dist":   {"package.json"},
+	"vendor": {"go.mod", "composer.json"},
+}
+
+// isLikelyBuildArtifact reports whether a directory named `name` (lowercased) at
+// `path` is genuinely build output. Ambiguous names require a sibling project
+// manifest; if the parent can't be read the answer is "no" so we fail closed.
+func isLikelyBuildArtifact(name, path string) bool {
+	markers, ambiguous := artifactMarkers[name]
+	if !ambiguous {
+		return true
+	}
+	entries, err := os.ReadDir(filepath.Dir(path))
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		en := e.Name()
+		for _, mk := range markers {
+			if strings.HasPrefix(mk, ".") {
+				if strings.EqualFold(filepath.Ext(en), mk) {
+					return true
+				}
+			} else if strings.EqualFold(en, mk) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Purge command flags
@@ -51,10 +98,6 @@ var (
 				Bold(true).
 				Foreground(purgeCyanColor).
 				Padding(0, 1)
-
-	purgeTitleStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(purgeWhiteColor)
 
 	purgeBoxStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
@@ -106,15 +149,23 @@ func executePurge(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	// Direct Headless JSON output
-	if purgeJSON || isPiped() {
+	// Explicit --json always wins: snapshot and exit
+	if purgeJSON {
 		runHeadlessPurge(absPath)
 		return
 	}
 
-	// Direct bulk non-interactive deletion if -y is specified
+	// Direct bulk non-interactive deletion if -y is specified. This must take
+	// precedence over pipe detection: `du purge -y | tee log` documents an
+	// explicit intent to delete, not to emit a JSON plan.
 	if purgeYes {
 		runNonInteractivePurge(absPath)
+		return
+	}
+
+	// Piped without --yes: emit the JSON plan, never delete
+	if isPiped() {
+		runHeadlessPurge(absPath)
 		return
 	}
 
@@ -160,6 +211,9 @@ type purgeModel struct {
 	selectedSize int64
 	currentPurge int
 	purgeErr     error
+	purgedCount  int
+	purgedBytes  int64
+	purgeFailed  int
 	width        int
 	height       int
 	scanChan     chan scanProgressMsg
@@ -228,6 +282,9 @@ func runScanCmd(root string, ch chan scanProgressMsg) tea.Cmd {
 			}
 
 			if framework, exists := developerArtifacts[strings.ToLower(name)]; exists {
+				if !isLikelyBuildArtifact(strings.ToLower(name), path) {
+					return nil // ambiguous folder with no project marker — keep scanning inside
+				}
 				size := calculateDirSize(path)
 				art := DiscoveredArtifact{
 					Path:      path,
@@ -313,12 +370,25 @@ func (m purgeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "q", "esc", "ctrl+c":
+		case "ctrl+c":
+			// Emergency exit is always available, even mid-purge.
+			return m, tea.Quit
+
+		case "q", "esc":
 			if m.state == stateConfirming {
 				m.state = stateSelecting
 				return m, nil
 			}
+			if m.state == statePurging {
+				return m, nil // deletions in flight; footer says do not interrupt
+			}
 			return m, tea.Quit
+
+		case "n", "N":
+			if m.state == stateConfirming {
+				m.state = stateSelecting
+				return m, nil
+			}
 
 		case "up", "k":
 			if m.state == stateSelecting && len(m.artifacts) > 0 {
@@ -400,11 +470,14 @@ func (m purgeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.latestFound = msg.Path
 		if msg.Err != nil {
 			m.purgeErr = msg.Err
+			m.purgeFailed++
 		}
 		return m, listenToPurgeProgress(m.purgeChan)
 
 	case purgeCompleteMsg:
 		m.state = stateFinished
+		m.purgedCount = msg.count
+		m.purgedBytes = msg.reclaimed
 		return m, nil
 	}
 
@@ -550,14 +623,25 @@ func (m purgeModel) View() string {
 		}
 
 	case stateFinished:
-		boxContent.WriteString("✓  " + purgeSuccessStyle.Render("DEVELOPER WORKSPACE PURGE COMPLETED") + "\n\n")
+		if m.purgeFailed > 0 {
+			boxContent.WriteString("⚠️  " + purgeFailStyle.Render("DEVELOPER WORKSPACE PURGE COMPLETED WITH ERRORS") + "\n\n")
+		} else {
+			boxContent.WriteString("✓  " + purgeSuccessStyle.Render("DEVELOPER WORKSPACE PURGE COMPLETED") + "\n\n")
+		}
 		if purgeDryRun {
-			boxContent.WriteString(fmt.Sprintf("  Dry-run scan completed successfully.\n"))
+			boxContent.WriteString("  Dry-run scan completed successfully.\n")
 			boxContent.WriteString(fmt.Sprintf("  Simulated cleaning of %d developer directories.\n", countSelected(m.artifacts)))
 			boxContent.WriteString(fmt.Sprintf("  Total simulated reclaimed space: %s\n\n", formatBytes(m.selectedSize)))
 		} else {
-			boxContent.WriteString(fmt.Sprintf("  Successfully cleaned %d developer artifact folders.\n", countSelected(m.artifacts)))
-			boxContent.WriteString(fmt.Sprintf("  Total active disk space reclaimed: %s\n\n", purgeSuccessStyle.Render(formatBytes(m.selectedSize))))
+			boxContent.WriteString(fmt.Sprintf("  Cleaned %d of %d selected artifact folders.\n", m.purgedCount-m.purgeFailed, m.purgedCount))
+			boxContent.WriteString(fmt.Sprintf("  Total active disk space reclaimed: %s\n\n", purgeSuccessStyle.Render(formatBytes(m.purgedBytes))))
+			if m.purgeFailed > 0 {
+				boxContent.WriteString(purgeFailStyle.Render(fmt.Sprintf("  %d folder(s) could not be removed.", m.purgeFailed)))
+				if m.purgeErr != nil {
+					boxContent.WriteString(purgeGrayText(fmt.Sprintf("\n  Last error: %v", m.purgeErr)))
+				}
+				boxContent.WriteString("\n\n")
+			}
 		}
 		boxContent.WriteString("  Press [q] or [esc] to return to the console.")
 	}
@@ -621,42 +705,10 @@ func purgeRecyclePath(path string, size int64) error {
 	return err
 }
 
-// Write transactional deletion details to central operations.log in localized config profiles.
+// logPurgeOperation delegates to the shared structured logging system,
+// which also rotates the log; the old local copy grew operations.log unbounded.
 func logPurgeOperation(action, target string, size int64, success bool) {
-	if os.Getenv("DU_NO_OPLOG") == "1" {
-		return
-	}
-
-	logDir := os.Getenv("LOCALAPPDATA")
-	if logDir == "" {
-		logDir = os.Getenv("USERPROFILE")
-	}
-	if logDir != "" {
-		logDir = filepath.Join(logDir, "Duster")
-	}
-
-	if logDir == "" {
-		logDir = filepath.Clean("./")
-	}
-
-	_ = os.MkdirAll(logDir, 0755)
-	logPath := filepath.Join(logDir, "operations.log")
-
-	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-
-	status := "SUCCESS"
-	if !success {
-		status = "FAILED"
-	}
-
-	timestamp := time.Now().UTC().Format(time.RFC3339)
-	entry := fmt.Sprintf("%s | Command: purge | Action: %s | Target: %s | Size: %d bytes | Status: %s\n",
-		timestamp, action, target, size, status)
-	_, _ = f.WriteString(entry)
+	logging.LogDestructiveOperation("purge", action, target, size, success)
 }
 
 // Headless non-interactive execution supporting pipes/snapshots
@@ -695,7 +747,7 @@ func runHeadlessPurge(target string) {
 }
 
 func scanDeveloperArtifactsHeadless(root string) ([]DiscoveredArtifact, error) {
-	var list []DiscoveredArtifact
+	list := []DiscoveredArtifact{} // non-nil so JSON renders [] instead of null
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
@@ -704,7 +756,9 @@ func scanDeveloperArtifactsHeadless(root string) ([]DiscoveredArtifact, error) {
 			return nil
 		}
 		name := d.Name()
-		if name == ".git" || name == ".svn" || name == "$Recycle.Bin" || name == "System Volume Information" {
+		// Keep this skip list identical to the TUI scan (runScanCmd): the two
+		// modes must never disagree about what is eligible for deletion.
+		if name == ".git" || name == ".svn" || name == ".vscode" || name == "$Recycle.Bin" || name == "System Volume Information" {
 			return filepath.SkipDir
 		}
 		if !fs.IsValidPath(path) {
@@ -712,6 +766,9 @@ func scanDeveloperArtifactsHeadless(root string) ([]DiscoveredArtifact, error) {
 		}
 
 		if framework, exists := developerArtifacts[strings.ToLower(name)]; exists {
+			if !isLikelyBuildArtifact(strings.ToLower(name), path) {
+				return nil // ambiguous folder with no project marker — keep scanning inside
+			}
 			size := calculateDirSize(path)
 			list = append(list, DiscoveredArtifact{
 				Path:      path,

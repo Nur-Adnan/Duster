@@ -6,9 +6,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
-	"time"
 
+	"github.com/Nur-Adnan/duster/internal/logging"
 	"github.com/Nur-Adnan/duster/lib/fs"
 	"github.com/Nur-Adnan/duster/lib/uninstall"
 	tea "github.com/charmbracelet/bubbletea"
@@ -25,9 +26,12 @@ var systemProtectedKeywords = []string{
 	"windows driver package",
 	"realtek high definition audio",
 	"windows update assistant",
-	"kb[0-9]{6}",
 	"system updates",
 }
+
+// kbUpdatePattern matches Windows update entries like "Update (KB123456)".
+// This must be a real regex — as a literal keyword it never matched anything.
+var kbUpdatePattern = regexp.MustCompile(`kb\d{6}`)
 
 // Flags
 var (
@@ -48,10 +52,6 @@ var (
 				Bold(true).
 				Foreground(uninstCyanColor).
 				Padding(0, 1)
-
-	uninstTitleStyle = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(uninstWhiteColor)
 
 	uninstLeftBoxStyle = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
@@ -140,14 +140,16 @@ type uninstallModel struct {
 	uninstErr    error
 	width        int
 	height       int
-	appChan      chan []uninstall.InstalledApp
-	leftoverChan chan []leftoverItem
 }
 
 // Messages
 type scanAppsCompleteMsg struct {
 	apps []uninstall.InstalledApp
 	err  error
+}
+
+type nativeUninstallDoneMsg struct {
+	err error
 }
 
 type scanLeftoversCompleteMsg struct {
@@ -160,27 +162,36 @@ type sweepCompleteMsg struct {
 
 func initialUninstallModel() uninstallModel {
 	return uninstallModel{
-		state:        uninstStateScanning,
-		cursor:       0,
-		appChan:      make(chan []uninstall.InstalledApp, 1),
-		leftoverChan: make(chan []leftoverItem, 1),
+		state:  uninstStateScanning,
+		cursor: 0,
 	}
 }
 
 func (m uninstallModel) Init() tea.Cmd {
-	return tea.Batch(
-		scanAppsCmd(m.appChan),
-	)
+	return scanAppsCmd()
 }
 
-func scanAppsCmd(ch chan []uninstall.InstalledApp) tea.Cmd {
+func scanAppsCmd() tea.Cmd {
 	return func() tea.Msg {
 		apps, err := uninstall.GetInstalledApps()
 		return scanAppsCompleteMsg{apps: apps, err: err}
 	}
 }
 
-func scanLeftoversCmd(app uninstall.InstalledApp, ch chan []leftoverItem) tea.Cmd {
+// runNativeUninstallCmd launches the app's own uninstaller asynchronously.
+// It must never run inside Update(): native uninstall wizards take minutes,
+// and a blocking Update() freezes the whole TUI on the confirm screen.
+func runNativeUninstallCmd(app uninstall.InstalledApp) tea.Cmd {
+	return func() tea.Msg {
+		var err error
+		if !uninstDryRun {
+			err = runNativeUninstaller(app.UninstallString)
+		}
+		return nativeUninstallDoneMsg{err: err}
+	}
+}
+
+func scanLeftoversCmd(app uninstall.InstalledApp) tea.Cmd {
 	return func() tea.Msg {
 		folders := scanAppLeftovers(app.Name, app.Publisher)
 		var list []leftoverItem
@@ -222,119 +233,136 @@ func runSweepCmd(items []leftoverItem, dry bool) tea.Cmd {
 func (m uninstallModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "q", "ctrl+c":
-			if m.state == uninstStateSelecting || m.state == uninstStateFinished || m.state == stateSelectingLeftovers {
+		key := msg.String()
+
+		// Emergency exit is always available.
+		if key == "ctrl+c" {
+			return m, tea.Quit
+		}
+
+		// Keys are dispatched per state. In the app-selection state nearly every
+		// printable character must reach the search filter — the old key-first
+		// switch swallowed q/k/j/y/a/space as hotkeys, making apps like
+		// "qBittorrent" or "Java" impossible to search for.
+		switch m.state {
+		case uninstStateScanning:
+			if key == "q" || key == "esc" {
 				return m, tea.Quit
 			}
-			m.state = uninstStateSelecting
-			return m, nil
 
-		case "esc":
-			if m.state == stateConfirmingNative {
-				m.state = uninstStateSelecting
-				return m, nil
-			} else if m.state == stateConfirmingLeftovers {
-				m.state = stateSelectingLeftovers
-				return m, nil
-			}
-			return m, tea.Quit
-
-		case "up", "k":
-			if m.state == uninstStateSelecting && len(m.filteredApps) > 0 {
-				m.cursor--
-				if m.cursor < 0 {
-					m.cursor = len(m.filteredApps) - 1
+		case uninstStateSelecting:
+			switch key {
+			case "esc":
+				return m, tea.Quit
+			case "up":
+				if len(m.filteredApps) > 0 {
+					m.cursor--
+					if m.cursor < 0 {
+						m.cursor = len(m.filteredApps) - 1
+					}
+					m.adjustScroll(len(m.filteredApps))
 				}
-				m.adjustScroll(len(m.filteredApps))
-			} else if m.state == stateSelectingLeftovers && len(m.leftovers) > 0 {
-				m.cursor--
-				if m.cursor < 0 {
-					m.cursor = len(m.leftovers) - 1
+			case "down":
+				if len(m.filteredApps) > 0 {
+					m.cursor++
+					if m.cursor >= len(m.filteredApps) {
+						m.cursor = 0
+					}
+					m.adjustScroll(len(m.filteredApps))
 				}
-				m.adjustScroll(len(m.leftovers))
-			}
-
-		case "down", "j":
-			if m.state == uninstStateSelecting && len(m.filteredApps) > 0 {
-				m.cursor++
-				if m.cursor >= len(m.filteredApps) {
-					m.cursor = 0
-				}
-				m.adjustScroll(len(m.filteredApps))
-			} else if m.state == stateSelectingLeftovers && len(m.leftovers) > 0 {
-				m.cursor++
-				if m.cursor >= len(m.leftovers) {
-					m.cursor = 0
-				}
-				m.adjustScroll(len(m.leftovers))
-			}
-
-		case "backspace":
-			if m.state == uninstStateSelecting {
+			case "backspace":
 				if len(m.searchQuery) > 0 {
 					m.searchQuery = m.searchQuery[:len(m.searchQuery)-1]
 					m.filterApps()
 				}
-			}
-
-		case " ":
-			if m.state == stateSelectingLeftovers && len(m.leftovers) > 0 {
-				m.leftovers[m.cursor].Selected = !m.leftovers[m.cursor].Selected
-				m.recalculateSweep()
-			}
-
-		case "a", "A":
-			if m.state == stateSelectingLeftovers && len(m.leftovers) > 0 {
-				anyUnselected := false
-				for _, l := range m.leftovers {
-					if !l.Selected {
-						anyUnselected = true
-						break
+			case "enter":
+				if len(m.filteredApps) > 0 {
+					app := m.filteredApps[m.cursor]
+					if m.isProtected(app.Name) {
+						return m, nil // Block system app uninstalls silently
 					}
+					m.selectedApp = app
+					m.state = stateConfirmingNative
 				}
-				for i := range m.leftovers {
-					m.leftovers[i].Selected = anyUnselected
+			default:
+				if len(key) == 1 {
+					m.searchQuery += key
+					m.filterApps()
 				}
-				m.recalculateSweep()
 			}
 
-		case "enter", "y", "Y":
-			if m.state == uninstStateSelecting && len(m.filteredApps) > 0 {
-				app := m.filteredApps[m.cursor]
-				if m.isProtected(app.Name) {
-					return m, nil // Block system app uninstalls silently
-				}
-				m.selectedApp = app
-				m.state = stateConfirmingNative
-			} else if m.state == stateConfirmingNative {
+		case stateConfirmingNative:
+			switch key {
+			case "esc", "n", "N", "q":
+				m.state = uninstStateSelecting
+			case "enter", "y", "Y":
 				m.state = stateRunningNative
-				// Launch native uninstaller
-				var err error
-				if !uninstDryRun {
-					err = runNativeUninstaller(m.selectedApp.UninstallString)
+				return m, runNativeUninstallCmd(m.selectedApp)
+			}
+
+		case stateRunningNative, stateScanningLeftovers, stateSweepingLeftovers:
+			// External work in flight — ignore input (ctrl+c handled above).
+
+		case stateSelectingLeftovers:
+			switch key {
+			case "q", "esc":
+				return m, tea.Quit
+			case "up", "k":
+				if len(m.leftovers) > 0 {
+					m.cursor--
+					if m.cursor < 0 {
+						m.cursor = len(m.leftovers) - 1
+					}
+					m.adjustScroll(len(m.leftovers))
 				}
-				m.uninstErr = err
-				m.state = stateScanningLeftovers
-				return m, scanLeftoversCmd(m.selectedApp, m.leftoverChan)
-			} else if m.state == stateSelectingLeftovers {
+			case "down", "j":
+				if len(m.leftovers) > 0 {
+					m.cursor++
+					if m.cursor >= len(m.leftovers) {
+						m.cursor = 0
+					}
+					m.adjustScroll(len(m.leftovers))
+				}
+			case " ":
+				if len(m.leftovers) > 0 {
+					m.leftovers[m.cursor].Selected = !m.leftovers[m.cursor].Selected
+					m.recalculateSweep()
+				}
+			case "a", "A":
+				if len(m.leftovers) > 0 {
+					anyUnselected := false
+					for _, l := range m.leftovers {
+						if !l.Selected {
+							anyUnselected = true
+							break
+						}
+					}
+					for i := range m.leftovers {
+						m.leftovers[i].Selected = anyUnselected
+					}
+					m.recalculateSweep()
+				}
+			case "enter", "y", "Y":
 				if len(m.leftovers) > 0 {
 					m.state = stateConfirmingLeftovers
 				} else {
 					m.state = uninstStateFinished
 				}
-			} else if m.state == stateConfirmingLeftovers {
-				m.state = stateSweepingLeftovers
-				return m, runSweepCmd(m.leftovers, uninstDryRun)
-			} else if m.state == uninstStateFinished {
-				return m, tea.Quit
 			}
 
-		default:
-			// Text filtering entry
-			if m.state == uninstStateSelecting && len(msg.String()) == 1 {
-				m.searchQuery += msg.String()
-				m.filterApps()
+		case stateConfirmingLeftovers:
+			switch key {
+			case "esc", "n", "N", "q":
+				m.state = stateSelectingLeftovers
+			case "enter", "y", "Y":
+				m.state = stateSweepingLeftovers
+				return m, runSweepCmd(m.leftovers, uninstDryRun)
+			}
+
+		case uninstStateFinished:
+			switch key {
+			case "q", "esc", "enter":
+				return m, tea.Quit
 			}
 		}
 
@@ -348,6 +376,11 @@ func (m uninstallModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.apps = msg.apps
 		m.filterApps()
 		return m, nil
+
+	case nativeUninstallDoneMsg:
+		m.uninstErr = msg.err
+		m.state = stateScanningLeftovers
+		return m, scanLeftoversCmd(m.selectedApp)
 
 	case scanLeftoversCompleteMsg:
 		m.leftovers = msg.items
@@ -409,7 +442,7 @@ func (m uninstallModel) isProtected(name string) bool {
 			return true
 		}
 	}
-	return false
+	return kbUpdatePattern.MatchString(lowerName)
 }
 
 func (m uninstallModel) View() string {
@@ -539,12 +572,15 @@ func (m uninstallModel) View() string {
 	case stateScanningLeftovers:
 		var scanLeftBox strings.Builder
 		scanLeftBox.WriteString("🔍  " + uninstSuccessStyle.Render("SCANNING SYSTEM PATHS FOR APPLICATION LEFTOVERS") + "\n\n")
-		scanLeftBox.WriteString(fmt.Sprintf("  Scanning roaming registry configs, AppData local, and Program Files\n"))
+		scanLeftBox.WriteString("  Scanning roaming registry configs, AppData local, and Program Files\n")
 		scanLeftBox.WriteString(fmt.Sprintf("  for files and caches related to %s...\n", uninstWhiteText(m.selectedApp.Name)))
 		boxLayout = uninstLeftBoxStyle.Width(83).Render(scanLeftBox.String())
 
 	case stateSelectingLeftovers:
 		var leftBox strings.Builder
+		if m.uninstErr != nil {
+			leftBox.WriteString(uninstFailStyle.Render("⚠ Native uninstaller reported an error: ") + uninstGrayText(m.uninstErr.Error()) + "\n\n")
+		}
 		leftBox.WriteString("Discovered application folder remnants & local caches:\n\n")
 
 		if len(m.leftovers) == 0 {
@@ -638,7 +674,7 @@ func (m uninstallModel) View() string {
 	case uninstStateScanning:
 		doc.WriteString(uninstFooterStyle.Render("Querying Windows system libraries... Please wait."))
 	case uninstStateSelecting:
-		doc.WriteString(uninstFooterStyle.Render("[↑/↓/j/k] Scroll  |  [Type] Filter apps  |  [Backspace] Clear filter  |  [Enter/y] Pick app  |  [q] Quit"))
+		doc.WriteString(uninstFooterStyle.Render("[↑/↓] Scroll  |  [Type] Filter apps  |  [Backspace] Erase  |  [Enter] Pick app  |  [Esc] Quit"))
 	case stateConfirmingNative:
 		doc.WriteString(uninstFooterStyle.Render("[y] Confirm and Launch uninstaller  |  [n/esc] Cancel and Go Back"))
 	case stateRunningNative:
@@ -747,10 +783,17 @@ func scanAppLeftovers(appName, publisher string) []string {
 	}
 
 	var cleanedDirs []string
+	seenDirs := make(map[string]bool)
 	for _, d := range scanDirs {
 		if d != "" {
 			if abs, err := filepath.Abs(d); err == nil {
-				cleanedDirs = append(cleanedDirs, abs)
+				// Dedupe: env vars can point at the same dir (e.g. ProgramFiles
+				// and ProgramFiles(x86) on 32-bit Windows); paths are case-insensitive.
+				key := strings.ToLower(abs)
+				if !seenDirs[key] {
+					seenDirs[key] = true
+					cleanedDirs = append(cleanedDirs, abs)
+				}
 			}
 		}
 	}
@@ -774,7 +817,12 @@ func scanAppLeftovers(appName, publisher string) []string {
 
 			matched := false
 			for _, term := range searchTerms {
-				if term != "" && (strings.Contains(entryName, term) || strings.Contains(term, entryName)) {
+				// Terms shorter than 3 chars (an app named "Go", publisher "EA")
+				// would substring-match half the filesystem; skip them.
+				if len(term) < 3 {
+					continue
+				}
+				if strings.Contains(entryName, term) || (len(entryName) >= 3 && strings.Contains(term, entryName)) {
 					matched = true
 					break
 				}
@@ -792,41 +840,10 @@ func scanAppLeftovers(appName, publisher string) []string {
 	return folders
 }
 
+// logUninstOperation delegates to the shared structured logging system,
+// which also rotates the log; the old local copy grew operations.log unbounded.
 func logUninstOperation(action, target string, size int64, success bool) {
-	if os.Getenv("DU_NO_OPLOG") == "1" {
-		return
-	}
-
-	logDir := os.Getenv("LOCALAPPDATA")
-	if logDir == "" {
-		logDir = os.Getenv("USERPROFILE")
-	}
-	if logDir != "" {
-		logDir = filepath.Join(logDir, "Duster")
-	}
-
-	if logDir == "" {
-		logDir = filepath.Clean("./")
-	}
-
-	_ = os.MkdirAll(logDir, 0755)
-	logPath := filepath.Join(logDir, "operations.log")
-
-	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-
-	status := "SUCCESS"
-	if !success {
-		status = "FAILED"
-	}
-
-	timestamp := time.Now().UTC().Format(time.RFC3339)
-	entry := fmt.Sprintf("%s | Command: uninstall | Action: %s | Target: %s | Size: %d bytes | Status: %s\n",
-		timestamp, action, target, size, status)
-	_, _ = f.WriteString(entry)
+	logging.LogDestructiveOperation("uninstall", action, target, size, success)
 }
 
 func runHeadlessUninstall() {
