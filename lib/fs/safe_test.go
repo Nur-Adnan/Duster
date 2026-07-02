@@ -1,7 +1,6 @@
 package fs
 
 import (
-	"os"
 	"strings"
 	"testing"
 )
@@ -11,35 +10,35 @@ func TestResolveEnvPath(t *testing.T) {
 		name     string
 		input    string
 		expected string
-		setupEnv func()
+		setupEnv func(t *testing.T)
 	}{
 		{
 			name:     "Static Windows path",
 			input:    `C:\Windows\System32`,
 			expected: `C:\Windows\System32`,
-			setupEnv: func() {},
+			setupEnv: func(t *testing.T) {},
 		},
 		{
 			name:     "TEMP expansion",
 			input:    `%TEMP%\duster-test`,
 			expected: `C:\Windows\Temp\duster-test`, // Fallback value when env not set
-			setupEnv: func() {
-				os.Unsetenv("TEMP")
+			setupEnv: func(t *testing.T) {
+				t.Setenv("TEMP", "") // empty reads as unset; auto-restored
 			},
 		},
 		{
 			name:     "Custom ENV expansion",
 			input:    `%CUSTOM_PATH%\subdir`,
 			expected: `D:\Projects\subdir`,
-			setupEnv: func() {
-				os.Setenv("CUSTOM_PATH", `D:\Projects`)
+			setupEnv: func(t *testing.T) {
+				t.Setenv("CUSTOM_PATH", `D:\Projects`)
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tt.setupEnv()
+			tt.setupEnv(t)
 			actual := ResolveEnvPath(tt.input)
 
 			// Normalize slashes for comparison
@@ -86,11 +85,25 @@ func TestIsSystemProtectedPath(t *testing.T) {
 		{"WinRE agent directory", `C:\$WinREAgent`, true},
 		{"Non-windows user path", `C:\Users\TestUser\Desktop\junk`, false},
 		{"Recovery-prefixed user folder is fine", `C:\RecoveryPhotos`, false},
+		// Drive-relative and root forms: filepath.Clean("C:") is "C:." on
+		// Windows and "C:" on POSIX; both must resolve as protected so a
+		// drive-relative target can never reach removeAllSafe.
+		{"Bare drive letter", `C:`, true},
+		{"Drive-relative path", `C:foo`, true},
+		{"Lowercase drive root", `d:\`, true},
+		// Extended-length and device prefixes must not bypass the stem checks.
+		{"Extended-length System32", `\\?\C:\Windows\System32`, true},
+		{"Extended-length Windows", `\\?\C:\Windows`, true},
+		{"Extended-length safe temp", `\\?\C:\Windows\Temp\x`, false},
+		// UNC share roots are protected like drive roots.
+		{"UNC share root", `\\server\share`, true},
+		{"UNC server only", `\\server`, true},
+		{"UNC deep path is fine", `\\server\share\sub\file`, false},
 	}
 
-	// Make sure environment fallbacks map correctly during test
-	os.Unsetenv("WINDIR")
-	os.Unsetenv("SYSTEMDRIVE")
+	// Force env fallbacks (empty reads as unset); t.Setenv auto-restores.
+	t.Setenv("WINDIR", "")
+	t.Setenv("SYSTEMDRIVE", "")
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

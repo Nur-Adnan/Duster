@@ -43,6 +43,20 @@ func TestParseUninstallString(t *testing.T) {
 			expectedCmd:  `C:\Program Files\App\uninstall.exe`,
 			expectedArgs: []string{`/dir=C:\My Projects`, "--quiet"},
 		},
+		{
+			// Security: an UNQUOTED path with spaces must not be misparsed into
+			// "C:\Program" (hijackable by a planted C:\Program.exe).
+			name:         "Unquoted executable path with spaces",
+			input:        `C:\Program Files\App\uninstall.exe /S`,
+			expectedCmd:  `C:\Program Files\App\uninstall.exe`,
+			expectedArgs: []string{"/S"},
+		},
+		{
+			name:         "Unquoted MSI-style command",
+			input:        `MsiExec.exe /X{12345678-1234-1234-1234-123456789012}`,
+			expectedCmd:  `MsiExec.exe`,
+			expectedArgs: []string{"/X{12345678-1234-1234-1234-123456789012}"},
+		},
 	}
 
 	for _, tt := range tests {

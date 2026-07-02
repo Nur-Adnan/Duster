@@ -114,13 +114,16 @@ Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{cmd}"; Parameters: "/K ""{app}\{#MyAppExeName}"" --help"; IconFilename: "{app}\{#MyAppExeName}"; Tasks: desktopicon; Comment: "Duster CLI"
 
 [Registry]
+; HKA resolves to HKLM for an elevated (admin-mode) install and HKCU for a
+; per-user install, so an elevated install never writes per-user state into
+; the elevating admin's profile.
 ; Add application to App Paths for Win+R launching: "duster" or "du"
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\App Paths\du.exe"; ValueType: string; ValueName: ""; ValueData: "{app}\{#MyAppExeName}"; Flags: uninsdeletekey
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\App Paths\du.exe"; ValueType: string; ValueName: "Path"; ValueData: "{app}"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Microsoft\Windows\CurrentVersion\App Paths\du.exe"; ValueType: string; ValueName: ""; ValueData: "{app}\{#MyAppExeName}"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Microsoft\Windows\CurrentVersion\App Paths\du.exe"; ValueType: string; ValueName: "Path"; ValueData: "{app}"; Flags: uninsdeletekey
 
 ; Store version info for auto-update queries
-Root: HKCU; Subkey: "Software\{#MyAppPublisher}\{#MyAppName}"; ValueType: string; ValueName: "Version"; ValueData: "{#MyAppVersion}"; Flags: uninsdeletekey
-Root: HKCU; Subkey: "Software\{#MyAppPublisher}\{#MyAppName}"; ValueType: string; ValueName: "InstallPath"; ValueData: "{app}"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\{#MyAppPublisher}\{#MyAppName}"; ValueType: string; ValueName: "Version"; ValueData: "{#MyAppVersion}"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\{#MyAppPublisher}\{#MyAppName}"; ValueType: string; ValueName: "InstallPath"; ValueData: "{app}"; Flags: uninsdeletekey
 
 [Run]
 ; Post-install: show help output to verify installation
@@ -130,17 +133,33 @@ Filename: "{cmd}"; Parameters: "/K echo. & echo   Duster v{#MyAppVersion} instal
 ; Clean up application data on uninstall
 Type: filesandordirs; Name: "{localappdata}\Duster"
 
-[UninstallRun]
-; Run cleanup of app data before uninstall
-Filename: "{cmd}"; Parameters: "/C rmdir /S /Q ""{localappdata}\Duster"" 2>nul"; Flags: runhidden
-
 [Code]
 // ─────────────────────────────────────────────
 // Pascal Script: PATH modification on install/uninstall
 // ─────────────────────────────────────────────
 
 const
-  EnvironmentKey = 'Environment';
+  UserEnvKey   = 'Environment';
+  SystemEnvKey = 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment';
+
+// An elevated install must edit the machine PATH: writing HKCU\Environment
+// while elevated would modify the elevating ADMIN's profile, not the
+// logged-on user's, leaving the actual user without `du` on PATH.
+function EnvRootKey: Integer;
+begin
+  if IsAdminInstallMode then
+    Result := HKEY_LOCAL_MACHINE
+  else
+    Result := HKEY_CURRENT_USER;
+end;
+
+function EnvSubKey: string;
+begin
+  if IsAdminInstallMode then
+    Result := SystemEnvKey
+  else
+    Result := UserEnvKey;
+end;
 
 // Normalize a PATH entry for comparison: uppercase, no trailing backslash.
 function NormalizePathEntry(const Entry: string): string;
@@ -186,7 +205,7 @@ procedure AddToPath(const Dir: string);
 var
   Path: string;
 begin
-  if not RegQueryStringValue(HKEY_CURRENT_USER, EnvironmentKey, 'Path', Path) then
+  if not RegQueryStringValue(EnvRootKey, EnvSubKey, 'Path', Path) then
     Path := '';
 
   if PathEntryExists(Path, Dir) then
@@ -197,10 +216,10 @@ begin
     Path := Path + ';';
   Path := Path + Dir;
 
-  // Write REG_EXPAND_SZ: the user Path value is conventionally expandable,
-  // and RegWriteStringValue would silently convert it to REG_SZ, breaking
-  // any pre-existing %VAR% entries the user relies on.
-  RegWriteExpandStringValue(HKEY_CURRENT_USER, EnvironmentKey, 'Path', Path);
+  // Write REG_EXPAND_SZ: the Path value is conventionally expandable, and
+  // RegWriteStringValue would silently convert it to REG_SZ, breaking any
+  // pre-existing %VAR% entries the user (or system) relies on.
+  RegWriteExpandStringValue(EnvRootKey, EnvSubKey, 'Path', Path);
 
   // Notify Windows of the environment change
   // SendMessage(HWND_BROADCAST, WM_SETTINGCHANGE ...) is handled by Inno automatically
@@ -211,7 +230,7 @@ var
   Path, Rest, Entry, NewPath, NormDir: string;
   P: Integer;
 begin
-  if not RegQueryStringValue(HKEY_CURRENT_USER, EnvironmentKey, 'Path', Path) then
+  if not RegQueryStringValue(EnvRootKey, EnvSubKey, 'Path', Path) then
     Exit;
 
   // Rebuild the PATH keeping every entry except exact matches for Dir.
@@ -241,7 +260,7 @@ begin
   end;
 
   if NewPath <> Path then
-    RegWriteExpandStringValue(HKEY_CURRENT_USER, EnvironmentKey, 'Path', NewPath);
+    RegWriteExpandStringValue(EnvRootKey, EnvSubKey, 'Path', NewPath);
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);

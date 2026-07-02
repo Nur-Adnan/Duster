@@ -398,13 +398,11 @@ func checkJunctionLoops() bool {
 type doctorModel struct {
 	snapshot   DoctorSnapshot
 	running    bool
-	progress   int
 	width      int
 	height     int
 	logEntries []string
 }
 
-type doctorProgMsg int
 type doctorCompleteMsg DoctorSnapshot
 
 func initialDoctorModel() doctorModel {
@@ -436,9 +434,6 @@ func (m doctorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-
-	case doctorProgMsg:
-		m.progress = int(msg)
 
 	case doctorCompleteMsg:
 		m.running = false

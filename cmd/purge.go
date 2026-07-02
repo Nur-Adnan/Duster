@@ -38,7 +38,7 @@ var developerArtifacts = map[string]string{
 // full file name. Names absent from this map (node_modules, .m2, .gradle, ...)
 // are unambiguous enough to match on name alone.
 var artifactMarkers = map[string][]string{
-	"target": {"Cargo.toml"},
+	"target": {"Cargo.toml", "pom.xml", "build.sbt"}, // Rust (cargo), Maven, sbt
 	"bin":    {".csproj", ".sln", ".vbproj", ".fsproj"},
 	"obj":    {".csproj", ".sln", ".vbproj", ".fsproj"},
 	"build":  {"package.json", "build.gradle", "build.gradle.kts", "pom.xml", "CMakeLists.txt"},
@@ -527,10 +527,7 @@ func (m purgeModel) View() string {
 		boxContent.WriteString(fmt.Sprintf("    Discovered targets : %s\n", purgeWhiteText(fmt.Sprintf("%d folders", m.totalFound))))
 		boxContent.WriteString(fmt.Sprintf("    Recoverable space  : %s\n\n", purgeWhiteText(formatBytes(m.totalSize))))
 		if m.latestFound != "" {
-			shortPath := m.latestFound
-			if len(shortPath) > 55 {
-				shortPath = "..." + shortPath[len(shortPath)-52:]
-			}
+			shortPath := clampTail(m.latestFound, 55)
 			boxContent.WriteString(purgeGrayText(fmt.Sprintf("    Reading: %s", shortPath)))
 		} else {
 			boxContent.WriteString(purgeGrayText("    Analyzing workspace directories..."))
@@ -567,10 +564,7 @@ func (m purgeModel) View() string {
 					chk = purgeCyanText(chk)
 				}
 
-				shortPath := art.Path
-				if len(shortPath) > 42 {
-					shortPath = "..." + shortPath[len(shortPath)-39:]
-				}
+				shortPath := clampTail(art.Path, 42)
 
 				line := fmt.Sprintf("%s%s  %-45s %-12s %10s\n",
 					linePrefix,
@@ -615,10 +609,7 @@ func (m purgeModel) View() string {
 		boxContent.WriteString(fmt.Sprintf("  Purging progress: %d / %d folders cleaned\n\n", m.currentPurge, selected))
 
 		if m.latestFound != "" {
-			shortPath := m.latestFound
-			if len(shortPath) > 55 {
-				shortPath = "..." + shortPath[len(shortPath)-52:]
-			}
+			shortPath := clampTail(m.latestFound, 55)
 			boxContent.WriteString(fmt.Sprintf("  Current Target: %s\n", purgeWhiteText(shortPath)))
 		}
 

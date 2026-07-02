@@ -59,7 +59,9 @@ func LogDestructiveOperation(command, action, target string, size int64, success
 	timestamp := time.Now().UTC().Format(time.RFC3339)
 	entry := fmt.Sprintf("%s | Command: %s | Action: %s | Target: %s | Size: %d bytes | Status: %s\n",
 		timestamp, command, action, target, size, status)
-	_, _ = f.WriteString(entry)
+	if _, err := f.WriteString(entry); err != nil {
+		Logger.Error("failed to write operations log entry", "error", err)
+	}
 }
 
 func rotateIfNeeded(logPath string) {

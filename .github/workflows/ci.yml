@@ -66,6 +66,7 @@ jobs:
       - name: Run Unit Tests (with Race Detector)
         env:
           CGO_ENABLED: 1  # Race detector requires CGO
+          DU_NO_OPLOG: "1"  # suppress operations.log so tests stay hermetic
         run: go test -count=1 -race -v ./...
 
   # ── Step 3: Windows Test Suite ─────────────────────────────────────────

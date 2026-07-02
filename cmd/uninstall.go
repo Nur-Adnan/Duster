@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Nur-Adnan/duster/internal/logging"
 	"github.com/Nur-Adnan/duster/lib/fs"
@@ -285,7 +286,9 @@ func (m uninstallModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.state = stateConfirmingNative
 				}
 			default:
-				if len(key) == 1 {
+				// One printable rune (byte length would drop multi-byte keys
+				// like ü/é/CJK, blocking search on non-ASCII app names).
+				if utf8.RuneCountInString(key) == 1 {
 					m.searchQuery += key
 					m.filterApps()
 				}
@@ -491,10 +494,7 @@ func (m uninstallModel) View() string {
 					prefix = "▸ "
 				}
 
-				name := app.Name
-				if len(name) > 30 {
-					name = name[:27] + "..."
-				}
+				name := clampHead(app.Name, 30)
 
 				// Check system whitelisting
 				var line string
@@ -610,10 +610,7 @@ func (m uninstallModel) View() string {
 					chk = uninstCyanText(chk)
 				}
 
-				shortPath := item.Path
-				if len(shortPath) > 50 {
-					shortPath = "..." + shortPath[len(shortPath)-47:]
-				}
+				shortPath := clampTail(item.Path, 50)
 
 				line := fmt.Sprintf("%s%s  %-52s %10s\n",
 					prefix,
@@ -708,40 +705,79 @@ func countSelectedLeftovers(list []leftoverItem) int {
 	return c
 }
 
-// Parses uninstaller command line into executable + args, handling quoted paths correctly
+// parseUninstallString splits an uninstaller command line into executable + args.
+// A quoted executable is taken verbatim. An UNQUOTED path may still contain
+// spaces (e.g. `C:\Program Files\App\uninst.exe /S`), so rather than naively
+// splitting on the first space — which yields `C:\Program`, hijackable by a
+// planted C:\Program.exe — it splits at the first executable-extension boundary.
 func parseUninstallString(uninstStr string) (string, []string) {
 	uninstStr = strings.TrimSpace(uninstStr)
 	if uninstStr == "" {
 		return "", nil
 	}
 
-	var parts []string
-	inQuotes := false
-	var currentToken strings.Builder
-
-	for i := 0; i < len(uninstStr); i++ {
-		char := uninstStr[i]
-		if char == '"' {
-			inQuotes = !inQuotes
-			continue
+	// Quoted executable: the exe is exactly the first quoted span.
+	if uninstStr[0] == '"' {
+		if end := strings.IndexByte(uninstStr[1:], '"'); end >= 0 {
+			exe := uninstStr[1 : 1+end]
+			return exe, splitArgs(strings.TrimSpace(uninstStr[end+2:]))
 		}
-		if char == ' ' && !inQuotes {
-			if currentToken.Len() > 0 {
-				parts = append(parts, currentToken.String())
-				currentToken.Reset()
+		// Malformed (no closing quote): fall through to boundary detection.
+	}
+
+	// Unquoted: split at the first executable extension followed by whitespace
+	// or end-of-string, so a valid spaced path is never misparsed.
+	lower := strings.ToLower(uninstStr)
+	for _, ext := range []string{".exe", ".com", ".bat", ".cmd"} {
+		from := 0
+		for {
+			rel := strings.Index(lower[from:], ext)
+			if rel < 0 {
+				break
 			}
-			continue
+			end := from + rel + len(ext)
+			if end == len(uninstStr) || uninstStr[end] == ' ' || uninstStr[end] == '\t' {
+				return uninstStr[:end], splitArgs(strings.TrimSpace(uninstStr[end:]))
+			}
+			from = end
 		}
-		currentToken.WriteByte(char)
-	}
-	if currentToken.Len() > 0 {
-		parts = append(parts, currentToken.String())
 	}
 
-	if len(parts) == 0 {
+	// No executable extension found: fall back to whitespace tokenization.
+	fields := strings.Fields(uninstStr)
+	if len(fields) == 0 {
 		return "", nil
 	}
-	return parts[0], parts[1:]
+	return fields[0], fields[1:]
+}
+
+// splitArgs tokenizes an argument tail on whitespace, honoring double quotes so
+// a switch like `"/dir=C:\My Projects"` stays a single argument.
+func splitArgs(s string) []string {
+	if s == "" {
+		return nil
+	}
+	var args []string
+	var cur strings.Builder
+	inQuotes := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c == '"':
+			inQuotes = !inQuotes
+		case c == ' ' && !inQuotes:
+			if cur.Len() > 0 {
+				args = append(args, cur.String())
+				cur.Reset()
+			}
+		default:
+			cur.WriteByte(c)
+		}
+	}
+	if cur.Len() > 0 {
+		args = append(args, cur.String())
+	}
+	return args
 }
 
 func runNativeUninstaller(uninstStr string) error {
