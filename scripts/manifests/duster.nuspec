@@ -3,7 +3,7 @@
 <package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
   <metadata>
     <id>duster</id>
-    <version>1.0.1</version>
+    <version>1.0.2</version>
     <packageSourceUrl>https://github.com/Nur-Adnan/duster/tree/main/scripts/manifests</packageSourceUrl>
     <owners>Nur Adnan</owners>
     <title>Duster CLI</title>
@@ -23,7 +23,7 @@
       It safely cleans temporary folders, Windows Update cache, Prefetch directories, and browser databases.
       It also offers live performance optimization such as system SSD TRIM execution and DNS flushing.
     </description>
-    <releaseNotes>https://github.com/Nur-Adnan/Duster/releases/tag/v1.0.1</releaseNotes>
+    <releaseNotes>https://github.com/Nur-Adnan/Duster/releases/tag/v1.0.2</releaseNotes>
   </metadata>
   <files>
     <file src="tools\**" target="tools" />

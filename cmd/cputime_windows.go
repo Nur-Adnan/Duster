@@ -15,11 +15,8 @@ type cpuTimes struct {
 
 func getProcessCPUTime() (cpuTimes, error) {
 	var creation, exit, kernel, user windows.Filetime
-	h, err := windows.GetCurrentProcess()
-	if err != nil {
-		return cpuTimes{}, err
-	}
-	err = windows.GetProcessTimes(h, &creation, &exit, &kernel, &user)
+	h := windows.CurrentProcess()
+	err := windows.GetProcessTimes(h, &creation, &exit, &kernel, &user)
 	if err != nil {
 		return cpuTimes{}, err
 	}

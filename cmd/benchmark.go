@@ -100,29 +100,38 @@ func runSystemBenchmark() BenchmarkMetrics {
 	benchSandbox := filepath.Join(scanDir, "duster-bench-sandbox")
 	_ = os.MkdirAll(benchSandbox, 0755)
 
+	// Count only operations that actually succeeded — with an unwritable temp
+	// dir the loops finish in microseconds doing nothing, and dividing the full
+	// numFiles by that time reported absurd fake throughput.
 	numFiles := 250
+	written := 0
 	startWrite := time.Now()
 	for i := 0; i < numFiles; i++ {
 		filePath := filepath.Join(benchSandbox, fmt.Sprintf("bench_file_%d.tmp", i))
-		_ = os.WriteFile(filePath, []byte("duster i/o benchmarking block write payload content"), 0644)
+		if err := os.WriteFile(filePath, []byte("duster i/o benchmarking block write payload content"), 0644); err == nil {
+			written++
+		}
 	}
 	durWrite := time.Since(startWrite)
 	m.WriteDurationMs = durWrite.Milliseconds()
 	if durWrite.Seconds() > 0 {
-		m.WriteOpsPerSec = float64(numFiles) / durWrite.Seconds()
+		m.WriteOpsPerSec = float64(written) / durWrite.Seconds()
 	}
 
+	deleted := 0
 	startDelete := time.Now()
 	for i := 0; i < numFiles; i++ {
 		filePath := filepath.Join(benchSandbox, fmt.Sprintf("bench_file_%d.tmp", i))
-		_ = os.Remove(filePath)
+		if err := os.Remove(filePath); err == nil {
+			deleted++
+		}
 	}
 	durDelete := time.Since(startDelete)
 	_ = os.RemoveAll(benchSandbox)
 
 	m.DeleteDurationMs = durDelete.Milliseconds()
 	if durDelete.Seconds() > 0 {
-		m.DeleteOpsPerSec = float64(numFiles) / durDelete.Seconds()
+		m.DeleteOpsPerSec = float64(deleted) / durDelete.Seconds()
 	}
 
 	// 3. Memory & Goroutines Footprint
@@ -182,11 +191,10 @@ func runSystemBenchmark() BenchmarkMetrics {
 
 // Bubble Tea TUI implementation for Benchmark
 type benchmarkModel struct {
-	metrics  BenchmarkMetrics
-	running  bool
-	progress float64
-	width    int
-	height   int
+	metrics BenchmarkMetrics
+	running bool
+	width   int
+	height  int
 }
 
 type benchmarkCompleteMsg BenchmarkMetrics

@@ -54,7 +54,7 @@ if [[ -n "$HAS_SHELL" ]] && command -v shfmt > /dev/null 2>&1; then
     done <<< "$HAS_SHELL"
     if [[ -n "$UNFORMATTED" ]]; then
         _fail "shfmt: unformatted files:$UNFORMATTED"
-        _info "Fix with: ./scripts/check.sh --format"
+        _info "Fix with: shfmt -i 4 -ci -sr -w <file>"
         FAILED=1
     else
         _ok "shfmt format clean"
@@ -73,10 +73,23 @@ if [[ -n "$HAS_SHELL" ]] && command -v shellcheck > /dev/null 2>&1; then
     [[ $FAILED -eq 0 ]] && _ok "shellcheck clean"
 fi
 
-# --- 4. Go vet (if staged Go files) ---
+# --- 4. gofmt + go vet (if staged Go files) ---
+# CI's lint job fails on gofmt -s and vets the whole module, so the hook must
+# mirror both — a ./cmd/...-only vet let lib/ and main.go failures reach CI.
 if [[ -n "$HAS_GO" ]] && command -v go > /dev/null 2>&1; then
+    _info "gofmt -s check..."
+    UNFMT=$(gofmt -s -l . 2> /dev/null || true)
+    if [[ -n "$UNFMT" ]]; then
+        _fail "gofmt: unformatted files:"
+        echo "$UNFMT"
+        _info "Fix with: gofmt -s -w ."
+        FAILED=1
+    else
+        _ok "gofmt clean"
+    fi
+
     _info "go vet..."
-    if go vet ./cmd/... 2>&1; then
+    if go vet ./... 2>&1; then
         _ok "go vet clean"
     else
         _fail "go vet failed"
@@ -87,7 +100,6 @@ fi
 echo ""
 if [[ $FAILED -ne 0 ]]; then
     _fail "Pre-commit checks failed. Fix the issues above before committing."
-    _info "Run './scripts/check.sh --format' to auto-fix formatting."
     echo ""
     exit 1
 fi

@@ -21,8 +21,10 @@ func calculateDirSize(dirPath string) int64 {
 			return nil // Skip inaccessible directories and items gracefully
 		}
 
-		// Avoid junction points / symlink traversals
-		if d.Type()&os.ModeSymlink != 0 {
+		// Avoid junction points / symlink traversals. Since Go 1.23 Windows
+		// junctions report as ModeIrregular rather than ModeSymlink, so both
+		// bits must be checked.
+		if d.Type()&(os.ModeSymlink|os.ModeIrregular) != 0 {
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
@@ -43,8 +45,10 @@ func calculateDirSize(dirPath string) int64 {
 // removeAllSafe handles the classic Windows read-only file lock issues.
 // Iterates and strips the read-only file attribute recursively before wiping directories to prevent silent deletion failures.
 func removeAllSafe(path string) error {
-	_ = os.Chmod(path, 0777)
-
+	// Lstat BEFORE any chmod: os.Chmod follows symlinks, so chmod'ing a reparse
+	// point would clear the read-only attribute on its target — a file outside the
+	// deletion root. Reparse points (symlinks, and junctions which report as
+	// ModeIrregular on Go 1.23+) are deleted as the link itself, never followed.
 	info, err := os.Lstat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -53,24 +57,24 @@ func removeAllSafe(path string) error {
 		return err
 	}
 
-	if info.Mode()&os.ModeSymlink != 0 {
-		// Bypasses recursion and deletes the symlink or junction link itself directly.
-		// This defeats TOCTOU redirection exploits completely.
+	if info.Mode()&(os.ModeSymlink|os.ModeIrregular) != 0 {
 		return os.Remove(path)
 	}
 
+	_ = os.Chmod(path, 0777)
+
 	if info.IsDir() {
-		// Securely strip read-only attributes from nested items without traversing junctions
+		// Securely strip read-only attributes from nested items without traversing
+		// or chmod'ing through junctions/symlinks.
 		_ = filepath.WalkDir(path, func(p string, d os.DirEntry, walkErr error) error {
 			if walkErr != nil {
 				return nil
 			}
-			if d.Type()&os.ModeSymlink != 0 {
+			if d.Type()&(os.ModeSymlink|os.ModeIrregular) != 0 {
 				if d.IsDir() {
 					return filepath.SkipDir
 				}
-				_ = os.Chmod(p, 0777)
-				return nil
+				return nil // do not chmod through a link
 			}
 			_ = os.Chmod(p, 0777)
 			return nil
@@ -82,6 +86,10 @@ func removeAllSafe(path string) error {
 
 // removeFileSafe strips read-only attributes before deleting a single file target.
 func removeFileSafe(path string) error {
+	// Skip chmod on links (it would follow to the target); Remove deletes the link.
+	if info, err := os.Lstat(path); err == nil && info.Mode()&(os.ModeSymlink|os.ModeIrregular) != 0 {
+		return os.Remove(path)
+	}
 	_ = os.Chmod(path, 0777)
 	return os.Remove(path)
 }

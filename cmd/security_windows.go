@@ -105,12 +105,37 @@ func checkDefenderStatus() (securityCheckResult, int) {
 }
 
 func checkFirewallStatus() (securityCheckResult, int) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	// Read profile state from the registry instead of parsing `netsh` output:
+	// netsh localizes ON/OFF ("EIN"/"AUS", ...), which made this check report
+	// "0 profiles disabled" as critical on any non-English Windows.
+	profiles := []struct {
+		name string
+		key  string
+	}{
+		{"Domain", `SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\DomainProfile`},
+		{"Private", `SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\StandardProfile`},
+		{"Public", `SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\PublicProfile`},
+	}
 
-	cmd := exec.CommandContext(ctx, "netsh", "advfirewall", "show", "allprofiles", "state")
-	out, err := cmd.Output()
-	if err != nil {
+	var disabled []string
+	queried := 0
+	for _, p := range profiles {
+		k, err := registry.OpenKey(registry.LOCAL_MACHINE, p.key, registry.QUERY_VALUE)
+		if err != nil {
+			continue
+		}
+		val, _, valErr := k.GetIntegerValue("EnableFirewall")
+		k.Close()
+		if valErr != nil {
+			continue
+		}
+		queried++
+		if val == 0 {
+			disabled = append(disabled, p.name)
+		}
+	}
+
+	if queried == 0 {
 		return securityCheckResult{
 			Name:    "Windows Defender Firewall",
 			Details: "Could not query firewall status",
@@ -118,21 +143,17 @@ func checkFirewallStatus() (securityCheckResult, int) {
 		}, 10
 	}
 
-	output := strings.ToLower(string(out))
-	offCount := strings.Count(output, "off")
-	onCount := strings.Count(output, "on")
-
-	if offCount == 0 && onCount > 0 {
+	if len(disabled) == 0 {
 		return securityCheckResult{
 			Name:    "Windows Defender Firewall",
-			Details: fmt.Sprintf("All %d firewall profiles are active", onCount),
+			Details: fmt.Sprintf("All %d firewall profiles are active", queried),
 			Status:  "secure",
 		}, 0
 	}
 
 	return securityCheckResult{
 		Name:    "Windows Defender Firewall",
-		Details: fmt.Sprintf("%d firewall profile(s) disabled", offCount),
+		Details: "Firewall disabled for: " + strings.Join(disabled, ", "),
 		Status:  "critical",
 	}, 20
 }

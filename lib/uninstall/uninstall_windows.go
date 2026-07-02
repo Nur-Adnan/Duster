@@ -53,11 +53,19 @@ func getInstalledAppsFromHive(hive registry.Key, path string, hiveName string) (
 		}
 
 		displayName, _, errName := subKey.GetStringValue("DisplayName")
-		uninstallString, _, errUninst := subKey.GetStringValue("UninstallString")
+		uninstallString, valType, errUninst := subKey.GetStringValue("UninstallString")
 
 		if errName != nil || errUninst != nil || displayName == "" || uninstallString == "" {
 			subKey.Close()
 			continue
+		}
+
+		// REG_EXPAND_SZ values arrive unexpanded (e.g. "%SystemRoot%\...\msiexec.exe");
+		// exec.Command on the literal string always fails, so expand them here.
+		if valType == registry.EXPAND_SZ {
+			if expanded, expErr := registry.ExpandString(uninstallString); expErr == nil {
+				uninstallString = expanded
+			}
 		}
 
 		publisher, _, _ := subKey.GetStringValue("Publisher")

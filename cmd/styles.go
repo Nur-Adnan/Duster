@@ -6,7 +6,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"github.com/Nur-Adnan/duster/internal/logging"
@@ -19,7 +18,6 @@ import (
 
 var (
 	colorDimGray   = lipgloss.Color("#333333") // subtle dark gray separators/empty ticks
-	colorSlate     = lipgloss.Color("#1A1A24")
 	colorWhite     = lipgloss.Color("#E8E8F0")
 	colorMint      = lipgloss.Color("#00FF66") // neon green primary
 	colorAmber     = lipgloss.Color("#FFCC00") // yellow metrics
@@ -28,7 +26,6 @@ var (
 	colorSkyBlue   = lipgloss.Color("#00D4FF") // cyan secondary
 	colorLimeGreen = lipgloss.Color("#00FF66") // neon green success
 	colorSilver    = lipgloss.Color("#A0A0B0") // muted white labels
-	colorBlue      = lipgloss.Color("#00A3FF") // blue process status
 )
 
 // ─────────────────────────────────────────────
@@ -36,32 +33,22 @@ var (
 // ─────────────────────────────────────────────
 
 var (
-	styleLabel    = lipgloss.NewStyle().Foreground(colorSilver)
-	styleValue    = lipgloss.NewStyle().Foreground(colorWhite).Bold(true)
-	styleAccent   = lipgloss.NewStyle().Foreground(colorSkyBlue).Bold(true)
-	styleSuccess  = lipgloss.NewStyle().Foreground(colorLimeGreen).Bold(true)
-	styleWarning  = lipgloss.NewStyle().Foreground(colorAmber).Bold(true)
-	styleDanger   = lipgloss.NewStyle().Foreground(colorCoral).Bold(true)
-	styleMuted    = lipgloss.NewStyle().Foreground(colorDimGray)
-	styleDivider  = lipgloss.NewStyle().Foreground(colorDimGray)
-	styleSelected = lipgloss.NewStyle().Foreground(colorSkyBlue).Bold(true)
-	styleHeader   = lipgloss.NewStyle().Foreground(colorSkyBlue).Bold(true)
-	styleSub      = lipgloss.NewStyle().Foreground(colorSilver)
-	styleNumber   = lipgloss.NewStyle().Foreground(colorDimGray)
-	styleAge      = lipgloss.NewStyle().Foreground(colorAmber)
-	styleTitle    = lipgloss.NewStyle().Foreground(colorSkyBlue).Bold(true)
+	styleLabel   = lipgloss.NewStyle().Foreground(colorSilver)
+	styleValue   = lipgloss.NewStyle().Foreground(colorWhite).Bold(true)
+	styleAccent  = lipgloss.NewStyle().Foreground(colorSkyBlue).Bold(true)
+	styleSuccess = lipgloss.NewStyle().Foreground(colorLimeGreen).Bold(true)
+	styleWarning = lipgloss.NewStyle().Foreground(colorAmber).Bold(true)
+	styleDanger  = lipgloss.NewStyle().Foreground(colorCoral).Bold(true)
+	styleMuted   = lipgloss.NewStyle().Foreground(colorDimGray)
+	styleDivider = lipgloss.NewStyle().Foreground(colorDimGray)
+	styleHeader  = lipgloss.NewStyle().Foreground(colorSkyBlue).Bold(true)
+	styleSub     = lipgloss.NewStyle().Foreground(colorSilver)
+	styleTitle   = lipgloss.NewStyle().Foreground(colorSkyBlue).Bold(true)
 
-	// Re-exported aliases used by older commands to avoid renaming every ref
+	// Aliases still referenced by a few commands
 	boldWhite        = lipgloss.NewStyle().Foreground(colorWhite).Bold(true)
-	grayColorStyle   = lipgloss.NewStyle().Foreground(colorSilver)
 	redColorStyle    = lipgloss.NewStyle().Foreground(colorCoral)
 	yellowColorStyle = lipgloss.NewStyle().Foreground(colorAmber)
-	errorStyle       = lipgloss.NewStyle().Foreground(colorCoral).Bold(true)
-	divStyle         = lipgloss.NewStyle().Foreground(colorDimGray)
-	footerStyle      = lipgloss.NewStyle().Foreground(colorDimGray).PaddingTop(1).PaddingLeft(2)
-	dirStyle         = lipgloss.NewStyle().Foreground(colorSkyBlue)
-	fileStyle        = lipgloss.NewStyle().Foreground(colorSilver)
-	selectedStyle    = lipgloss.NewStyle().Foreground(colorSkyBlue).Bold(true)
 )
 
 // ─────────────────────────────────────────────
@@ -92,55 +79,6 @@ func progressBar(percent float64, width int) string {
 		bracketStyle.Render("]")
 }
 
-// MiniBar — 5-dot mini I/O sparkline (▪▪▪▪□ disk read/write indicator)
-func miniBar(value, maxValue float64, width int) string {
-	if maxValue <= 0 {
-		return styleMuted.Render(strings.Repeat("□", width))
-	}
-	filled := int((value / maxValue) * float64(width))
-	if filled > width {
-		filled = width
-	}
-	empty := width - filled
-	return styleSuccess.Render(strings.Repeat("▪", filled)) +
-		styleMuted.Render(strings.Repeat("□", empty))
-}
-
-// ─────────────────────────────────────────────
-// Status Header — one-liner system overview
-// e.g. "Duster Status  Health ● 92  DESKTOP-NUR · Intel i7 · 16GB · Windows 11"
-// ─────────────────────────────────────────────
-
-func statusHeader(healthScore int, hostname, cpuModel, ramGB, osVer string) string {
-	var healthStyle lipgloss.Style
-	switch {
-	case healthScore >= 80:
-		healthStyle = lipgloss.NewStyle().Foreground(colorLimeGreen).Bold(true)
-	case healthScore >= 50:
-		healthStyle = lipgloss.NewStyle().Foreground(colorAmber).Bold(true)
-	default:
-		healthStyle = lipgloss.NewStyle().Foreground(colorCoral).Bold(true)
-	}
-
-	title := styleTitle.Render("Duster Status")
-	health := healthStyle.Render(fmt.Sprintf("Health ● %d", healthScore))
-	meta := styleSub.Render(fmt.Sprintf("%s · %s · %s · %s", hostname, cpuModel, ramGB, osVer))
-
-	return fmt.Sprintf("%s  %s  %s", title, health, meta)
-}
-
-// ─────────────────────────────────────────────
-// Analyze Header
-// e.g. "Analyze Disk  C:\Users\Nur  |  Total: 156.8GB"
-// ─────────────────────────────────────────────
-
-func analyzeHeader(path, totalSize string) string {
-	title := styleTitle.Render("Analyze Disk")
-	pathStr := styleValue.Render(path)
-	sizeStr := styleAccent.Render(totalSize)
-	return fmt.Sprintf("%s  %s  %s  %s", title, pathStr, styleMuted.Render("|"), sizeStr)
-}
-
 // ─────────────────────────────────────────────
 // Keyboard Hints Footer
 // e.g. "↑↓ Navigate  │  O Open  │  F Show  │  ⌫ Delete  │  L Large files  │  Q Quit"
@@ -153,29 +91,6 @@ func kbHints(pairs ...string) string {
 		parts = append(parts, styleMuted.Render(p))
 	}
 	return strings.Join(parts, sep)
-}
-
-// ─────────────────────────────────────────────
-// Aging Label — ">6mo", ">1yr", ">3yr"
-// ─────────────────────────────────────────────
-
-func getAgeLabel(path string) string {
-	info, err := os.Stat(path)
-	if err != nil {
-		return ""
-	}
-	age := time.Since(info.ModTime())
-	days := age.Hours() / 24
-	switch {
-	case days > 1095: // >3 years
-		return styleAge.Render(">3yr")
-	case days > 365: // >1 year
-		return styleAge.Render(">1yr")
-	case days > 180: // >6 months
-		return styleAge.Render(">6mo")
-	default:
-		return ""
-	}
 }
 
 // ─────────────────────────────────────────────
@@ -234,15 +149,6 @@ func spaceEquivalent(bytes int64) string {
 }
 
 // ─────────────────────────────────────────────
-// explorerProgressBar — kept for analyze compat
-// ─────────────────────────────────────────────
-
-func explorerProgressBar(percent float64, width int) string {
-	return progressBar(percent, width)
-}
-
-// ─────────────────────────────────────────────
-// formatBytes — already defined in utils.go,
 // formatInt helper for commas
 // ─────────────────────────────────────────────
 
@@ -271,10 +177,13 @@ func getDiskFreeBytes(path string) int64 {
 }
 
 // ─────────────────────────────────────────────
-// truncateString (already in analyze.go — shared here for safety)
+// truncateString — rune-safe truncation with ellipsis
 // ─────────────────────────────────────────────
 
 func truncateString(s string, maxLen int) string {
+	if maxLen <= 1 {
+		return "…" // runes[:maxLen-1] would panic on narrow widths
+	}
 	if utf8.RuneCountInString(s) <= maxLen {
 		return s
 	}
@@ -295,41 +204,6 @@ func padRight(s string, width int) string {
 }
 
 // ─────────────────────────────────────────────
-// getParentPath — returns parent directory
-// ─────────────────────────────────────────────
-
-func getParentPath(p string) string {
-	return filepath.Dir(p)
-}
-
-// ─────────────────────────────────────────────
-// Shared TUI Layout Styles
-// Used by optimize, purge, update, remove, installer, doctor
-// to render consistent boxed layouts without per-file duplication.
-// ─────────────────────────────────────────────
-
-var (
-	sharedBoxStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(colorMint).
-			Padding(1, 2).
-			Width(80)
-
-	sharedHeaderStyle = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(colorMint).
-				Padding(0, 1)
-
-	sharedFooterStyle = lipgloss.NewStyle().
-				Foreground(colorDimGray).
-				PaddingTop(1).
-				PaddingLeft(2)
-
-	sharedDividerLine = lipgloss.NewStyle().
-				Foreground(colorDimGray)
-)
-
-// ─────────────────────────────────────────────
 // Shared Text Rendering Helpers
 // Canonical single-source color text renderers
 // used across all TUI subcommands.
@@ -338,9 +212,6 @@ var (
 func cyanText(s string) string  { return lipgloss.NewStyle().Foreground(colorMint).Render(s) }
 func whiteText(s string) string { return styleValue.Render(s) }
 func grayText(s string) string  { return styleMuted.Render(s) }
-func greenText(s string) string { return styleSuccess.Render(s) }
-func redText(s string) string   { return styleDanger.Render(s) }
-func amberText(s string) string { return styleWarning.Render(s) }
 
 // ─────────────────────────────────────────────
 // scheduleDelayedDelete — safely schedule a file deletion
@@ -356,11 +227,17 @@ func amberText(s string) string { return styleWarning.Render(s) }
 // ─────────────────────────────────────────────
 
 func scheduleDelayedDelete(targetPath string) {
+	// The target path is passed through an environment variable rather than as a
+	// command argument. Trailing args after `powershell -Command "<string>"` are
+	// appended to the command *text* (they do not populate $args), so an inline
+	// $args[0] is always $null and any $(...) in the path would be executed. Reading
+	// $env:DUSTER_DELETE_TARGET expands the value literally, and -LiteralPath keeps
+	// wildcard/special characters inert.
 	c := exec.Command(systemExecutable(`WindowsPowerShell\v1.0\powershell.exe`),
 		"-NoProfile", "-WindowStyle", "Hidden", "-Command",
-		"Start-Sleep -Seconds 2; Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $args[0]",
-		targetPath,
+		"Start-Sleep -Seconds 2; Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $env:DUSTER_DELETE_TARGET",
 	)
+	c.Env = append(os.Environ(), "DUSTER_DELETE_TARGET="+targetPath)
 	if err := c.Start(); err != nil {
 		logging.Logger.Error("failed to schedule delayed delete", "target", targetPath, "error", err)
 		return
@@ -407,7 +284,13 @@ func RenderHeaderWithSubtitle(width int, currentCommand, title, subtitle string)
 		if subtitle != "" {
 			sb.WriteString("  " + styleSuccess.Render(subtitle) + "\n")
 		}
-		sb.WriteString("  " + styleMuted.Render(strings.Repeat("─", width-4)) + "\n\n")
+		// Guard against a negative repeat count on very narrow terminals (width 1-4),
+		// which would panic strings.Repeat.
+		divWidth := width - 4
+		if divWidth < 1 {
+			divWidth = 1
+		}
+		sb.WriteString("  " + styleMuted.Render(strings.Repeat("─", divWidth)) + "\n\n")
 		return sb.String()
 	}
 

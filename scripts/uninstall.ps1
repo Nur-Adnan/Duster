@@ -111,18 +111,25 @@ foreach ($RegPath in $RegPaths) {
 }
 
 # == 5. Remove App Data (Optional) =====================================
-$AppDataDir = Join-Path $env:APPDATA "Duster"
+# Duster writes its operation logs to %LOCALAPPDATA%\Duster; %APPDATA%\Duster
+# is checked too in case older builds left anything there.
+$AppDataDirs = @(
+    (Join-Path $env:LOCALAPPDATA "Duster"),
+    (Join-Path $env:APPDATA "Duster")
+) | Where-Object { $_ -and (Test-Path $_) }
 
-if (-not $Silent -and -not $RemoveAppData -and (Test-Path $AppDataDir)) {
-    $RemoveData = Read-Host "  Also remove app data and logs from $AppDataDir? [y/N]"
+if (-not $Silent -and -not $RemoveAppData -and $AppDataDirs.Count -gt 0) {
+    $RemoveData = Read-Host "  Also remove app data and logs from $($AppDataDirs -join ', ')? [y/N]"
     if ($RemoveData -match "^[yY]") { $RemoveAppData = $true }
 }
 
-if ($RemoveAppData -and (Test-Path $AppDataDir)) {
-    Remove-Item $AppDataDir -Recurse -Force
-    Write-OK "Removed app data: $AppDataDir"
-} elseif (Test-Path $AppDataDir) {
-    Write-Info "App data kept at: $AppDataDir (contains operation logs)"
+foreach ($AppDataDir in $AppDataDirs) {
+    if ($RemoveAppData) {
+        Remove-Item $AppDataDir -Recurse -Force
+        Write-OK "Removed app data: $AppDataDir"
+    } else {
+        Write-Info "App data kept at: $AppDataDir (contains operation logs)"
+    }
 }
 
 # == Done ==============================================================

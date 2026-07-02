@@ -71,9 +71,21 @@ func TestIsSystemProtectedPath(t *testing.T) {
 		{"Allowable prefetch subfolder", `C:\Windows\Prefetch\cache`, false},
 		{"Allowable software distribution", `C:\Windows\SoftwareDistribution\Download\package`, false},
 		{"Allowable delivery optimization", `C:\Windows\SoftwareDistribution\DeliveryOptimization\Download\package`, false},
+		{"Allowable delivery optimization root", `C:\Windows\SoftwareDistribution\DeliveryOptimization`, false},
 		{"Allowable user temp", `C:\Users\Default\AppData\Local\Temp\cleanup`, false},
-		{"Allowable Minidump directory", `C:\Windows\Minidump`, true}, // Inside Windows dir, not in allowed exceptions
+		{"Allowable Minidump directory", `C:\Windows\Minidump`, false}, // cleanable by the memdumps category
+		{"Allowable CBS logs", `C:\Windows\Logs\CBS`, false},           // cleanable by the logfiles category
+		{"Allowable DISM logs", `C:\Windows\Logs\DISM`, false},         // cleanable by the logfiles category
+		{"Windows Logs root stays protected", `C:\Windows\Logs`, true},
+		{"Windows Installer stays protected", `C:\Windows\Installer`, true},
+		{"Boot directory", `C:\Boot`, true},
+		{"Boot subdirectory", `C:\Boot\BCD`, true},
+		{"Recovery directory", `C:\Recovery`, true},
+		{"EFI directory", `C:\EFI`, true},
+		{"System Volume Information", `C:\System Volume Information`, true},
+		{"WinRE agent directory", `C:\$WinREAgent`, true},
 		{"Non-windows user path", `C:\Users\TestUser\Desktop\junk`, false},
+		{"Recovery-prefixed user folder is fine", `C:\RecoveryPhotos`, false},
 	}
 
 	// Make sure environment fallbacks map correctly during test

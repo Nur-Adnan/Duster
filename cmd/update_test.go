@@ -152,11 +152,11 @@ func TestIsNewerVersion(t *testing.T) {
 
 func TestExpectedChecksumFor(t *testing.T) {
 	checksums := []byte(
-		"abc123  duster-1.0.2-windows-amd64.zip\n" +
-			"def456  duster-1.0.2-windows-arm64.zip\n" +
+		"abc123  Duster-1.0.2-Portable-x64.zip\n" +
+			"def456  Duster-1.0.2-Portable-arm64.zip\n" +
 			"malformed line\n")
 
-	hash, err := expectedChecksumFor(checksums, "duster-1.0.2-windows-amd64.zip")
+	hash, err := expectedChecksumFor(checksums, "Duster-1.0.2-Portable-x64.zip")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

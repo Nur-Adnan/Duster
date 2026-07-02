@@ -79,7 +79,7 @@ func recyclePathNative(path string) error {
 		return fmt.Errorf("SHFileOperationW native call failed with error code %d", ret)
 	}
 	if op.fAnyOperationsAborted != 0 {
-		return fmt.Errorf("Recycle Bin deletion transaction was aborted")
+		return fmt.Errorf("recycle bin deletion transaction was aborted")
 	}
 
 	return nil
@@ -117,8 +117,10 @@ func emptyRecycleBinNative() error {
 		0,
 		SHERB_NOCONFIRMATION|SHERB_NOPROGRESSUI|SHERB_NOSOUND,
 	)
-	if ret != 0 {
-		// S_OK is 0. If it fails, return error code
+	// S_OK is 0. E_UNEXPECTED (0x8000FFFF) is SHEmptyRecycleBinW's documented
+	// quirk for an already-empty bin — success, not an error.
+	const eUnexpected = 0x8000FFFF
+	if ret != 0 && ret != eUnexpected {
 		return fmt.Errorf("SHEmptyRecycleBinW native call failed with error code %d", ret)
 	}
 	return nil

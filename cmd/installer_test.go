@@ -149,7 +149,7 @@ func TestScanInstallersCrawler(t *testing.T) {
 	_ = os.Chtimes(smallPath, oldTime, oldTime)
 
 	// Run scan command (setting minSize to 10MB to match our 15MB test files)
-	cmdFn := scanInstallersCmd(10, make(chan []installerItem))
+	cmdFn := scanInstallersCmd(10)
 	msg := cmdFn()
 	completeMsg := msg.(installerScanCompleteMsg)
 

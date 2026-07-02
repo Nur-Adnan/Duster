@@ -224,10 +224,20 @@ func fetchLatestRelease() (releaseMetadata, error) {
 	return rel, nil
 }
 
+// archiveArchSuffix maps Go's GOARCH to the suffix used in release archive names.
+func archiveArchSuffix(goarch string) string {
+	if goarch == "amd64" {
+		return "x64"
+	}
+	return goarch // arm64 is spelled the same in both
+}
+
 // selectArchiveAsset picks the release zip matching this OS/architecture.
+// Must stay in sync with the archive names produced by .github/workflows/release.yml
+// (e.g. "Duster-1.0.2-Portable-x64.zip").
 func selectArchiveAsset(rel releaseMetadata) (releaseAsset, error) {
 	version := strings.TrimPrefix(rel.TagName, "v")
-	wanted := fmt.Sprintf("duster-%s-windows-%s.zip", version, runtime.GOARCH)
+	wanted := fmt.Sprintf("Duster-%s-Portable-%s.zip", version, archiveArchSuffix(runtime.GOARCH))
 	for _, a := range rel.Assets {
 		if strings.EqualFold(a.Name, wanted) {
 			return a, nil
@@ -466,7 +476,12 @@ func (m updateModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "q", "ctrl+c", "esc":
+		case "ctrl+c":
+			return m, tea.Quit
+		case "q", "esc", "n", "N":
+			if m.state == stateUpDownloading || m.state == stateUpSwapping {
+				return m, nil // binary swap in flight; footer says do not interrupt
+			}
 			return m, tea.Quit
 		case "enter", "y", "Y":
 			if m.state == stateUpIdle {
@@ -685,6 +700,11 @@ func runHeadlessUpdate() {
 		os.Exit(1)
 	}
 	fmt.Println(string(data))
+
+	// Scripts must be able to detect failures without parsing the JSON.
+	if checkErr != nil || swapErr != nil {
+		os.Exit(1)
+	}
 }
 
 // Local helper style functions — delegate to canonical shared helpers

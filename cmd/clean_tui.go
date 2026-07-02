@@ -12,7 +12,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/Nur-Adnan/duster/lib/elevation"
-	"github.com/Nur-Adnan/duster/lib/fs"
 	"github.com/Nur-Adnan/duster/lib/sysinfo"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -23,23 +22,18 @@ import (
 // ─────────────────────────────────────────────
 
 var (
-	colorBlack      = lipgloss.Color("#000000")
 	colorNeonGreen  = lipgloss.Color("#00FF66") // Neon Green
 	colorMagenta    = lipgloss.Color("#00D4FF") // Cyan (section titles / accents)
 	colorMutedWhite = lipgloss.Color("#E8E8F0") // Muted White text
 	colorCyanAccent = lipgloss.Color("#FFCC00") // Yellow (highlights / metrics)
 	colorMutedGray  = lipgloss.Color("#333333") // Subtle Dark Gray
-	colorBlueStatus = lipgloss.Color("#00A3FF") // Status blue
 
-	styleTuiTitle        = lipgloss.NewStyle().Foreground(colorMagenta).Bold(true)
-	styleTuiAdmin        = lipgloss.NewStyle().Foreground(colorNeonGreen).Bold(true)
-	styleTuiSysInfo      = lipgloss.NewStyle().Foreground(colorMutedWhite)
-	styleTuiWhite        = lipgloss.NewStyle().Foreground(colorMutedWhite)
-	styleTuiMuted        = lipgloss.NewStyle().Foreground(colorMutedGray)
-	styleTuiGreenVal     = lipgloss.NewStyle().Foreground(colorNeonGreen)
-	styleTuiMagentaTitle = lipgloss.NewStyle().Foreground(colorMagenta).Bold(true)
-	styleTuiArrow        = lipgloss.NewStyle().Foreground(colorMagenta)
-	styleTuiHighlight    = lipgloss.NewStyle().Foreground(colorCyanAccent).Bold(true)
+	styleTuiTitle     = lipgloss.NewStyle().Foreground(colorMagenta).Bold(true)
+	styleTuiSysInfo   = lipgloss.NewStyle().Foreground(colorMutedWhite)
+	styleTuiWhite     = lipgloss.NewStyle().Foreground(colorMutedWhite)
+	styleTuiMuted     = lipgloss.NewStyle().Foreground(colorMutedGray)
+	styleTuiGreenVal  = lipgloss.NewStyle().Foreground(colorNeonGreen)
+	styleTuiHighlight = lipgloss.NewStyle().Foreground(colorCyanAccent).Bold(true)
 )
 
 // ─────────────────────────────────────────────
@@ -105,24 +99,16 @@ type cleanModel struct {
 	whitelistText string
 	isAdmin       bool
 
-	// Password Elevation Prompt Fields
-	passwordInput      string
+	// Elevation screen fields
 	verifyingElevation bool
 	elevationError     string
 	ramStats           string
 	diskStats          string
 	uptimeStats        string
 
-	// Safe vs Aggressive Mode
-	cleanupMode string
-
-	// Rollback & Restore Fields
-	rollbackLog         []*operationsLogEntry
-	rollbackCursor      int
-	rollbackProgress    int
-	rollbackVerifying   bool
-	rollbackActiveEntry *operationsLogEntry
-	rollbackStatus      string
+	// Rollback log viewer fields
+	rollbackLog    []*operationsLogEntry
+	rollbackCursor int
 }
 
 // ─────────────────────────────────────────────
@@ -169,12 +155,28 @@ func scanItemCmd(itemIdx int, item *cleanTuiItem) tea.Cmd {
 		var files int
 		var err error
 
-		localAppData := fs.ResolveEnvPath("%LOCALAPPDATA%")
-
 		// Whitelist guard
 		whitelistMap := make(map[string]bool)
 		for _, id := range whitelist {
 			whitelistMap[strings.ToLower(strings.TrimSpace(id))] = true
+		}
+
+		// The --whitelist flag documents getCategories() IDs, but this TUI's
+		// combined "logs" item spans two of them, and users may pass browser
+		// names. Map both vocabularies onto TUI item IDs so protection always
+		// errs on the side of skipping more, never less.
+		aliases := map[string][]string{
+			"chrome":   {"browsers"},
+			"edge":     {"browsers"},
+			"brave":    {"browsers"},
+			"firefox":  {"browsers"},
+			"wer":      {"logs"},
+			"logfiles": {"logs"},
+		}
+		for id := range whitelistMap {
+			for _, tuiID := range aliases[id] {
+				whitelistMap[tuiID] = true
+			}
 		}
 
 		if whitelistMap[item.ID] {
@@ -192,24 +194,6 @@ func scanItemCmd(itemIdx int, item *cleanTuiItem) tea.Cmd {
 		}
 
 		switch item.ID {
-		case "chrome":
-			cat := CleanCategory{
-				ID: "chrome",
-				Paths: []string{
-					filepath.Join(localAppData, `Google\Chrome\User Data\Default\Cache\Cache_Data`),
-					filepath.Join(localAppData, `Google\Chrome\User Data\Default\Code Cache`),
-				},
-			}
-			size, files, err = scanDirCategory(cat)
-		case "edge":
-			cat := CleanCategory{
-				ID: "edge",
-				Paths: []string{
-					filepath.Join(localAppData, `Microsoft\Edge\User Data\Default\Cache\Cache_Data`),
-					filepath.Join(localAppData, `Microsoft\Edge\User Data\Default\Code Cache`),
-				},
-			}
-			size, files, err = scanDirCategory(cat)
 		case "logs":
 			// Scan both "wer" and "logfiles" and sum them up!
 			var size1, size2 int64
@@ -293,27 +277,7 @@ func cleanItemCmd(itemIdx int, item *cleanTuiItem, isSimulation bool) tea.Cmd {
 		var filesFreed int
 		var err error
 
-		localAppData := fs.ResolveEnvPath("%LOCALAPPDATA%")
-
 		switch item.ID {
-		case "chrome":
-			cat := CleanCategory{
-				ID: "chrome",
-				Paths: []string{
-					filepath.Join(localAppData, `Google\Chrome\User Data\Default\Cache\Cache_Data`),
-					filepath.Join(localAppData, `Google\Chrome\User Data\Default\Code Cache`),
-				},
-			}
-			sizeFreed, filesFreed, err = cleanDirCategory(cat)
-		case "edge":
-			cat := CleanCategory{
-				ID: "edge",
-				Paths: []string{
-					filepath.Join(localAppData, `Microsoft\Edge\User Data\Default\Cache\Cache_Data`),
-					filepath.Join(localAppData, `Microsoft\Edge\User Data\Default\Code Cache`),
-				},
-			}
-			sizeFreed, filesFreed, err = cleanDirCategory(cat)
 		case "logs":
 			var size1, size2 int64
 			var files1, files2 int
@@ -389,17 +353,18 @@ func initialCleanModel(startDryRun bool) cleanModel {
 	}
 
 	m := cleanModel{
-		state:       startState,
-		dryRun:      startDryRun,
-		startTime:   time.Now(),
-		cursor:      0,
-		cleanupMode: "safe",
+		state:     startState,
+		dryRun:    startDryRun,
+		startTime: time.Now(),
+		cursor:    0,
 		items: []*cleanTuiItem{
 			{ID: "temp", Name: "Windows Temp Files", Checked: true, Status: "scanning", Scanning: true, Progress: 0.0},
 			{ID: "prefetch", Name: "Prefetch Files", Checked: true, Status: "scanning", Scanning: true, Progress: 0.0},
 			{ID: "update", Name: "Windows Update Cache", Checked: true, Status: "scanning", Scanning: true, Progress: 0.0},
-			{ID: "chrome", Name: "Browser Cache (Chrome)", Checked: true, Status: "scanning", Scanning: true, Progress: 0.0},
-			{ID: "edge", Name: "Browser Cache (Edge)", Checked: true, Status: "scanning", Scanning: true, Progress: 0.0},
+			// One item backed by the canonical "browsers" category so the TUI
+			// cleans the same set as CLI mode (Chrome, Edge, Brave, Firefox);
+			// the old hardcoded chrome/edge items silently skipped the rest.
+			{ID: "browsers", Name: "Browser Caches", Checked: true, Status: "scanning", Scanning: true, Progress: 0.0},
 			{ID: "thumbs", Name: "Thumbnail Cache", Checked: true, Status: "scanning", Scanning: true, Progress: 0.0},
 			{ID: "delivery_opt", Name: "Delivery Optimization Cache", Checked: true, Status: "scanning", Scanning: true, Progress: 0.0},
 			{ID: "dns", Name: "DNS Cache", Checked: true, Status: "scanning", Scanning: true, Progress: 0.0},
@@ -418,7 +383,7 @@ func initialCleanModel(startDryRun bool) cleanModel {
 	freeBytes := getDiskFreeBytes(os.TempDir())
 	freeSpaceStr := formatBytes(freeBytes)
 
-	wlText := fmt.Sprintf("%d core patterns active", 28+len(whitelist))
+	wlText := fmt.Sprintf("%d protected paths, %d whitelisted categories", len(getCategories()), len(whitelist))
 
 	m.osVersion = osVer
 	m.freeSpace = freeSpaceStr
@@ -483,25 +448,18 @@ type elevationVerificationMsg struct {
 	Err     string
 }
 
-func verifyElevationCmd(_ string) tea.Cmd {
+func verifyElevationCmd() tea.Cmd {
 	return func() tea.Msg {
 		err := elevation.RequestElevation()
 		if err != nil {
 			return elevationVerificationMsg{Success: false, Err: fmt.Sprintf("Elevation failed: %v", err)}
 		}
 		// A new elevated process has been launched via ShellExecuteW "runas".
-		// This (non-elevated) process must exit so only the elevated instance runs.
-		os.Exit(0)
-		return nil
+		// Report success so Update can quit cleanly — never os.Exit here, which
+		// would skip Bubble Tea's terminal restore and leave the console in
+		// alt-screen raw mode.
+		return elevationVerificationMsg{Success: true}
 	}
-}
-
-type rollbackProgressMsg struct{}
-
-func rollbackTickCmd() tea.Cmd {
-	return tea.Tick(50*time.Millisecond, func(t time.Time) tea.Msg {
-		return rollbackProgressMsg{}
-	})
 }
 
 func (m cleanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -512,11 +470,13 @@ func (m cleanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case timerTickMsg:
+		// Keep the tick chain alive across all states — it previously died on
+		// the first tick in Ready and never re-armed, freezing "Time taken"
+		// at the scan duration for the whole cleaning phase.
 		if m.state == cleanStateScanning || m.state == cleanStateCleaning {
 			m.duration = time.Since(m.startTime)
-			return m, timerTickCmd()
 		}
-		return m, nil
+		return m, timerTickCmd()
 
 	case animateTickMsg:
 		if m.state == cleanStateScanning {
@@ -553,24 +513,11 @@ func (m cleanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case elevationVerificationMsg:
 		m.verifyingElevation = false
 		if msg.Success {
-			m.state = cleanStateScanning
-			m.startTime = time.Now()
-			// Queue all scans
-			var cmds []tea.Cmd
-			cmds = append(cmds, timerTickCmd(), animateTickCmd())
-			for iIdx, item := range m.items {
-				item.Status = "scanning"
-				item.Scanning = true
-				item.Progress = 0.0
-				cmds = append(cmds, scanItemCmd(iIdx, item))
-			}
-			return m, tea.Batch(cmds...)
-		} else {
-			m.elevationError = msg.Err
-			return m, nil
+			// The elevated instance now owns the session; this non-elevated
+			// process exits after Bubble Tea restores the terminal.
+			return m, tea.Quit
 		}
-
-	case rollbackProgressMsg:
+		m.elevationError = msg.Err
 		return m, nil
 
 	case cleanScanProgressMsg:
@@ -629,9 +576,12 @@ func (m cleanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			nextItem.Status = "cleaning"
 			nextItem.Progress = 0.0
 			m.activeItemIdx = nextIdx
-		} else {
-			m.state = cleanStateDone
+			// Re-arm the animation chain; the tick that reached 100% returned
+			// cleanItemCmd instead of a new tick, so without this the next item
+			// would never animate or delete (the whole run would stall here).
+			return m, animateTickCmd()
 		}
+		m.state = cleanStateDone
 		return m, nil
 
 	case tea.KeyMsg:
@@ -653,7 +603,7 @@ func (m cleanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if !m.verifyingElevation {
 					m.verifyingElevation = true
 					m.elevationError = ""
-					return m, verifyElevationCmd("")
+					return m, verifyElevationCmd()
 				}
 			case "esc":
 				return m, tea.Quit
@@ -688,7 +638,9 @@ func (m cleanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.cursor++
 				}
 
-			case "space":
+			case " ", "space":
+				// Bubble Tea reports the space key as " ", never "space"; the
+				// old match made category deselection impossible.
 				if m.cursor >= 0 && m.cursor < len(m.items) {
 					item := m.items[m.cursor]
 					item.Checked = !item.Checked
@@ -696,7 +648,9 @@ func (m cleanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 			case "enter":
-				m.dryRun = false
+				// Honor the launch flag: `clean --dry-run` seeds m.dryRun=true and
+				// Enter must respect it. Users can still force a real clean with "c"
+				// or an explicit dry run with "d".
 				m.startCleanup()
 				nextIdx, nextItem := m.getNextItemToClean()
 				if nextItem != nil {
@@ -708,26 +662,9 @@ func (m cleanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.state = cleanStateDone
 				}
 
-			case "m", "M":
-				if m.cleanupMode == "safe" {
-					m.cleanupMode = "aggressive"
-					for _, item := range m.items {
-						item.Checked = true
-					}
-				} else {
-					m.cleanupMode = "safe"
-					for _, item := range m.items {
-						item.Checked = true
-					}
-				}
-				m.recalculateReclaim()
-
 			case "v", "V":
 				m.rollbackLog = readOperationsLog()
 				m.rollbackCursor = 0
-				m.rollbackProgress = 0
-				m.rollbackVerifying = false
-				m.rollbackStatus = ""
 				m.state = cleanStateRollback
 
 			case "d", "D":
@@ -752,6 +689,7 @@ func (m cleanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.totalReclaim = 0
 				m.totalReclaimF = 0
 				m.cursor = 0
+				m.startTime = time.Now()
 
 				var cmds []tea.Cmd
 				cmds = append(cmds, timerTickCmd(), animateTickCmd())
@@ -833,7 +771,7 @@ func (m *cleanModel) startCleanup() {
 
 func (m *cleanModel) getNextItemToClean() (int, *cleanTuiItem) {
 	for iIdx, item := range m.items {
-		if item.Checked && item.Status != "done" && item.Status != "cleaning" && item.Status != "deleting" && item.Status != "skipped" && item.Status != "adminonly" && item.Status != "noaccess" {
+		if item.Checked && item.Status != "done" && item.Status != "cleaning" && item.Status != "deleting" && item.Status != "skipped" && item.Status != "adminonly" && item.Status != "noaccess" && item.Status != "failed" {
 			return iIdx, item
 		}
 	}
@@ -1058,6 +996,7 @@ func (m cleanModel) View() string {
 			formatShortcut("Enter", "Clean"),
 			formatShortcut("D", "Dry Run"),
 			formatShortcut("R", "Rescan"),
+			formatShortcut("V", "History"),
 			formatShortcut("B", "Back to menu"),
 			formatShortcut("Q", "Quit"),
 		}
@@ -1076,6 +1015,10 @@ func (m cleanModel) View() string {
 // ─────────────────────────────────────────────
 
 func (m cleanModel) renderElevationScreen(width int) string {
+	if width < 24 {
+		width = 24 // strings.Repeat(…, width-4) must never go negative
+	}
+
 	var sb strings.Builder
 	sb.WriteString("\n")
 	sb.WriteString("  " + styleTuiTitle.Render("Optimize and Check") + "\n\n")
@@ -1093,15 +1036,14 @@ func (m cleanModel) renderElevationScreen(width int) string {
 	sb.WriteString(fmt.Sprintf("  %s%s\n\n", wlLBL, styleTuiWhite.Render(m.whitelistText)))
 
 	arrowIcon := "➤"
-	sb.WriteString("  " + styleTuiHighlight.Render(arrowIcon+" System optimization requires admin access") + "\n")
+	sb.WriteString("  " + styleTuiHighlight.Render(arrowIcon+" Deep cleaning requires administrator access") + "\n")
 
+	// Elevation happens through the standard Windows UAC dialog — Duster
+	// never reads a password itself, so never render a password prompt.
 	if m.verifyingElevation {
-		sb.WriteString("  " + styleTuiHighlight.Render(arrowIcon+" Verifying credentials... ") + styleTuiGreenVal.Render("[░░░░░░░░░░]") + "\n")
+		sb.WriteString("  " + styleTuiHighlight.Render(arrowIcon+" Waiting for Windows UAC approval... ") + styleTuiGreenVal.Render("[░░░░░░░░░░]") + "\n")
 	} else {
-		masked := strings.Repeat("*", len(m.passwordInput))
-		cursor := styleTuiHighlight.Render("█")
-
-		sb.WriteString("  " + styleTuiWhite.Render(arrowIcon+" Password: ") + styleTuiWhite.Render(masked) + cursor + "\n")
+		sb.WriteString("  " + styleTuiWhite.Render(arrowIcon+" Press Enter to relaunch elevated (a Windows UAC prompt will appear)") + "\n")
 	}
 
 	if m.elevationError != "" {
@@ -1115,9 +1057,8 @@ func (m cleanModel) renderElevationScreen(width int) string {
 	divStyle := lipgloss.NewStyle().Foreground(colorMutedGray)
 
 	hints := []string{
-		keyStyle.Render("Enter") + " " + lblStyle.Render("Submit"),
+		keyStyle.Render("Enter") + " " + lblStyle.Render("Elevate"),
 		keyStyle.Render("Esc") + " " + lblStyle.Render("Cancel"),
-		keyStyle.Render("H") + " " + lblStyle.Render("Help"),
 	}
 	hintsStr := strings.Join(hints, divStyle.Render("  │  "))
 	hintsLen := utf8.RuneCountInString(stripAnsi(hintsStr))
@@ -1128,7 +1069,7 @@ func (m cleanModel) renderElevationScreen(width int) string {
 	sb.WriteString("\n" + styleTuiMuted.Render(strings.Repeat("─", width-4)) + "\n")
 	sb.WriteString(hintsPadding + hintsStr + "\n\n")
 
-	helpTip := "Your password is used only for this session and is never stored."
+	helpTip := "Elevation uses the standard Windows UAC prompt; Duster never sees your password."
 	tipLen := len(helpTip)
 	tipPadding := ""
 	if width > tipLen {
@@ -1140,31 +1081,21 @@ func (m cleanModel) renderElevationScreen(width int) string {
 }
 
 func (m cleanModel) renderRollbackScreen(width int) string {
+	if width < 50 {
+		width = 50 // guards strings.Repeat(…, width-4) and truncateString(…, width-45)
+	}
+
 	var sb strings.Builder
 	sb.WriteString("\n")
-	sb.WriteString("  " + styleTuiTitle.Render("Rollback & Restore Preview") + "\n\n")
-
-	if m.rollbackVerifying {
-		sb.WriteString("  " + styleTuiHighlight.Render("⚙ Restoring: ") + styleTuiWhite.Render(m.rollbackActiveEntry.Target) + "\n")
-		filled := m.rollbackProgress / 10
-		empty := 10 - filled
-		bar := styleTuiGreenVal.Render(strings.Repeat("█", filled)) + styleTuiMuted.Render(strings.Repeat("░", empty))
-		sb.WriteString(fmt.Sprintf("  Progress: [%s] %d%%\n\n", bar, m.rollbackProgress))
-		sb.WriteString("  " + styleTuiHighlight.Render(m.rollbackStatus) + "\n\n")
-
-		sb.WriteString("\n\n\n\n\n\n\n\n\n\n")
-		return sb.String()
-	}
-
-	if m.rollbackStatus != "" {
-		sb.WriteString("  " + styleTuiAdmin.Render(m.rollbackStatus) + "\n\n")
-	}
+	sb.WriteString("  " + styleTuiTitle.Render("Operations History") + "\n\n")
 
 	if len(m.rollbackLog) == 0 {
 		sb.WriteString("  " + styleTuiMuted.Render("No recent destructive operations found in log file.") + "\n")
 		sb.WriteString("  " + styleTuiMuted.Render("Operations are logged to %LOCALAPPDATA%\\Duster\\operations.log") + "\n\n")
 	} else {
-		sb.WriteString("  Select a past cleanup operation and press " + styleTuiHighlight.Render("Enter") + " to simulate rollback/restore:\n\n")
+		// Read-only view. Deleted cache files cannot be restored, so this
+		// screen must never advertise a rollback action it can't perform.
+		sb.WriteString("  " + styleTuiMuted.Render("Read-only audit trail of past cleanup operations:") + "\n\n")
 
 		sb.WriteString("  " + styleTuiHighlight.Render("Timestamp") + "            │ " +
 			styleTuiHighlight.Render("Action") + " │ " +
@@ -1222,8 +1153,7 @@ func (m cleanModel) renderRollbackScreen(width int) string {
 	divStyle := lipgloss.NewStyle().Foreground(colorMutedGray)
 
 	hints := []string{
-		keyStyle.Render("Enter") + " " + lblStyle.Render("Simulate Restore"),
-		keyStyle.Render("Esc / B") + " " + lblStyle.Render("Back to List"),
+		keyStyle.Render("Esc / B") + " " + lblStyle.Render("Back"),
 	}
 	hintsStr := strings.Join(hints, divStyle.Render("  │  "))
 	hintsLen := utf8.RuneCountInString(stripAnsi(hintsStr))

@@ -14,7 +14,11 @@ var (
 	procGetWindowsDirectory = kernel32.NewProc("GetWindowsDirectoryW")
 )
 
-const FILE_ATTRIBUTE_OFFLINE = 0x1000
+const (
+	FILE_ATTRIBUTE_OFFLINE               = 0x1000
+	FILE_ATTRIBUTE_RECALL_ON_OPEN        = 0x40000
+	FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS = 0x400000
+)
 
 // GetSecureSystemDirectory queries the kernel32 DLL directly to get the true, immutable system32 path.
 // This completely circumvents %WINDIR% or %SYSTEMROOT% environment manipulation attempts.
@@ -46,6 +50,8 @@ func GetSecureWindowsDirectory() (string, error) {
 
 // IsOfflineFile checks if a file is stored offline (OneDrive cloud storage placeholder)
 // to prevent WalkDir from triggering automatic high-latency hydration/download.
+// Modern cloud sync engines mark placeholders with the RECALL_* attributes, not
+// the deprecated OFFLINE bit — all three must be checked or the guard is dead.
 func IsOfflineFile(path string) bool {
 	pointer, err := syscall.UTF16PtrFromString(path)
 	if err != nil {
@@ -55,5 +61,6 @@ func IsOfflineFile(path string) bool {
 	if err != nil {
 		return false
 	}
-	return attrs&FILE_ATTRIBUTE_OFFLINE != 0
+	const placeholderMask = FILE_ATTRIBUTE_OFFLINE | FILE_ATTRIBUTE_RECALL_ON_OPEN | FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS
+	return attrs&placeholderMask != 0
 }

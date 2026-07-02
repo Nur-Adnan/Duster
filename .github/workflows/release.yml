@@ -25,6 +25,9 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          # workflow_dispatch must test the TAGGED tree, not main HEAD
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref }}
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -61,6 +64,10 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          # workflow_dispatch must build the TAGGED tree — building main HEAD
+          # here published binaries whose source differed from the tag.
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref }}
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -71,9 +78,13 @@ jobs:
 
       - name: Extract Version from Tag
         id: version
+        env:
+          # Pass via env, never interpolate ${{ inputs.* }} into run: text —
+          # a crafted tag_name would execute in the runner shell.
+          INPUT_TAG: ${{ inputs.tag_name }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            TAG="${{ inputs.tag_name }}"
+            TAG="$INPUT_TAG"
           else
             TAG="${GITHUB_REF_NAME}"
           fi
@@ -116,9 +127,11 @@ jobs:
 
       - name: Extract Version from Tag
         id: version
+        env:
+          INPUT_TAG: ${{ inputs.tag_name }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            TAG="${{ inputs.tag_name }}"
+            TAG="$INPUT_TAG"
           else
             TAG="${GITHUB_REF_NAME}"
           fi
@@ -177,7 +190,7 @@ jobs:
           echo "$CHANGELOG" > dist/CHANGELOG.txt
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}
           files: |
@@ -254,13 +267,17 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref }}
 
       - name: Extract Version from Tag
         id: version
         shell: bash
+        env:
+          INPUT_TAG: ${{ inputs.tag_name }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            TAG="${{ inputs.tag_name }}"
+            TAG="$INPUT_TAG"
           else
             TAG="${GITHUB_REF_NAME}"
           fi
@@ -292,9 +309,21 @@ jobs:
           retention-days: 5
 
       - name: Upload Installer to Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}
           files: dist/installer/Duster-Setup-*.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Append Installer Checksum to Release Checksums
+        # The setup exe is aimed at the least technical users; it must not be
+        # the one release artifact with no entry in checksums-sha256.txt.
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          gh release download "$TAG" --pattern checksums-sha256.txt --output checksums-sha256.txt
+          (cd dist/installer && sha256sum Duster-Setup-*.exe) >> checksums-sha256.txt
+          gh release upload "$TAG" checksums-sha256.txt --clobber

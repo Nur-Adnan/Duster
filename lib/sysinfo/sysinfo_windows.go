@@ -25,6 +25,7 @@ var (
 	procGetTickCount64       = kernel32.NewProc("GetTickCount64")
 	procGetDiskFreeSpaceExW  = kernel32.NewProc("GetDiskFreeSpaceExW")
 	procGetLogicalDrives     = kernel32.NewProc("GetLogicalDrives")
+	procGetDriveTypeW        = kernel32.NewProc("GetDriveTypeW")
 	procGetComputerNameExW   = kernel32.NewProc("GetComputerNameExW")
 
 	advapi32             = syscall.NewLazyDLL("advapi32.dll")
@@ -63,9 +64,13 @@ var (
 	lastTime      time.Time
 )
 
-func init() {
+var ioBaselineOnce sync.Once
+
+// initIOBaseline establishes the first I/O counter snapshot. It runs lazily on
+// the first GetSystemStats call — as a package init() it hit Windows
+// performance counters on every command invocation, including `du --help`.
+func initIOBaseline() {
 	lastTime = time.Now()
-	// Fetch initial values to establish baseline delta rates
 	if ioNets, err := net.IOCounters(false); err == nil && len(ioNets) > 0 {
 		lastNetDown = ioNets[0].BytesRecv
 		lastNetUp = ioNets[0].BytesSent
@@ -80,6 +85,8 @@ func init() {
 
 // GetSystemStats returns the populated native Windows system metrics.
 func GetSystemStats() (SystemStats, error) {
+	ioBaselineOnce.Do(initIOBaseline)
+
 	stats := SystemStats{
 		HealthScore: 100,
 	}
@@ -111,20 +118,27 @@ func GetSystemStats() (SystemStats, error) {
 	var powerInfo SYSTEM_POWER_STATUS
 	ret, _, _ = procGetSystemPowerStatus.Call(uintptr(unsafe.Pointer(&powerInfo)))
 	if ret != 0 {
-		stats.BatteryLevel = int(powerInfo.BatteryLifePercent)
-		if stats.BatteryLevel == 255 {
-			stats.BatteryLevel = 100 // Default fallback when no battery is found (e.g. Desktops)
+		// BatteryFlag bit 128 = NO_SYSTEM_BATTERY, percent 255 = unknown.
+		// Desktops must not masquerade as a laptop "Charging at 100%".
+		noBattery := powerInfo.BatteryFlag&128 != 0 || powerInfo.BatteryLifePercent == 255
+		if noBattery {
+			stats.BatteryLevel = 100
+			stats.BatteryStatus = "No Battery"
+			stats.BatteryHealth = "N/A"
+		} else {
+			stats.BatteryLevel = int(powerInfo.BatteryLifePercent)
+			switch {
+			case powerInfo.BatteryFlag&8 != 0: // charging bit
+				stats.BatteryStatus = "Charging"
+			case powerInfo.ACLineStatus == 1:
+				stats.BatteryStatus = "Plugged In"
+			case powerInfo.ACLineStatus == 0:
+				stats.BatteryStatus = "Discharging"
+			default:
+				stats.BatteryStatus = "Unknown"
+			}
+			stats.BatteryHealth = "Normal"
 		}
-
-		switch powerInfo.ACLineStatus {
-		case 0:
-			stats.BatteryStatus = "Discharging"
-		case 1:
-			stats.BatteryStatus = "Charging"
-		default:
-			stats.BatteryStatus = "Plugged In"
-		}
-		stats.BatteryHealth = "Normal"
 	}
 
 	// 5. Native Windows Disk scanning via GetLogicalDrives & GetDiskFreeSpaceExW
@@ -328,6 +342,11 @@ func getWindowsDisks() []DiskInfo {
 	ret, _, _ := procGetLogicalDrives.Call()
 	driveMask := uint32(ret)
 
+	const (
+		driveRemovable = 2
+		driveFixed     = 3
+	)
+
 	for i := 0; i < 26; i++ {
 		if (driveMask & (1 << i)) != 0 {
 			driveLetter := string(rune('A'+i)) + `:\`
@@ -337,8 +356,17 @@ func getWindowsDisks() []DiskInfo {
 				continue
 			}
 
-			// Call native GetDiskFreeSpaceExW
 			drivePtr, _ := syscall.UTF16PtrFromString(driveLetter)
+
+			// Filter to local disks. Querying free space on a DRIVE_REMOTE
+			// with an unreachable server blocks for the whole SMB timeout on
+			// every stats tick; CD-ROM drives are not storage to report.
+			driveType, _, _ := procGetDriveTypeW.Call(uintptr(unsafe.Pointer(drivePtr)))
+			if driveType != driveFixed && driveType != driveRemovable {
+				continue
+			}
+
+			// Call native GetDiskFreeSpaceExW
 			var freeAvail, totalBytes, totalFree uint64
 
 			callRet, _, _ := procGetDiskFreeSpaceExW.Call(
@@ -353,7 +381,9 @@ func getWindowsDisks() []DiskInfo {
 					Drive: driveLetter,
 					Total: totalBytes,
 					Free:  freeAvail,
-					Used:  totalBytes - freeAvail,
+					// totalFree is the volume-wide figure; freeAvail is scoped
+					// to the caller's disk quota and overstates usage.
+					Used: totalBytes - totalFree,
 				})
 			}
 		}

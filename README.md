@@ -49,7 +49,7 @@ du analyze .   # Interactive disk explorer
 | `du update` | Self-update with SHA-256 verification |
 | `du remove` | Uninstall Duster and delete all its config/logs |
 
-> Every command supports `--json` for scripting and `--dry-run` for safe previews.
+> Most commands support `--json` for scripting, and every destructive command supports `--dry-run` for safe previews.
 
 ---
 
@@ -134,18 +134,11 @@ irm https://raw.githubusercontent.com/Nur-Adnan/Duster/main/scripts/install.ps1 
 powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/Nur-Adnan/Duster/main/scripts/install.ps1 | iex"
 ```
 
-### Scoop
+### Scoop / winget
 
-```powershell
-scoop bucket add duster https://github.com/Nur-Adnan/scoop-duster
-scoop install duster
-```
-
-### winget
-
-```powershell
-winget install NurAdnan.Duster
-```
+> Not yet published — the Scoop bucket and winget package are planned.
+> Manifests are staged in [scripts/manifests/](scripts/manifests/).
+> Use the PowerShell one-liner above until then.
 
 ### Manual Download
 

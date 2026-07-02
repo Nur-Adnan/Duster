@@ -44,14 +44,16 @@ param(
     [string]  $Version    = "",
     [bool]    $AddToPath  = $true,
     [switch]  $Silent,
-    [switch]  $Force
+    [switch]  $Force,
+    [switch]  $SkipChecksum
 )
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference    = "SilentlyContinue"   # Speeds up Invoke-WebRequest dramatically
 
-# Guarantee TLS 1.2 is enabled for all secure REST and download queries (critical for GitHub API/CDN on older OS versions)
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+# Guarantee TLS 1.2 is enabled for all secure REST and download queries (critical for GitHub API/CDN on older OS versions).
+# OR it into the existing protocol set so TLS 1.3 stays available where the OS supports it.
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
 # == Constants =========================================================
 $RepoOwner       = "Nur-Adnan"
@@ -122,36 +124,35 @@ $IsDefaultLocalAppData = (-not $UserSpecifiedDir) -and ($InstallDir -like "*$env
 
 function Test-WDACBlocked {
     param([string]$Dir)
-    # Check if WDAC / AppLocker policies are active by querying the AppLocker service
-    try {
-        $appidSvc = Get-Service -Name "AppIDSvc" -ErrorAction SilentlyContinue
-        if ($appidSvc -and $appidSvc.Status -eq "Running") {
-            return $true
-        }
-    } catch { }
+    # Only signals that reliably mean "EXEs from user-writable paths will be
+    # blocked" may return $true here. False positives silently hijack the
+    # documented per-user install into Program Files + a UAC prompt.
+    # (A merely *running* AppIDSvc service is NOT such a signal — it has other
+    # trigger-start duties — so it is deliberately not checked.)
 
-    # Additional check: query AppLocker effective policy via COM
+    # AppLocker: only ENFORCED Exe rule collections count; audit-only policies
+    # log but do not block.
     try {
         $appLockerPolicy = Get-AppLockerPolicy -Effective -ErrorAction SilentlyContinue
-        if ($appLockerPolicy -and $appLockerPolicy.RuleCollections.Count -gt 0) {
-            # Check if there are explicit EXE deny rules for user-writable paths
+        if ($appLockerPolicy) {
             foreach ($collection in $appLockerPolicy.RuleCollections) {
-                if ($collection.RuleCollectionType -eq "Exe") {
+                if ($collection.RuleCollectionType -eq "Exe" -and "$($collection.EnforcementMode)" -eq "Enabled") {
                     return $true
                 }
             }
         }
     } catch { }
 
-    # Heuristic check: see if WDAC CI policy files exist
-    $ciPolicyPaths = @(
-        "$env:SystemRoot\System32\CodeIntegrity\SIPolicy.p7b",
-        "$env:SystemRoot\System32\CodeIntegrity\CiPolicies\Active"
-    )
-    foreach ($p in $ciPolicyPaths) {
-        if (Test-Path $p) {
-            return $true
-        }
+    # WDAC: a deployed legacy single-policy file is a strong signal
+    if (Test-Path "$env:SystemRoot\System32\CodeIntegrity\SIPolicy.p7b") {
+        return $true
+    }
+
+    # WDAC multi-policy: the Active directory EXISTS on stock Windows 11 —
+    # only treat it as a signal when it actually contains policy files.
+    $activePolicies = Get-ChildItem "$env:SystemRoot\System32\CodeIntegrity\CiPolicies\Active" -Filter "*.cip" -ErrorAction SilentlyContinue
+    if ($activePolicies -and @($activePolicies).Count -gt 0) {
+        return $true
     }
 
     return $false
@@ -176,12 +177,19 @@ if ($IsDefaultLocalAppData) {
         # If not already admin, request elevation
         if (-not (Test-IsAdminSession)) {
             Write-Step "Requesting administrator privileges for Program Files install..."
+
+            # Forward every user-supplied parameter — dropping any of them
+            # (e.g. a pinned -Version) silently changes what gets installed.
+            $forwardArgs = " -InstallDir `"$InstallDir`""
+            if ($Version -ne "") { $forwardArgs += " -Version `"$Version`"" }
+            if ($PSBoundParameters.ContainsKey('AddToPath')) { $forwardArgs += " -AddToPath `$$AddToPath" }
+            if ($Silent) { $forwardArgs += " -Silent" }
+            if ($Force) { $forwardArgs += " -Force" }
+            if ($SkipChecksum) { $forwardArgs += " -SkipChecksum" }
+
             $scriptPath = $MyInvocation.MyCommand.Path
             if ($scriptPath) {
-                $elevateArgs = "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`" -InstallDir `"$InstallDir`""
-                if ($Version -ne "") { $elevateArgs += " -Version `"$Version`"" }
-                if ($Silent) { $elevateArgs += " -Silent" }
-                if ($Force) { $elevateArgs += " -Force" }
+                $elevateArgs = "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`"$forwardArgs"
                 try {
                     Start-Process powershell.exe -Verb RunAs -ArgumentList $elevateArgs -Wait
                     Write-OK "Elevated install completed."
@@ -190,13 +198,14 @@ if ($IsDefaultLocalAppData) {
                     Write-Fail "Administrator privileges are required to install to $InstallDir.`n  Please run PowerShell as Administrator and try again.`n`n  Or install to a user-writable location:`n    .\\install.ps1 -InstallDir `"$env:LOCALAPPDATA\\Duster`"`n`n  Note: This may still be blocked by your organization's security policy."
                 }
             } else {
-                # Piped script (irm | iex) — auto-elevate by re-downloading elevated
+                # Piped script (irm | iex) — auto-elevate by re-downloading to a
+                # temp file so the same parameters can be forwarded to it.
                 Write-Step "Auto-elevating: spawning elevated installer..."
                 $redownloadUrl = "https://raw.githubusercontent.com/Nur-Adnan/Duster/main/scripts/install.ps1"
-                # Build the inner command that the elevated session will run.
-                # The re-downloaded script will detect WDAC again, but Test-IsAdminSession
-                # will return $true in the elevated session, so it proceeds to install.
-                $innerCmd = "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; irm $redownloadUrl | iex"
+                $innerCmd = "[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12; " +
+                    "`$f = Join-Path `$env:TEMP 'duster-install-elevated.ps1'; " +
+                    "Invoke-WebRequest -Uri '$redownloadUrl' -OutFile `$f -UseBasicParsing -TimeoutSec 120; " +
+                    "& `$f$forwardArgs"
                 try {
                     Start-Process powershell.exe -Verb RunAs -ArgumentList @(
                         "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", $innerCmd
@@ -243,7 +252,7 @@ if ($Version -eq "") {
     # Strategy 1: Try /releases/latest API endpoint
     try {
         $Headers = @{ "User-Agent" = "DusterInstaller/1.0" }
-        $Release = Invoke-RestMethod "$ApiBase/releases/latest" -Headers $Headers
+        $Release = Invoke-RestMethod "$ApiBase/releases/latest" -Headers $Headers -TimeoutSec 30
         $Version = $Release.tag_name -replace "^v", ""
         $TagName = $Release.tag_name
         $ReleaseAssetsAvailable = ($Release.assets.Count -gt 0)
@@ -255,7 +264,7 @@ if ($Version -eq "") {
         # Strategy 2: Try /tags API endpoint to find latest tag
         try {
             $Headers = @{ "User-Agent" = "DusterInstaller/1.0" }
-            $Tags = Invoke-RestMethod "$ApiBase/tags?per_page=10" -Headers $Headers
+            $Tags = Invoke-RestMethod "$ApiBase/tags?per_page=10" -Headers $Headers -TimeoutSec 30
             if ($Tags.Count -gt 0) {
                 # Tags are returned newest-first; find the first semver-like tag
                 foreach ($Tag in $Tags) {
@@ -287,7 +296,7 @@ if ($Version -eq "") {
 if (-not $ReleaseAssetsAvailable) {
     try {
         $Headers = @{ "User-Agent" = "DusterInstaller/1.0" }
-        $SpecificRelease = Invoke-RestMethod "$ApiBase/releases/tags/$TagName" -Headers $Headers
+        $SpecificRelease = Invoke-RestMethod "$ApiBase/releases/tags/$TagName" -Headers $Headers -TimeoutSec 30
         $ReleaseAssetsAvailable = ($SpecificRelease.assets.Count -gt 0)
     } catch {
         $ReleaseAssetsAvailable = $false
@@ -335,7 +344,9 @@ if (Test-Path $ExePath) {
 Write-Step "Downloading Duster $Version..."
 
 $DownloadBase   = "https://github.com/$RepoOwner/$RepoName/releases/download/$TagName"
-$ArchiveName    = "duster-$Version-$ArchSuffix.zip"
+# Archive name must match .github/workflows/release.yml (e.g. Duster-1.0.2-Portable-x64.zip)
+if ($ArchSuffix -eq "windows-arm64") { $PortableArch = "arm64" } else { $PortableArch = "x64" }
+$ArchiveName    = "Duster-$Version-Portable-$PortableArch.zip"
 $ArchiveUrl     = "$DownloadBase/$ArchiveName"
 $ChecksumUrl    = "$DownloadBase/checksums-sha256.txt"
 $TempDir        = Join-Path $env:TEMP "duster-install-$Version"
@@ -361,7 +372,7 @@ $ZipDownloaded = $false
 try {
     Write-Step "Trying portable archive: $ArchiveName..."
     Invoke-WithRetry -MaxAttempts $MaxRetries -Description "ZIP download" -Action {
-        Invoke-WebRequest -Uri $ArchiveUrl -OutFile $TempZip -UseBasicParsing
+        Invoke-WebRequest -Uri $ArchiveUrl -OutFile $TempZip -UseBasicParsing -TimeoutSec 600
     }
     $ArchiveSize = [math]::Round((Get-Item $TempZip).Length / 1MB, 1)
     Write-OK "Downloaded $ArchiveName ($ArchiveSize MB)"
@@ -377,7 +388,7 @@ if (-not $ZipDownloaded) {
         Write-Step "Trying direct binary: $DirectExeName..."
         $TempExeDirect = Join-Path $TempDir $DirectExeName
         Invoke-WithRetry -MaxAttempts $MaxRetries -Description "binary download" -Action {
-            Invoke-WebRequest -Uri $DirectExeUrl -OutFile $TempExeDirect -UseBasicParsing
+            Invoke-WebRequest -Uri $DirectExeUrl -OutFile $TempExeDirect -UseBasicParsing -TimeoutSec 600
         }
         $BinarySize = [math]::Round((Get-Item $TempExeDirect).Length / 1MB, 1)
         if ($BinarySize -lt 0.5) {
@@ -403,16 +414,30 @@ $ChecksumVerified = $false
 $FileToCheck = if ($DownloadMethod -eq "zip") { $TempZip } else { $DownloadedExePath }
 $ChecksumTarget = if ($DownloadMethod -eq "zip") { $ArchiveName } else { $DirectExeName }
 
+# The try only guards the network fetch. The hash comparison and the mandatory
+# abort-on-failure decision live outside it, so Write-Fail (which throws) is not
+# swallowed by the catch — otherwise a real checksum mismatch would be caught and
+# the install would silently continue.
+$ChecksumFetched = $false
 try {
-    Invoke-WebRequest -Uri $ChecksumUrl -OutFile $TempChecksum -UseBasicParsing
+    # Same retry policy as the binary downloads — a transient blip on this one
+    # request otherwise aborts an entire successful install (fail-closed).
+    Invoke-WithRetry -MaxAttempts $MaxRetries -Description "checksums download" -Action {
+        Invoke-WebRequest -Uri $ChecksumUrl -OutFile $TempChecksum -UseBasicParsing -TimeoutSec 60
+    }
+    $ChecksumFetched = $true
+} catch {
+    $ChecksumFetched = $false
+}
 
+if ($ChecksumFetched) {
     # Parse the expected hash for our archive/binary
     $ChecksumLines = Get-Content $TempChecksum
     $ExpectedLine  = $ChecksumLines | Where-Object { $_ -like "*$ChecksumTarget*" }
 
     if ($ExpectedLine) {
         $ExpectedHash = ($ExpectedLine -split '\s+')[0].ToUpper()
-        
+
         # Defensive check for Get-FileHash availability
         if (Get-Command Get-FileHash -ErrorAction SilentlyContinue) {
             $ActualHash = (Get-FileHash -Path $FileToCheck -Algorithm SHA256).Hash.ToUpper()
@@ -432,11 +457,16 @@ try {
 
         $ChecksumVerified = $true
         Write-OK "Checksum verified: $($ActualHash.Substring(0,16))..."
-    } else {
-        Write-Warn "Checksum entry not found for $ChecksumTarget. Skipping verification."
     }
-} catch {
-    Write-Warn "Could not fetch checksums file. Skipping verification."
+}
+
+if (-not $ChecksumVerified) {
+    if ($SkipChecksum) {
+        Write-Warn "Could not verify checksum for $ChecksumTarget (file missing or no matching entry). Skipping (-SkipChecksum)."
+    } else {
+        Remove-Item $TempDir -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Fail "Unable to verify download integrity for $ChecksumTarget.`n  The checksums file was missing or had no matching entry.`n  Re-run with -SkipChecksum to override (not recommended)."
+    }
 }
 
 # == 6. Extract & Install ==============================================
@@ -448,11 +478,14 @@ if ($DownloadMethod -eq "zip") {
         Write-Fail "Failed to extract release archive. Ensure Expand-Archive is available."
     }
 
-    $TempExe = Join-Path $TempDir "du.exe"
-    if (-not (Test-Path $TempExe)) {
+    # The release ZIP nests du.exe inside a Duster-<ver>-Portable-<arch>/ folder,
+    # so search recursively rather than assuming it sits at the archive root.
+    $TempExe = Get-ChildItem -Path $TempDir -Filter "du.exe" -Recurse -File -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if (-not $TempExe) {
         Write-Fail "Failed to find 'du.exe' inside extracted archive."
     }
-    $DownloadedExePath = $TempExe
+    $DownloadedExePath = $TempExe.FullName
 }
 
 Write-Step "Installing to $InstallDir..."

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Nur-Adnan/duster/internal/logging"
 	"github.com/Nur-Adnan/duster/lib/fs"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -111,8 +112,6 @@ type installerModel struct {
 	reclaimed    int64
 	width        int
 	height       int
-	scanChan     chan []installerItem
-	sweepChan    chan int64
 }
 
 type installerScanCompleteMsg struct {
@@ -128,84 +127,79 @@ func initialInstallerModel() installerModel {
 		state:        instStateScanning,
 		cursor:       0,
 		scrollOffset: 0,
-		scanChan:     make(chan []installerItem, 1),
-		sweepChan:    make(chan int64, 1),
 	}
 }
 
 func (m installerModel) Init() tea.Cmd {
-	return tea.Batch(
-		scanInstallersCmd(instMinSize, m.scanChan),
-	)
+	return scanInstallersCmd(instMinSize)
 }
 
-func scanInstallersCmd(minSizeMB int64, ch chan []installerItem) tea.Cmd {
-	return func() tea.Msg {
-		var list []installerItem
-		minSizeBytes := minSizeMB * 1024 * 1024
-		now := time.Now()
+// scanInstallerItems walks the user's Downloads folder for bulky, week-old
+// installer files. Shared by the TUI scan command and the headless JSON path.
+func scanInstallerItems(minSizeMB int64) []installerItem {
+	list := []installerItem{} // non-nil so headless JSON renders [] instead of null
+	minSizeBytes := minSizeMB * 1024 * 1024
+	now := time.Now()
 
-		userProfile := os.Getenv("USERPROFILE")
-		if userProfile == "" {
-			userProfile = `C:\Users\Default`
+	userProfile := os.Getenv("USERPROFILE")
+	if userProfile == "" {
+		userProfile = `C:\Users\Default`
+	}
+	downloadsDir := filepath.Join(userProfile, "Downloads")
+
+	_ = filepath.WalkDir(downloadsDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
 		}
-		downloadsDir := filepath.Join(userProfile, "Downloads")
 
-		if downloadsDir == "" {
-			return installerScanCompleteMsg{items: nil}
-		}
-
-		// Ensure it exists and is clean
-		_ = os.MkdirAll(downloadsDir, 0755)
-
-		_ = filepath.WalkDir(downloadsDir, func(path string, d os.DirEntry, err error) error {
-			if err != nil {
-				return nil
-			}
-
-			if d.IsDir() {
-				// Don't recurse into hidden or config subfolders to speed up walk
-				if strings.HasPrefix(d.Name(), ".") {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-
-			info, err := d.Info()
-			if err != nil {
-				return nil
-			}
-
-			// Validate size
-			if info.Size() < minSizeBytes {
-				return nil
-			}
-
-			// Validate age (must be older than 7 days)
-			age := now.Sub(info.ModTime())
-			ageDays := int(age.Hours() / 24)
-			if ageDays < 7 {
-				return nil
-			}
-
-			// Validate extension
-			ext := strings.ToLower(filepath.Ext(d.Name()))
-			if ext == ".exe" || ext == ".msi" || ext == ".msix" || ext == ".appx" || ext == ".pkg" {
-				if fs.IsValidPath(path) {
-					list = append(list, installerItem{
-						Path:     path,
-						Name:     d.Name(),
-						Size:     info.Size(),
-						AgeDays:  ageDays,
-						ModTime:  info.ModTime(),
-						Selected: true,
-					})
-				}
+		if d.IsDir() {
+			// Don't recurse into hidden or config subfolders to speed up walk
+			if strings.HasPrefix(d.Name(), ".") {
+				return filepath.SkipDir
 			}
 			return nil
-		})
+		}
 
-		return installerScanCompleteMsg{items: list}
+		info, err := d.Info()
+		if err != nil {
+			return nil
+		}
+
+		// Validate size
+		if info.Size() < minSizeBytes {
+			return nil
+		}
+
+		// Validate age (must be older than 7 days)
+		age := now.Sub(info.ModTime())
+		ageDays := int(age.Hours() / 24)
+		if ageDays < 7 {
+			return nil
+		}
+
+		// Validate extension
+		ext := strings.ToLower(filepath.Ext(d.Name()))
+		if ext == ".exe" || ext == ".msi" || ext == ".msix" || ext == ".appx" || ext == ".pkg" {
+			if fs.IsValidPath(path) {
+				list = append(list, installerItem{
+					Path:     path,
+					Name:     d.Name(),
+					Size:     info.Size(),
+					AgeDays:  ageDays,
+					ModTime:  info.ModTime(),
+					Selected: true,
+				})
+			}
+		}
+		return nil
+	})
+
+	return list
+}
+
+func scanInstallersCmd(minSizeMB int64) tea.Cmd {
+	return func() tea.Msg {
+		return installerScanCompleteMsg{items: scanInstallerItems(minSizeMB)}
 	}
 }
 
@@ -236,19 +230,30 @@ func (m installerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "q", "ctrl+c":
-			if m.state == instStateSelecting || m.state == instStateFinished {
-				return m, tea.Quit
-			}
-			m.state = instStateSelecting
-			return m, nil
+		case "ctrl+c":
+			return m, tea.Quit
 
-		case "esc":
+		case "q":
+			if m.state == instStateSweeping {
+				return m, nil // deletions in flight
+			}
 			if m.state == instStateConfirming {
 				m.state = instStateSelecting
 				return m, nil
 			}
 			return m, tea.Quit
+
+		case "esc", "n", "N":
+			if m.state == instStateConfirming {
+				m.state = instStateSelecting
+				return m, nil
+			}
+			if msg.String() == "esc" {
+				if m.state == instStateSweeping {
+					return m, nil
+				}
+				return m, tea.Quit
+			}
 
 		case "up", "k":
 			if m.state == instStateSelecting && len(m.items) > 0 {
@@ -487,98 +492,14 @@ func countSelectedInstallers(list []installerItem) int {
 	return c
 }
 
+// logInstOperation delegates to the shared structured logging system,
+// which also rotates the log; the old local copy grew operations.log unbounded.
 func logInstOperation(action, target string, size int64, success bool) {
-	if os.Getenv("DU_NO_OPLOG") == "1" {
-		return
-	}
-
-	logDir := os.Getenv("LOCALAPPDATA")
-	if logDir == "" {
-		logDir = os.Getenv("USERPROFILE")
-	}
-	if logDir != "" {
-		logDir = filepath.Join(logDir, "Duster")
-	}
-
-	if logDir == "" {
-		logDir = filepath.Clean("./")
-	}
-
-	_ = os.MkdirAll(logDir, 0755)
-	logPath := filepath.Join(logDir, "operations.log")
-
-	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-
-	status := "SUCCESS"
-	if !success {
-		status = "FAILED"
-	}
-
-	timestamp := time.Now().UTC().Format(time.RFC3339)
-	entry := fmt.Sprintf("%s | Command: installer | Action: %s | Target: %s | Size: %d bytes | Status: %s\n",
-		timestamp, action, target, size, status)
-	_, _ = f.WriteString(entry)
+	logging.LogDestructiveOperation("installer", action, target, size, success)
 }
 
 func runHeadlessInstaller() {
-	minSizeBytes := instMinSize * 1024 * 1024
-	now := time.Now()
-	var list []installerItem
-
-	userProfile := os.Getenv("USERPROFILE")
-	if userProfile == "" {
-		userProfile = `C:\Users\Default`
-	}
-	downloadsDir := filepath.Join(userProfile, "Downloads")
-
-	if downloadsDir != "" {
-		_ = filepath.WalkDir(downloadsDir, func(path string, d os.DirEntry, err error) error {
-			if err != nil {
-				return nil
-			}
-
-			if d.IsDir() {
-				if strings.HasPrefix(d.Name(), ".") {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-
-			info, err := d.Info()
-			if err != nil {
-				return nil
-			}
-
-			if info.Size() < minSizeBytes {
-				return nil
-			}
-
-			age := now.Sub(info.ModTime())
-			ageDays := int(age.Hours() / 24)
-			if ageDays < 7 {
-				return nil
-			}
-
-			ext := strings.ToLower(filepath.Ext(d.Name()))
-			if ext == ".exe" || ext == ".msi" || ext == ".msix" || ext == ".appx" || ext == ".pkg" {
-				if fs.IsValidPath(path) {
-					list = append(list, installerItem{
-						Path:     path,
-						Name:     d.Name(),
-						Size:     info.Size(),
-						AgeDays:  ageDays,
-						ModTime:  info.ModTime(),
-						Selected: true,
-					})
-				}
-			}
-			return nil
-		})
-	}
+	list := scanInstallerItems(instMinSize)
 
 	payload := struct {
 		DiscoveredSetups []installerItem `json:"discovered_setups"`
@@ -586,8 +507,14 @@ func runHeadlessInstaller() {
 		Timestamp        string          `json:"timestamp"`
 	}{
 		DiscoveredSetups: list,
-		TotalBytes:       func() int64 { var s int64; for _, i := range list { s += i.Size }; return s }(),
-		Timestamp:        time.Now().UTC().Format(time.RFC3339),
+		TotalBytes: func() int64 {
+			var s int64
+			for _, i := range list {
+				s += i.Size
+			}
+			return s
+		}(),
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
 
 	data, err := json.MarshalIndent(payload, "", "  ")

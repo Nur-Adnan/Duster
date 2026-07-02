@@ -68,7 +68,33 @@ jobs:
           CGO_ENABLED: 1  # Race detector requires CGO
         run: go test -count=1 -race -v ./...
 
-  # ── Step 3: Build Verification ─────────────────────────────────────────
+  # ── Step 3: Windows Test Suite ─────────────────────────────────────────
+  # The product is Windows-only; Linux runners only ever exercise the
+  # !windows stubs. This job is the only one that tests the real code.
+  test-windows:
+    name: Windows Test Suite
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Go Vet (Windows)
+        run: go vet ./...
+
+      - name: Run Unit Tests (Windows)
+        env:
+          CGO_ENABLED: 0
+          DU_NO_OPLOG: "1"
+        run: go test -count=1 -v ./...
+
+  # ── Step 4: Build Verification ─────────────────────────────────────────
   build-verification:
     name: Compiler & Cross-Build Verification
     runs-on: ubuntu-latest
