@@ -135,6 +135,47 @@ jobs:
           if ((Count-Entry "$dir-old") -ne 1) { throw "uninstall removed an unrelated PATH entry" }
           if (Test-Path "$dir\du.exe") { throw "uninstall left du.exe behind" }
 
+      - name: CMD Installer Test (path with a space and an apostrophe)
+        shell: cmd
+        run: |
+          call scripts\install.cmd --dir "%RUNNER_TEMP%\Du ster's dir" 1.0.2 --silent
+          if errorlevel 1 exit /b 1
+          if not exist "%RUNNER_TEMP%\Du ster's dir\du.exe" (echo install.cmd did not install into the requested folder & exit /b 1)
+
+      # The setup exe used to be compiled only at release time, after the
+      # release was already public. Build it here and install/uninstall it.
+      - name: Setup Installer Test (Inno Setup, per-user)
+        shell: powershell
+        run: |
+          $env:CGO_ENABLED = '0'
+          go build -o dist\duster-windows-amd64.exe .
+          if ($LASTEXITCODE) { throw 'go build failed' }
+          & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' /Q installer\duster-setup.iss
+          if ($LASTEXITCODE) { throw 'ISCC failed' }
+          $setup = Get-ChildItem dist\installer\Duster-Setup-*.exe | Select-Object -First 1
+
+          # A script install and its logs share %LOCALAPPDATA%\Duster with the setup exe's data.
+          $shared = Join-Path $env:LOCALAPPDATA 'Duster'
+          New-Item -ItemType Directory -Force $shared | Out-Null
+          Copy-Item dist\duster-windows-amd64.exe "$shared\du.exe"
+          Set-Content "$shared\operations.log" 'x'
+          Set-Content "$shared\operations.log.old" 'x'
+          function Count-Entry($d) { @([Environment]::GetEnvironmentVariable('Path', 'User') -split ';' | Where-Object { $_.TrimEnd('\') -eq $d }).Count }
+
+          $app = Join-Path $env:RUNNER_TEMP 'Duster Setup Test'
+          Start-Process $setup.FullName -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER', "/DIR=`"$app`"" -Wait
+          if (-not (Test-Path "$app\du.exe")) { throw 'setup did not install du.exe' }
+          if ((Count-Entry $app) -ne 1) { throw 'setup did not add its folder to the user PATH exactly once' }
+
+          Start-Process "$app\unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait
+          # The uninstaller re-launches itself from %TEMP% and returns early.
+          for ($i = 0; $i -lt 60 -and (Test-Path "$app\du.exe"); $i++) { Start-Sleep -Seconds 1 }
+          for ($i = 0; $i -lt 30 -and (Test-Path "$shared\operations.log*"); $i++) { Start-Sleep -Seconds 1 }
+          if (Test-Path "$app\du.exe") { throw 'uninstall left du.exe behind' }
+          if ((Count-Entry $app) -ne 0) { throw 'uninstall left its folder in the user PATH' }
+          if (Test-Path "$shared\operations.log*") { throw 'uninstall left the operation logs' }
+          if (-not (Test-Path "$shared\du.exe")) { throw 'uninstall deleted a separate script install' }
+
   # ── Step 4: Build Verification ─────────────────────────────────────────
   build-verification:
     name: Compiler & Cross-Build Verification
