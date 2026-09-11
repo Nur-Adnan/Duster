@@ -48,6 +48,10 @@ func executeAnalyze(cmd *cobra.Command, args []string) {
 		fmt.Fprintf(os.Stderr, "Error resolving path: %v\n", err)
 		os.Exit(1)
 	}
+	if err := scanTargetError(absPath, false); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: cannot analyze %s: %v\n", absPath, err)
+		os.Exit(1)
+	}
 
 	// Read from pipe or explicit JSON flag
 	if analyzeJSON || isPiped() {
@@ -61,6 +65,20 @@ func executeAnalyze(cmd *cobra.Command, args []string) {
 		fmt.Fprintf(os.Stderr, "Error running TUI analysis: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// scanTargetError reports why path can't be scanned: it doesn't exist, can't
+// be read, or (needDir) isn't a folder. A mistyped path must fail with exit 1,
+// not look like a successful scan of an empty folder.
+func scanTargetError(path string, needDir bool) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if needDir && !info.IsDir() {
+		return fmt.Errorf("%s is not a folder", path)
+	}
+	return nil
 }
 
 // JSON Snapshot Headless Mode Structures
