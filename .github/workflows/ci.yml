@@ -13,7 +13,9 @@ permissions:
   contents: read
 
 env:
-  GO_VERSION: '1.25.x'
+  # Build/test on a supported toolchain (Go supports the two latest majors);
+  # go.mod still declares 1.25 as the minimum language version.
+  GO_VERSION: '1.26.x'
 
 jobs:
   # ── Step 1: Static Analysis & Linting ──────────────────────────────────
@@ -47,6 +49,14 @@ jobs:
 
       - name: Go Vet Static Analysis
         run: go vet ./...
+
+      - name: Vulnerability Scan (host and Windows targets)
+        # Fails on known-vulnerable stdlib/dependency code reachable from
+        # Duster (the shipped v1.0.2 binary carried 14 such findings).
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
+          "$(go env GOPATH)/bin/govulncheck" ./...
+          GOOS=windows "$(go env GOPATH)/bin/govulncheck" ./...
 
   # ── Step 2: Test Suite ────────────────────────────────────────────────
   test:
