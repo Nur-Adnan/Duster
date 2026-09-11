@@ -1,5 +1,25 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- `install.cmd` now works when the install folder contains a space or an apostrophe; it used to split `C:\Users\John Smith\...` into two arguments. It also no longer passes `-InstallDir` when you didn't give `--dir`, which had disabled install.ps1's Program Files fallback on PCs with WDAC or AppLocker policies.
+- Uninstalling the setup exe no longer deletes all of `%LOCALAPPDATA%\Duster`. That folder is also where the PowerShell installer puts `du.exe`, so uninstalling one install method wiped the other. It now removes only Duster's operation logs.
+- JetBrains cache cleaning now goes through the same safety checks as every other category (protected paths, linked roots, per-file checks), and it reports files it couldn't delete.
+- `du clean --whitelist` now accepts the same names in the CLI as in the interactive screen (`chrome`, `edge`, `brave`, `firefox`, `logs`), and warns about names it doesn't recognize. It used to protect nothing, silently.
+- The reclaimable total no longer counts the Yarn cache twice, or counts the Office clipboard temp folder on top of `%TEMP%`. The misnamed "Installer Patch Cache" category is gone.
+- The "Recent Items" category no longer claims to clean jump lists. It never matched them, and they hold your pinned items.
+- Categories under the Windows folder now follow Windows to whatever drive it's installed on, instead of assuming `C:`.
+- OneDrive placeholder detection now also catches "recall on open" files, which Windows reports only in directory listings.
+
+### Performance
+- Clean scans read each file's attributes from the directory listing instead of asking Windows again for every file.
+- Walks expand an 8.3 short root (such as `C:\Users\JOHNSM~1\...`) once, so the safety check on each file no longer does a disk lookup.
+- The interactive clean now starts deleting each item right away, instead of first playing a progress animation that took about 3.5 s per run.
+
+### Build and CI
+- Release builds use the Inno Setup preinstalled on GitHub's Windows images instead of an unpinned Chocolatey package. CI now also builds the setup exe and installs and uninstalls it, and runs `install.cmd` into a path with a space and an apostrophe.
+
 ## [1.0.4] - 2026-09-11
 
 ### Fixed

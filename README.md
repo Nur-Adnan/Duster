@@ -37,25 +37,25 @@ du analyze .   # Interactive disk explorer
 | Command | What it does |
 |:---|:---|
 | `du` | Interactive landing screen with system overview |
-| `du clean` | Scans & cleans 35 cache categories (temp, browsers, dev tools, GPU shaders) |
+| `du clean` | Scans & cleans 34 cache categories (temp, browsers, dev tools, GPU shaders) |
 | `du status` | Real-time CPU, RAM, disk, network, battery dashboard (1s refresh) |
 | `du analyze [path]` | Drill-down disk usage explorer with delete & open actions |
 | `du purge` | Finds `node_modules`, `target`, `dist`, `.gradle`, `vendor` and purges them |
 | `du uninstall` | App uninstaller + leftover AppData sweeper |
 | `du installer` | Detects bulky old `.exe`/`.msi` installers in Downloads |
-| `du optimize` | Network reset, defrag hooks, service optimizations |
+| `du optimize` | Flushes DNS, clears the Delivery Optimization cache, optimizes drives (SSD TRIM, admin) |
 | `du doctor` | System diagnostics (UAC, Defender, filesystem policies) |
 | `du benchmark` | Disk I/O throughput & memory profiling |
 | `du update` | Self-update with SHA-256 verification |
 | `du remove` | Uninstall Duster and delete all its config/logs |
 
-> Most commands support `--json` for scripting, and every destructive command supports `--dry-run` for safe previews.
+> Most commands support `--json` for scripting. `clean`, `purge`, `installer`, `optimize`, `uninstall` and `remove` support `--dry-run` for safe previews.
 
 ---
 
 ## Cleanup Categories
 
-Duster targets **35 cleanup zones** across 4 domains:
+Duster cleans **34 categories**. The main groups (run `du clean --dry-run` for the full list):
 
 <details>
 <summary><strong>💻 System & Windows</strong> (9 categories)</summary>
@@ -164,9 +164,9 @@ irm https://raw.githubusercontent.com/Nur-Adnan/Duster/main/scripts/uninstall.ps
 |:---|:---|
 | `↑↓` / `jk` | Navigate lists |
 | `Enter` / `→` | Drill into folder |
-| `Esc` / `←` | Go back |
+| `Esc` / `←` / `⌫` | Go back |
 | `O` | Open in Explorer |
-| `D` / `⌫` | Delete to Recycle Bin |
+| `D` | Delete to Recycle Bin (asks first) |
 | `L` | Toggle large files view |
 | `Space` | Toggle selection |
 | `Q` | Quit |

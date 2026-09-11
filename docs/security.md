@@ -9,7 +9,7 @@ This document details the threat model, safety boundaries, security architecture
 Duster is a system utility designed for deep-cleaning operations. Because file deletion is a destructive operation, Duster adheres to a **Strict Safety-First Policy**:
 1. **Never Broaden Scope**: When in doubt or encountering an unexpected filesystem structure, Duster will skip, refuse, or raise a warning rather than broadening the sweep range.
 2. **Never Touch System Criticals**: Hardcoded and dynamic overrides prevent the deletion of core Windows libraries and boot sectors.
-3. **No Untrusted Shell Interpolation**: No user-controlled data is ever interpolated into PowerShell or CMD command strings. The one PowerShell invocation (delayed self-delete) passes its target path through an environment variable read with `-LiteralPath`, and resolves `powershell.exe` by absolute System32 path to defeat PATH planting.
+3. **No Untrusted Shell Interpolation**: No user-controlled data is ever interpolated into PowerShell or CMD command strings. PowerShell only ever runs fixed scripts (the drivers and security views' queries, and the delayed self-delete), always from its absolute System32 path to defeat PATH planting; the self-delete passes its target path through an environment variable read with `-LiteralPath`.
 
 ---
 
@@ -26,7 +26,7 @@ Duster is a system utility designed for deep-cleaning operations. Because file d
 
 ### C. OneDrive Cloud Storage Placeholder Safebound
 * **Stability Threat**: Walking cloud directories (OneDrive) that contain offline files can trigger automatic hydration (forcibly downloading files from the cloud), leading to extreme network usage and severe disk thrashing.
-* **Mitigation**: The scanner checks the Win32 placeholder attributes — `FILE_ATTRIBUTE_OFFLINE` (0x1000) plus the modern cloud-sync markers `FILE_ATTRIBUTE_RECALL_ON_OPEN` (0x40000) and `FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS` (0x400000) — using native API calls. If any is flagged, Duster skips the placeholder file entirely without invoking read commands.
+* **Mitigation**: The scanner checks the Win32 placeholder attributes — `FILE_ATTRIBUTE_OFFLINE` (0x1000) plus the modern cloud-sync markers `FILE_ATTRIBUTE_RECALL_ON_OPEN` (0x40000) and `FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS` (0x400000) — read from the directory listing itself, which is also the only place Windows reports `RECALL_ON_OPEN` (`GetFileAttributes` never does). If any is flagged, Duster skips the placeholder file entirely without invoking read commands.
 
 ### D. Subprocess Context Leaks Prevention
 * **Resource Threat**: If a user cancels optimization tasks (like SSD TRIM) or exits the TUI mid-sweep, subprocesses (`defrag.exe`) can continue thrumming in the background as orphans.
@@ -48,7 +48,7 @@ The Duster self-update engine verifies release integrity with **SHA-256 checksum
 1. Release metadata and all assets are downloaded exclusively over HTTPS; non-HTTPS URLs are refused.
 2. Each release publishes a `checksums-sha256.txt` asset. The updater downloads it and looks up the expected digest for the platform archive; a release without checksums is treated as not installable.
 3. The downloaded archive's SHA-256 digest must match the published entry exactly, or the update aborts before anything is written.
-4. The new binary is swapped in atomically on the same volume, with the previous binary preserved for rollback if any step fails.
+4. The new binary is renamed into place on the same volume, with the previous binary kept as `du.exe.old` so a failed step rolls back.
 5. In headless / `--json` mode an update is installed only with `--yes`. Pre-release tags are never offered to users on a stable version, and a tag that doesn't parse as a version never counts as newer (no downgrade through a malformed tag).
 
 > **Trust model:** integrity is rooted in GitHub's TLS and the release checksums file. This protects against corrupted or man-in-the-middle-tampered downloads, but not against a compromised release-publishing account (which could publish a matching checksum). The release pipeline includes an optional Authenticode signing stage for both binaries and the installer, activated by configuring the `WINDOWS_CODESIGN_PFX_BASE64` / `WINDOWS_CODESIGN_PFX_PASSWORD` repository secrets; until a certificate is provisioned, releases ship unsigned and SmartScreen prompts are expected.
