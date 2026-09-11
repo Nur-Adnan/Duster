@@ -313,7 +313,7 @@ func (m verifyModel) View() string {
 	var s strings.Builder
 
 	s.WriteString("\n  " + verifyTitle.Render("Duster Security Suite — Integrity Verify"))
-	s.WriteString("\n" + verifyDivider.Render("  ═════════════════════════════════════════════════════════════════════\n\n"))
+	s.WriteString("\n" + verifyDivider.Render("  ═════════════════════════════════════════════════════════════════════") + "\n\n")
 
 	if m.running {
 		s.WriteString("  [Running Asserts] Executing security and boundary checks...\n\n")
@@ -340,7 +340,7 @@ func (m verifyModel) View() string {
 		m.report.Total, m.report.Passed, m.report.Failed))
 
 	s.WriteString("  " + boldWhite.Render("INTEGRITY SECURITY VERIFICATION ASSERTIONS") + "\n")
-	s.WriteString(verifyDivider.Render("  ─────────────────────────────────────────────────────────────────────\n"))
+	s.WriteString(verifyDivider.Render("  ─────────────────────────────────────────────────────────────────────") + "\n")
 
 	for _, c := range m.report.Cases {
 		var indicator string
@@ -354,7 +354,7 @@ func (m verifyModel) View() string {
 			indicator, boldWhite.Render(c.Name), verifyGray.Render(c.Details)))
 	}
 
-	s.WriteString(verifyDivider.Render("\n  ═════════════════════════════════════════════════════════════════════\n"))
+	s.WriteString("\n" + verifyDivider.Render("  ═════════════════════════════════════════════════════════════════════") + "\n")
 	if m.report.Healthy {
 		s.WriteString("  " + verifySuccess.Render("✓ SYSTEM VERIFIED: All safety boundaries, dry-run engines, and package hashes are 100% compliant."))
 	} else {
