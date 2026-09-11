@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- `du uninstall` now waits for the whole uninstaller. Inno Setup and NSIS uninstallers, which many apps use, start a copy of themselves and exit at once. Duster checked too early, so it showed "UNINSTALL NOT CONFIRMED" and skipped the leftover scan while the app's own "Are you sure?" dialog was still open. It now waits until every process the uninstaller started has exited, or until the app is gone.
+- A finished dry run in the clean screen said "System cache cleaned successfully!" and counted "Total files removed", although nothing was deleted. It now says "Dry run complete: nothing was deleted." and labels the totals as space and files to remove.
+- The Chocolatey package (`scripts/manifests/duster.nuspec`) pointed at a `tools/` folder that didn't exist, so it couldn't be built. It now has an install script that downloads the release and checks its SHA-256, and CI builds, installs and uninstalls it.
+
+### Added
+- Every release file gets a signed build-provenance attestation (keyless, via GitHub and Sigstore). `gh attestation verify <file> --repo Nur-Adnan/Duster` proves a download was built by the release workflow from the tagged commit; a file swapped by hand on the release page fails it.
+- The Windows Smoke Test now does the checks that needed a person at a desktop. It types keys into Duster in a real Windows terminal (a pseudo console), answers Windows' own dialogs, uninstalls a real Inno Setup app, runs install.ps1's elevation path, and upgrades a v1.0.2 install by reinstalling.
+
 ## [1.0.5] - 2026-09-11
 
 ### Fixed

@@ -176,6 +176,23 @@ jobs:
           if (Test-Path "$shared\operations.log*") { throw 'uninstall left the operation logs' }
           if (-not (Test-Path "$shared\du.exe")) { throw 'uninstall deleted a separate script install' }
 
+      # The Chocolatey package downloads the release named in duster.nuspec and
+      # checks it against the SHA-256 in tools\chocolateyinstall.ps1.
+      - name: Chocolatey Package Test
+        shell: powershell
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'choco'
+          choco pack scripts\manifests\duster.nuspec --outputdirectory $out
+          if ($LASTEXITCODE) { throw 'choco pack failed' }
+          choco install duster --source $out -y --no-progress
+          if ($LASTEXITCODE) { throw 'choco install failed' }
+          $want = ([xml](Get-Content scripts\manifests\duster.nuspec)).package.metadata.version
+          $v = & "$env:ChocolateyInstall\bin\du.exe" --version
+          if ("$v" -notmatch [regex]::Escape($want)) { throw "choco installed '$v', expected $want" }
+          choco uninstall duster -y --no-progress
+          if ($LASTEXITCODE) { throw 'choco uninstall failed' }
+          if (Test-Path "$env:ChocolateyInstall\bin\du.exe") { throw 'choco uninstall left the du shim' }
+
   # ── Step 4: Build Verification ─────────────────────────────────────────
   build-verification:
     name: Compiler & Cross-Build Verification
