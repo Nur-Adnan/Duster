@@ -153,6 +153,10 @@ func executePurge(cmd *cobra.Command, args []string) {
 		fmt.Fprintf(os.Stderr, "Error: The target path '%s' is critical/system protected. Scanning is blocked for safety.\n", absPath)
 		os.Exit(1)
 	}
+	if err := scanTargetError(absPath, true); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: cannot scan %s: %v\n", absPath, err)
+		os.Exit(1)
+	}
 
 	// Explicit --json always wins: snapshot and exit
 	if purgeJSON {
