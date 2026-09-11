@@ -139,9 +139,19 @@ func TestIsNewerVersion(t *testing.T) {
 		{"1.0.0", "1.0.1", false},
 		{"2.0.0", "1.9.9", true},
 		{"1.10.0", "1.9.0", true},
-		{"1.0.2-rc1", "1.0.1", true},
 		{"1.0.2", "0.0.0", true},
-		{"dev", "1.0.1", true}, // unparseable: any difference counts as an update
+		{"V1.0.3", "1.0.2", true},
+		{"v1.0", "1.0.0", false},
+		// Pre-releases reach only users already on a pre-release.
+		{"1.0.2-rc1", "1.0.1", false},
+		{"1.0.3-rc1", "1.0.2-rc1", true},
+		{"1.0.2", "1.0.2-rc1", true},
+		{"1.0.2-rc1", "1.0.2", false},
+		// Unparseable tags never count as an update (no downgrade via a bad tag).
+		{"dev", "1.0.1", false},
+		{"1.0.1", "dev", false},
+		{"1.0.1.hotfix", "1.0.0", false},
+		{"release-2026", "1.0.0", false},
 	}
 	for _, c := range cases {
 		if got := isNewerVersion(c.latest, c.current); got != c.want {
