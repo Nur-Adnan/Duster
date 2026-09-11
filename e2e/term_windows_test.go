@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -185,7 +186,16 @@ func (tm *term) waitExit(timeout time.Duration) uint32 {
 	return code
 }
 
-func squash(s string) string { return strings.Join(strings.Fields(s), "") }
+// squash drops whitespace and box-drawing characters, so text that wraps
+// inside a bordered box still reads as one string.
+func squash(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) || (r >= 0x2500 && r <= 0x257f) {
+			return -1
+		}
+		return r
+	}, s)
+}
 
 // render replays VT output onto a cols x rows grid: printable text, cursor
 // moves, erases and scrolling, which is what the pseudo console emits.

@@ -799,6 +799,8 @@ func (m cleanModel) View() string {
 			activeName = m.items[m.activeItemIdx].Name
 		}
 		bannerText = "  " + styleMuted.Render("[") + styleAccent.Render("i") + styleMuted.Render("]") + " " + styleValue.Render("Cleaning: "+activeName+"...") + "\n\n"
+	} else if m.state == cleanStateDone && m.dryRun {
+		bannerText = "  " + styleMuted.Render("[") + styleAccent.Render("i") + styleMuted.Render("]") + " " + styleValue.Render("Dry run complete: nothing was deleted.") + "\n\n"
 	} else if m.state == cleanStateDone {
 		bannerText = "  " + styleMuted.Render("[") + styleSuccess.Render("✓") + styleMuted.Render("]") + " " + styleSuccess.Render("System cache cleaned successfully!") + "\n\n"
 	}
@@ -921,6 +923,9 @@ func (m cleanModel) View() string {
 		spaceStr = formatBytes(m.cleanedSize)
 		filesStr = formatInt(m.cleanedFiles)
 		statusSummary = "Completed successfully!"
+		if m.dryRun {
+			statusSummary = "Dry run complete"
+		}
 	} else {
 		// Ready state
 		spaceStr = formatBytes(m.totalReclaim)
@@ -936,8 +941,13 @@ func (m cleanModel) View() string {
 		return lblStyle.Render(padded)
 	}
 
-	sb.WriteString(fmt.Sprintf("  🗑  %s :  %s\n", padLabel("Total space recovered", 22), valStyle.Render(spaceStr)))
-	sb.WriteString(fmt.Sprintf("  📄  %s :  %s\n", padLabel("Total files removed", 22), valStyle.Render(filesStr)))
+	// A dry run, or a scan not yet cleaned, has removed nothing.
+	spaceLabel, filesLabel := "Total space recovered", "Total files removed"
+	if m.dryRun || m.state == cleanStateScanning || m.state == cleanStateReady {
+		spaceLabel, filesLabel = "Space to recover", "Files to remove"
+	}
+	sb.WriteString(fmt.Sprintf("  🗑  %s :  %s\n", padLabel(spaceLabel, 22), valStyle.Render(spaceStr)))
+	sb.WriteString(fmt.Sprintf("  📄  %s :  %s\n", padLabel(filesLabel, 22), valStyle.Render(filesStr)))
 	sb.WriteString(fmt.Sprintf("  🕒  %s :  %s\n", padLabel("Time taken", 22), valStyle.Render(durStr)))
 
 	statusColored := valStyle.Render(statusSummary)
