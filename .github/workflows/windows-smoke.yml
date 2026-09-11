@@ -200,6 +200,9 @@ jobs:
           Remove-Item -Recurse -Force $pf
           $deny = "function Start-Process { throw 'The operation was canceled by the user.' }`n"
           Set-Content "$dir\install-deny.ps1" $src.Replace($marker, $fake + $deny + $marker) -Encoding UTF8
+          # The installer's error goes to stderr; under the runner's 'Stop' preference
+          # that would end this step before the checks below.
+          $ErrorActionPreference = 'Continue'
           $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$dir\install-deny.ps1" -Silent 2>&1 | Out-String
           $code = $LASTEXITCODE
           Write-Host $out
