@@ -260,7 +260,9 @@ func runSweepCmd(items []leftoverItem, dry bool) tea.Cmd {
 			}
 
 			success := err == nil
-			logUninstOperation("sweep", item.Path, item.Size, success)
+			if !dry { // a dry run deleted nothing, so there is nothing to log
+				logUninstOperation("sweep", item.Path, item.Size, success)
+			}
 			if success {
 				reclaimed += item.Size
 			}
@@ -508,7 +510,7 @@ func (m uninstallModel) View() string {
 		doc.WriteString("  |  " + uninstSuccessStyle.Render("LIVE ACTIVE MODE"))
 	}
 	doc.WriteString("\n")
-	doc.WriteString(uninstDividerStyle.Render("  ═══════════════════════════════════════════════════════════════════════\n\n"))
+	doc.WriteString(uninstDividerStyle.Render("  ═══════════════════════════════════════════════════════════════════════") + "\n\n")
 
 	var boxLayout string
 
@@ -562,7 +564,7 @@ func (m uninstallModel) View() string {
 		}
 
 		// Search Filter Bar
-		leftCol.WriteString("\n\n" + uninstDividerStyle.Render("  ───────────────────────────────────────────\n"))
+		leftCol.WriteString("\n\n" + uninstDividerStyle.Render("  ───────────────────────────────────────────") + "\n")
 		leftCol.WriteString(fmt.Sprintf("  Filter: %s", uninstCyanText(m.searchQuery)))
 		if len(m.searchQuery) > 0 {
 			leftCol.WriteString(" █")
@@ -571,7 +573,7 @@ func (m uninstallModel) View() string {
 		// Right Column (Sidebar Panel)
 		if len(m.filteredApps) > 0 {
 			app := m.filteredApps[m.cursor]
-			rightCol.WriteString(uninstSuccessStyle.Render("⚙ APPLICATION META INFORMATION\n\n"))
+			rightCol.WriteString(uninstSuccessStyle.Render("⚙ APPLICATION META INFORMATION") + "\n\n")
 			rightCol.WriteString(fmt.Sprintf("Name      : %s\n", uninstWhiteText(app.Name)))
 			rightCol.WriteString(fmt.Sprintf("Publisher : %s\n", uninstWhiteText(app.Publisher)))
 			rightCol.WriteString(fmt.Sprintf("Version   : %s\n", uninstWhiteText(app.DisplayVersion)))
@@ -579,12 +581,12 @@ func (m uninstallModel) View() string {
 			rightCol.WriteString(fmt.Sprintf("Est. Size : %s\n", uninstWhiteText(formatBytes(app.EstimatedSize))))
 			rightCol.WriteString(fmt.Sprintf("Hive      : %s\n\n", uninstWhiteText(app.RegistryHive)))
 
-			rightCol.WriteString(uninstDividerStyle.Render("─────────────────────────────────\n"))
+			rightCol.WriteString(uninstDividerStyle.Render("─────────────────────────────────") + "\n")
 			if m.isProtected(app.Name) {
-				rightCol.WriteString(uninstFailStyle.Render("⚠️  SYSTEM CRITICAL RUNTIME\n"))
+				rightCol.WriteString(uninstFailStyle.Render("⚠️  SYSTEM CRITICAL RUNTIME") + "\n")
 				rightCol.WriteString("This software is whitelisted. Deletion is disabled to avoid OS instability.")
 			} else {
-				rightCol.WriteString(uninstSuccessStyle.Render("✓ Action Allowed\n"))
+				rightCol.WriteString(uninstSuccessStyle.Render("✓ Action Allowed") + "\n")
 				rightCol.WriteString("Press [Enter] to run the native uninstaller process.")
 			}
 		} else {
@@ -641,7 +643,7 @@ func (m uninstallModel) View() string {
 			leftBox.WriteString("  Press [Enter] to complete.")
 		} else {
 			leftBox.WriteString(uninstGrayText("     Target Leftover Path                             Size\n"))
-			leftBox.WriteString(uninstDividerStyle.Render("     ───────────────────────────────────────────────────────────────────────\n"))
+			leftBox.WriteString(uninstDividerStyle.Render("     ───────────────────────────────────────────────────────────────────────") + "\n")
 
 			maxVisible := 12
 			endIdx := m.scrollOffset + maxVisible

@@ -5,11 +5,17 @@
 ### Fixed
 - `du uninstall` now waits for the whole uninstaller. Inno Setup and NSIS uninstallers, which many apps use, start a copy of themselves and exit at once. Duster checked too early, so it showed "UNINSTALL NOT CONFIRMED" and skipped the leftover scan while the app's own "Are you sure?" dialog was still open. It now waits until every process the uninstaller started has exited, or until the app is gone.
 - A finished dry run in the clean screen said "System cache cleaned successfully!" and counted "Total files removed", although nothing was deleted. It now says "Dry run complete: nothing was deleted." and labels the totals as space and files to remove.
+- Screens no longer push their content about 70 columns to the right. A styled divider with a line break inside ended in a line of padding spaces, and the next line of text continued after it: the boxes on the remove, installer, purge, optimize, update and uninstall screens started at column 73 (mostly cut off in a 120-column terminal), and verify showed "Integrity Status: SECURE" instead of "SECURED & CERTIFIED". Doctor and benchmark had the same fault.
+- `du analyze` and `du purge` now fail with exit code 1 on a path that doesn't exist (and `purge` on a path that isn't a folder). A mistyped path used to print an empty result and exit 0, as if the folder had nothing in it.
+- `du optimize --json --yes` now exits 1 when a task fails. It reported the failure in its JSON but exited 0, so scripts couldn't tell a failed DNS flush or TRIM from success.
+- `install.ps1` and `uninstall.ps1` no longer rewrite your user PATH. They read it expanded and saved it back as a plain string (REG_SZ), which froze every `%VAR%` entry, including Windows' own `%USERPROFILE%\AppData\Local\Microsoft\WindowsApps`, into a fixed path. They now keep the value exactly as stored, as `REG_EXPAND_SZ`, like the setup exe does.
+- Dry runs of the uninstall leftover sweep and the installer sweep no longer write "success" entries to `operations.log` for deletions that never happened.
+- `du purge --dry-run --yes` no longer prints "SUCCESS" and "Purged N / N directories"; it says what would be purged and that nothing was deleted.
 - The Chocolatey package (`scripts/manifests/duster.nuspec`) pointed at a `tools/` folder that didn't exist, so it couldn't be built. It now has an install script that downloads the release and checks its SHA-256, and CI builds, installs and uninstalls it.
 
 ### Added
 - Every release file gets a signed build-provenance attestation (keyless, via GitHub and Sigstore). `gh attestation verify <file> --repo Nur-Adnan/Duster` proves a download was built by the release workflow from the tagged commit; a file swapped by hand on the release page fails it.
-- The Windows Smoke Test now does the checks that needed a person at a desktop. It types keys into Duster in a real Windows terminal (a pseudo console), answers Windows' own dialogs, uninstalls a real Inno Setup app, runs install.ps1's elevation path, and upgrades a v1.0.2 install by reinstalling.
+- The Windows Smoke Test now does the checks that needed a person at a desktop. It types keys into Duster in a real Windows terminal (a pseudo console), answers Windows' own dialogs, uninstalls a real Inno Setup app, runs install.ps1's elevation path, and upgrades a v1.0.2 install by reinstalling. It also checks that wrong input fails cleanly, that nothing is deleted without `--yes` or with `--dry-run`, and that repeated and concurrent runs work; CI checks that installing and uninstalling keep the user PATH's `%VAR%` entries and registry type.
 
 ## [1.0.5] - 2026-09-11
 

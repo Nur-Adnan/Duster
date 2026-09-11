@@ -33,6 +33,30 @@ func TestOptimizeModelInitialization(t *testing.T) {
 	}
 }
 
+// Headless optimize exits 1 when any task failed; skipped tasks don't count.
+func TestAnyTaskFailed(t *testing.T) {
+	tests := []struct {
+		name     string
+		statuses []taskStatus
+		want     bool
+	}{
+		{"all completed", []taskStatus{statusCompleted, statusCompleted}, false},
+		{"preview skips everything", []taskStatus{statusSkipped, statusSkipped, statusSkipped}, false},
+		{"one failed", []taskStatus{statusCompleted, statusFailed, statusSkipped}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var tasks []optimizeTask
+			for _, s := range tt.statuses {
+				tasks = append(tasks, optimizeTask{Status: s})
+			}
+			if got := anyTaskFailed(tasks); got != tt.want {
+				t.Errorf("anyTaskFailed = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestOptimizeModelUpdate(t *testing.T) {
 	m := initialOptimizeModel()
 

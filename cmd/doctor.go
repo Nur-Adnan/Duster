@@ -449,7 +449,7 @@ func (m doctorModel) View() string {
 	var s strings.Builder
 
 	s.WriteString("\n  " + doctorTitle.Render("Duster Diagnostics — Environment Doctor"))
-	s.WriteString("\n" + doctorDivider.Render("  ═════════════════════════════════════════════════════════════════════\n\n"))
+	s.WriteString("\n" + doctorDivider.Render("  ═════════════════════════════════════════════════════════════════════") + "\n\n")
 
 	if m.running {
 		s.WriteString("  [Running Audits] Please wait while we verify your Windows configurations...\n\n")
@@ -468,7 +468,7 @@ func (m doctorModel) View() string {
 		m.snapshot.Passed, m.snapshot.Warnings, m.snapshot.Failed))
 
 	s.WriteString("  " + boldWhite.Render("DETAILED REPORT CARD") + "\n")
-	s.WriteString(doctorDivider.Render("  ─────────────────────────────────────────────────────────────────────\n"))
+	s.WriteString(doctorDivider.Render("  ─────────────────────────────────────────────────────────────────────") + "\n")
 
 	for _, r := range m.snapshot.Results {
 		var indicator string
@@ -486,7 +486,7 @@ func (m doctorModel) View() string {
 		s.WriteString(fmt.Sprintf("  %s  %-30s %s\n", indicator, boldWhite.Render(r.Name), doctorGray.Render(r.Message)))
 	}
 
-	s.WriteString(doctorDivider.Render("\n  ═════════════════════════════════════════════════════════════════════\n"))
+	s.WriteString("\n" + doctorDivider.Render("  ═════════════════════════════════════════════════════════════════════") + "\n")
 	if m.snapshot.Healthy {
 		s.WriteString("  " + doctorSuccess.Render("🎉 ENVIRONMENT CLEAN & HEALTHY! Duster is fully ready for maximum deep optimization."))
 	} else {

@@ -239,7 +239,7 @@ func (m benchmarkModel) View() string {
 	var s strings.Builder
 
 	s.WriteString("\n  " + benchTitle.Render("Duster Performance Suite — System Benchmark"))
-	s.WriteString("\n" + benchDivider.Render("  ═════════════════════════════════════════════════════════════════════\n\n"))
+	s.WriteString("\n" + benchDivider.Render("  ═════════════════════════════════════════════════════════════════════") + "\n\n")
 
 	if m.running {
 		s.WriteString("  [Profiling Hardware] Running latency stress tests...\n\n")
@@ -274,7 +274,7 @@ func (m benchmarkModel) View() string {
 	s.WriteString(fmt.Sprintf("    Throughput    : %s serializations/sec (latency: %d ms)\n",
 		formatFloat(m.metrics.JsonSpeedPerSec), m.metrics.JsonDurationMs))
 
-	s.WriteString(benchDivider.Render("\n  ═════════════════════════════════════════════════════════════════════\n"))
+	s.WriteString("\n" + benchDivider.Render("  ═════════════════════════════════════════════════════════════════════") + "\n")
 	s.WriteString("  " + benchTeal.Render("💡 PRODUCTION VERDICT: Your storage sub-system and Go runtime bounds are fully optimized."))
 	s.WriteString("\n  " + benchGray.Render("Press [q/esc] to exit."))
 
