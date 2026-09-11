@@ -66,3 +66,5 @@ func removeStartupEntry(startupEntry) error      { return errNotWindows }
 
 func setProcessGroup(*exec.Cmd)       {}
 func setRawCmdLine(*exec.Cmd, string) {}
+
+func runTree(c *exec.Cmd, _ func() bool) error { return c.Run() }

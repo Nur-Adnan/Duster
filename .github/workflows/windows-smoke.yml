@@ -1,9 +1,10 @@
 name: Windows Smoke Test
 
-# Runs Duster's destructive commands for real on a throwaway Windows runner:
-# everything in docs/release-checklist.md that needs no desktop UI or UAC.
-# Run it before tagging (Actions > Windows Smoke Test > Run workflow); it also
-# runs on pushes to smoke/** branches.
+# Runs Duster's destructive commands for real on a throwaway Windows runner,
+# including the desktop steps of docs/release-checklist.md: keys typed into a
+# real terminal, Windows' own dialogs, real uninstalls and install.ps1's
+# elevation. Run it before tagging (Actions > Windows Smoke Test > Run
+# workflow); it also runs on pushes to smoke/** branches.
 on:
   workflow_dispatch:
   push:
@@ -17,7 +18,7 @@ jobs:
   smoke:
     name: Windows Smoke Test
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     defaults:
       run:
         shell: powershell
@@ -39,8 +40,15 @@ jobs:
           CGO_ENABLED: 0
         run: |
           go build -o du.exe .
+          if ($LASTEXITCODE) { throw 'go build failed' }
           # An older version string, so the update step has something to update.
           go build -ldflags "-X main.Version=1.0.1" -o du-old.exe .
+          if ($LASTEXITCODE) { throw 'go build (old) failed' }
+          # A real Inno Setup app for the uninstall checks.
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item du.exe dist\duster-windows-amd64.exe
+          & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' /Q installer\duster-setup.iss
+          if ($LASTEXITCODE) { throw 'ISCC failed' }
 
       - name: Read-only commands and exit codes
         run: |
@@ -148,6 +156,75 @@ jobs:
           $v = & "$dir\du.exe" --version
           Write-Host "after update: $v"
           if ("$v" -notmatch [regex]::Escape($j.latest_version)) { throw "expected $($j.latest_version) after update" }
+          exit 0
+
+      # What a person would check at a desktop: keys typed into a real terminal
+      # (a Windows pseudo console), Windows' own dialogs answered, and a real
+      # Inno Setup app uninstalled. See e2e/.
+      - name: Desktop checks (TUI keys, Recycle Bin prompt, real uninstalls)
+        timeout-minutes: 20
+        env:
+          CGO_ENABLED: 0
+        run: |
+          $env:DU_E2E_BIN = (Resolve-Path du.exe).Path
+          $env:DU_E2E_SETUP = (Get-ChildItem dist\installer\Duster-Setup-*.exe | Select-Object -First 1).FullName
+          go test ./e2e -count=1 -v -timeout 18m
+
+      # CI can't click a UAC prompt, and the runner is already elevated. These
+      # copies of install.ps1 pretend a policy blocks AppData and that the
+      # session is not elevated, so the real re-launch code runs (the runner
+      # elevates without a prompt) and must install to Program Files.
+      - name: Admin install path (elevated re-launch, denied prompt)
+        timeout-minutes: 10
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP "Du ster's installer"
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          $src = Get-Content scripts\install.ps1 -Raw
+          $marker = 'if ($IsDefaultLocalAppData) {'
+          if (([regex]::Matches($src, [regex]::Escape($marker))).Count -ne 1) { throw 'install.ps1 changed: update this step' }
+          # The elevated copy gets -InstallDir, so it reports itself as admin.
+          $fake = "function Test-WDACBlocked { param([string]`$Dir) `$true }`nfunction Test-IsAdminSession { `$UserSpecifiedDir }`n"
+          Set-Content "$dir\install.ps1" $src.Replace($marker, $fake + $marker) -Encoding UTF8
+          $pf = Join-Path $env:ProgramFiles 'Duster'
+
+          & "$dir\install.ps1" -Silent
+          if (-not (Test-Path "$pf\du.exe")) { throw 'the elevated re-launch did not install to Program Files' }
+          & "$pf\du.exe" --version
+
+          # Piped (irm | iex): no file to re-run, so the elevated copy fetches main's script.
+          Remove-Item -Recurse -Force $pf
+          & ([scriptblock]::Create((Get-Content "$dir\install.ps1" -Raw))) -Silent
+          if (-not (Test-Path "$pf\du.exe")) { throw 'the piped re-launch did not install to Program Files' }
+
+          # A denied prompt makes Start-Process -Verb RunAs throw.
+          Remove-Item -Recurse -Force $pf
+          $deny = "function Start-Process { throw 'The operation was canceled by the user.' }`n"
+          Set-Content "$dir\install-deny.ps1" $src.Replace($marker, $fake + $deny + $marker) -Encoding UTF8
+          $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$dir\install-deny.ps1" -Silent 2>&1 | Out-String
+          $code = $LASTEXITCODE
+          Write-Host $out
+          if ($code -eq 0) { throw 'a denied prompt did not fail the install' }
+          if ($out -notmatch 'Could not obtain administrator privileges') { throw 'a denied prompt gave no clear error' }
+          if (Test-Path "$pf\du.exe") { throw 'installed despite the denied prompt' }
+          exit 0
+
+      # v1.0.2's self-updater was a mock, so the release notes tell those users
+      # to reinstall once. Do exactly that over a real 1.0.2 install.
+      - name: Upgrade from v1.0.2 by reinstalling
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'from-1.0.2'
+          .\scripts\install.ps1 -InstallDir $dir -Version 1.0.2 -Silent
+          if ((& "$dir\du.exe" --version) -notmatch '1\.0\.2') { throw 'did not start from 1.0.2' }
+
+          .\scripts\install.ps1 -InstallDir $dir -Silent
+          $latest = (Invoke-RestMethod 'https://api.github.com/repos/Nur-Adnan/Duster/releases/latest' -Headers @{ Authorization = "Bearer $env:GH_TOKEN" }).tag_name.TrimStart('v')
+          $v = & "$dir\du.exe" --version
+          Write-Host "after reinstall: $v"
+          if ("$v" -notmatch [regex]::Escape($latest)) { throw "expected $latest after reinstalling" }
+          $j = & "$dir\du.exe" update --json | Out-String | ConvertFrom-Json
+          if ($j.status -ne 'UP_TO_DATE') { throw "update after reinstalling: $($j.status)" }
           exit 0
 
       - name: Remove (self-uninstall)
