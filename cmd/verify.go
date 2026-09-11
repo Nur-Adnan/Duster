@@ -34,7 +34,7 @@ var VerifyCmd = &cobra.Command{
 }
 
 func init() {
-	VerifyCmd.Flags().BoolVar(&verifyJSON, "json", false, "Output verification test records as a single JSON payload and exit immediately")
+	VerifyCmd.Flags().BoolVar(&verifyJSON, "json", false, "Output verification test records as a single JSON payload (exit code 1 if any case fails)")
 }
 
 // VerifyTestCase represents an individual verification assert.
@@ -65,6 +65,9 @@ func executeVerify(cmd *cobra.Command, args []string) {
 			os.Exit(1)
 		}
 		fmt.Println(string(data))
+		if !report.Healthy {
+			os.Exit(1)
+		}
 		return
 	}
 

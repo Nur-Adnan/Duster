@@ -106,8 +106,12 @@ Windows-native binary swap to safely self-update the utility in-place.`,
 	Run: executeUpdate,
 }
 
+// upYes allows headless/--json mode to install; without it headless only checks.
+var upYes bool
+
 func init() {
-	UpdateCmd.Flags().BoolVar(&upJSON, "json", false, "Output update availability details as JSON and exit immediately")
+	UpdateCmd.Flags().BoolVar(&upJSON, "json", false, "Output update status as JSON (installs only with --yes)")
+	UpdateCmd.Flags().BoolVarP(&upYes, "yes", "y", false, "Install an available update without confirmation in headless/--json mode")
 	UpdateCmd.Flags().BoolVarP(&upCheck, "check", "c", false, "Verify if an update is available without downloading it")
 	UpdateCmd.Flags().BoolVarP(&upForce, "force", "f", false, "Force executable update even if already on the latest version")
 }
@@ -414,29 +418,34 @@ func swapBinary(newBytes []byte) error {
 	return nil
 }
 
-// isNewerVersion reports whether latest is strictly newer than current,
-// comparing dot-separated numeric components (pre-release suffixes ignored).
+// isNewerVersion reports whether latest should be offered as an update to
+// current. Versions are [v]MAJOR.MINOR.PATCH with an optional -prerelease
+// suffix. Anything unparseable is never an update (a malformed tag must not
+// trigger a downgrade), and a pre-release is only offered to users already on
+// a pre-release: stable users wait for the final release.
 func isNewerVersion(latest, current string) bool {
-	parse := func(v string) []int {
-		v = strings.TrimPrefix(strings.TrimSpace(v), "v")
-		if i := strings.IndexAny(v, "-+"); i >= 0 {
-			v = v[:i]
+	parse := func(v string) (nums []int, pre string, ok bool) {
+		v = strings.TrimLeft(strings.TrimSpace(v), "vV")
+		if i := strings.IndexByte(v, '+'); i >= 0 {
+			v = v[:i] // build metadata never affects precedence
 		}
-		var nums []int
+		if i := strings.IndexByte(v, '-'); i >= 0 {
+			v, pre = v[:i], v[i+1:]
+		}
 		for _, part := range strings.Split(v, ".") {
 			n, err := strconv.Atoi(part)
-			if err != nil {
-				return nil
+			if err != nil || n < 0 {
+				return nil, "", false
 			}
 			nums = append(nums, n)
 		}
-		return nums
+		return nums, pre, true
 	}
 
-	l, c := parse(latest), parse(current)
-	if l == nil || c == nil {
-		// Unparseable versions (e.g. dev builds): treat any difference as an update.
-		return strings.TrimPrefix(latest, "v") != strings.TrimPrefix(current, "v")
+	l, lPre, okL := parse(latest)
+	c, cPre, okC := parse(current)
+	if !okL || !okC {
+		return false
 	}
 	for i := 0; i < len(l) || i < len(c); i++ {
 		var lv, cv int
@@ -447,10 +456,11 @@ func isNewerVersion(latest, current string) bool {
 			cv = c[i]
 		}
 		if lv != cv {
-			return lv > cv
+			return lv > cv && (lPre == "" || cPre != "")
 		}
 	}
-	return false
+	// Same version numbers: only the final release supersedes its pre-release.
+	return lPre == "" && cPre != ""
 }
 
 func runCheckReleaseCmd() tea.Cmd {
@@ -662,8 +672,13 @@ func runHeadlessUpdate() {
 	latestVersion := strings.TrimPrefix(rel.TagName, "v")
 	updateAvailable := checkErr == nil && (isNewerVersion(latestVersion, currentVersion) || upForce)
 
+	// Replacing the binary is destructive: without a TTY to confirm, require an
+	// explicit --yes (like purge/clean/optimize) rather than installing on
+	// `du update --json` or a piped stdout.
+	install := updateAvailable && !upCheck && upYes
+
 	var swapErr error
-	if updateAvailable && !upCheck {
+	if install {
 		if data, err := downloadVerifiedBinary(rel); err != nil {
 			swapErr = err
 		} else {
@@ -675,7 +690,7 @@ func runHeadlessUpdate() {
 	switch {
 	case checkErr != nil:
 		statusStr = fmt.Sprintf("CHECK_FAILED: %v", checkErr)
-	case updateAvailable && upCheck:
+	case updateAvailable && !install:
 		statusStr = "NEW_VERSION_AVAILABLE"
 	case updateAvailable && swapErr != nil:
 		statusStr = fmt.Sprintf("INSTALLATION_FAILED: %v", swapErr)

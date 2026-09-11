@@ -178,7 +178,7 @@ func runTaskCmd(idx int, task optimizeTask, dry bool, isAdmin bool) tea.Cmd {
 
 		switch task.ID {
 		case "dns":
-			c := exec.CommandContext(optCtx, "ipconfig", "/flushdns")
+			c := exec.CommandContext(optCtx, systemExecutable("ipconfig.exe"), "/flushdns")
 			setProcessGroup(c)
 			runErr = c.Run()
 			if runErr != nil {
@@ -187,32 +187,10 @@ func runTaskCmd(idx int, task optimizeTask, dry bool, isAdmin bool) tea.Cmd {
 			logOptOperation("flushdns", "DNS Resolver Cache", 0, runErr == nil)
 
 		case "delivery_opt":
-			windir := os.Getenv("WINDIR")
-			if windir == "" {
-				windir = `C:\Windows`
-			}
-			cacheDir := filepath.Join(windir, "SoftwareDistribution", "DeliveryOptimization", "Download")
+			cacheDir := filepath.Join(secureWindowsDir(), "SoftwareDistribution", "DeliveryOptimization", "Download")
 
 			if fs.IsValidPath(cacheDir) {
-				_ = filepath.WalkDir(cacheDir, func(path string, d os.DirEntry, err error) error {
-					if err == nil && !d.IsDir() {
-						info, err := d.Info()
-						if err == nil {
-							reclaimed += info.Size()
-						}
-					}
-					return nil
-				})
-
-				// Delete contents
-				entries, err := os.ReadDir(cacheDir)
-				if err == nil {
-					for _, entry := range entries {
-						entryPath := filepath.Join(cacheDir, entry.Name())
-						_ = removeAllSafe(entryPath)
-					}
-				} else {
-					runErr = err
+				if reclaimed, runErr = purgeDeliveryOptimization(cacheDir); runErr != nil {
 					status = statusFailed
 				}
 			} else {
@@ -230,7 +208,7 @@ func runTaskCmd(idx int, task optimizeTask, dry bool, isAdmin bool) tea.Cmd {
 			if !isAdmin {
 				status = statusSkipped
 			} else {
-				c := exec.CommandContext(optCtx, "defrag.exe", "/O", "/C")
+				c := exec.CommandContext(optCtx, systemExecutable("defrag.exe"), "/O", "/C")
 				setProcessGroup(c)
 				runErr = c.Run()
 				if runErr != nil {
@@ -244,6 +222,34 @@ func runTaskCmd(idx int, task optimizeTask, dry bool, isAdmin bool) tea.Cmd {
 
 		return optTaskProgressMsg{idx: idx, status: status, reclaimed: reclaimed, err: runErr}
 	}
+}
+
+// purgeDeliveryOptimization empties cacheDir, shared by the TUI and headless
+// paths. It reports only bytes actually deleted (the old code counted the
+// whole cache up front and ignored delete errors) and returns the first
+// failure, e.g. files locked by the Delivery Optimization service.
+func purgeDeliveryOptimization(cacheDir string) (int64, error) {
+	entries, err := os.ReadDir(cacheDir)
+	if err != nil {
+		return 0, err
+	}
+	var reclaimed int64
+	var firstErr error
+	for _, e := range entries {
+		p := filepath.Join(cacheDir, e.Name())
+		size := calculateDirSize(p)
+		if err := removeAllSafe(p); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			if left := calculateDirSize(p); left < size {
+				reclaimed += size - left
+			}
+			continue
+		}
+		reclaimed += size
+	}
+	return reclaimed, firstErr
 }
 
 func (m optimizeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -446,7 +452,7 @@ func runHeadlessOptimize() {
 		case "dns":
 			// Same cancellation/process-group behavior as the TUI path, so an
 			// interrupted pipeline can't orphan child processes.
-			c := exec.CommandContext(optCtx, "ipconfig", "/flushdns")
+			c := exec.CommandContext(optCtx, systemExecutable("ipconfig.exe"), "/flushdns")
 			setProcessGroup(c)
 			runErr = c.Run()
 			if runErr != nil {
@@ -458,36 +464,18 @@ func runHeadlessOptimize() {
 			logOptOperation("flushdns", "DNS Resolver Cache", 0, runErr == nil)
 
 		case "delivery_opt":
-			windir := os.Getenv("WINDIR")
-			if windir == "" {
-				windir = `C:\Windows`
-			}
-			cacheDir := filepath.Join(windir, "SoftwareDistribution", "DeliveryOptimization", "Download")
+			cacheDir := filepath.Join(secureWindowsDir(), "SoftwareDistribution", "DeliveryOptimization", "Download")
 
 			var reclaimed int64
 			if fs.IsValidPath(cacheDir) {
-				_ = filepath.WalkDir(cacheDir, func(path string, d os.DirEntry, err error) error {
-					if err == nil && !d.IsDir() {
-						info, err := d.Info()
-						if err == nil {
-							reclaimed += info.Size()
-						}
-					}
-					return nil
-				})
-
-				entries, err := os.ReadDir(cacheDir)
-				if err == nil {
-					for _, entry := range entries {
-						_ = removeAllSafe(filepath.Join(cacheDir, entry.Name()))
-					}
-					tasks[i].Status = statusCompleted
-					tasks[i].Reclaimed = reclaimed
-					totalReclaimed += reclaimed
-				} else {
+				reclaimed, runErr = purgeDeliveryOptimization(cacheDir)
+				tasks[i].Reclaimed = reclaimed
+				totalReclaimed += reclaimed
+				if runErr != nil {
 					tasks[i].Status = statusFailed
-					tasks[i].ErrorMsg = err.Error()
-					runErr = err
+					tasks[i].ErrorMsg = runErr.Error()
+				} else {
+					tasks[i].Status = statusCompleted
 				}
 			} else {
 				tasks[i].Status = statusSkipped
@@ -500,7 +488,7 @@ func runHeadlessOptimize() {
 			if !isAdmin {
 				tasks[i].Status = statusSkipped
 			} else {
-				c := exec.CommandContext(optCtx, "defrag.exe", "/O", "/C")
+				c := exec.CommandContext(optCtx, systemExecutable("defrag.exe"), "/O", "/C")
 				setProcessGroup(c)
 				runErr = c.Run()
 				if runErr != nil {

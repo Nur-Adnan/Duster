@@ -81,39 +81,110 @@ func isUNCShareRoot(p string) bool {
 	return len(segs) <= 2 // \\server or \\server\share
 }
 
-// stripExtendedPrefix removes the \\?\ and \\.\ extended-length / device
-// prefixes (including the \\?\UNC\ form) so they cannot be used to slip a
-// protected path past the string comparisons in IsSystemProtectedPath.
-func stripExtendedPrefix(p string) string {
-	for _, pfx := range []string{"\\\\?\\", "\\\\.\\"} {
+// normalizeWinPath lowercases p and resolves it the way the Win32 path parser
+// will, on every host OS, so the protected-path checks compare the path
+// Windows actually opens rather than its spelling:
+//   - "/" becomes "\"; \\?\, \\.\ and \??\ prefixes are removed (\\?\UNC\ -> \\)
+//   - admin shares (\\host\c$\x) become their drive form (c:\x)
+//   - trailing dots and spaces are trimmed from every component ("windows." -> "windows")
+//   - "." and ".." are resolved lexically
+//
+// ok is false for forms that must never be a deletion target: device/NT object
+// paths (GLOBALROOT, Volume{GUID}, PhysicalDrive0), alternate data streams or
+// any other ':' past the drive, and components that vanish when trimmed.
+func normalizeWinPath(p string) (norm string, ok bool) {
+	p = strings.ToLower(strings.ReplaceAll(p, "/", `\`))
+	device := false
+	for _, pfx := range []string{`\\?\`, `\\.\`, `\??\`} {
 		if strings.HasPrefix(p, pfx) {
-			p = p[len(pfx):]
-			if strings.HasPrefix(p, "unc\\") { // \\?\UNC\server\share
-				p = "\\\\" + p[len("unc\\"):]
+			p, device = p[len(pfx):], true
+			if strings.HasPrefix(p, `unc\`) {
+				p = `\\` + p[len(`unc\`):]
 			}
 			break
 		}
 	}
-	return p
+
+	var prefix, rest string
+	switch {
+	case strings.HasPrefix(p, `\\`):
+		parts := strings.SplitN(p[2:], `\`, 3)
+		if len(parts) < 2 || parts[1] == "" {
+			return p, true // \\server or \\server\ : a share root, protected by isUNCShareRoot
+		}
+		host, share := parts[0], parts[1]
+		if len(share) == 2 && share[1] == '$' && isDriveLetter(share[0]) {
+			prefix = share[:1] + ":" // \\host\c$ is drive c:
+		} else if strings.HasSuffix(share, "$") {
+			return "", false // admin$ (Windows dir), print$ (spool drivers), other hidden admin shares
+		} else {
+			prefix = `\\` + host + `\` + share
+		}
+		if len(parts) == 3 {
+			rest = parts[2]
+		}
+	case len(p) >= 2 && p[1] == ':' && isDriveLetter(p[0]):
+		prefix, rest = p[:2], p[2:]
+		if rest != "" && rest[0] != '\\' {
+			return p, true // drive-relative (c:foo): protected by isDriveRootOrRelative
+		}
+	default:
+		if device {
+			return "", false // \\.\PhysicalDrive0, \\?\GLOBALROOT\..., \\?\Volume{...}\...
+		}
+		rest = p // rooted (\x), relative, or a POSIX path on a test host
+	}
+
+	rooted := prefix != "" || strings.HasPrefix(rest, `\`)
+	var out []string
+	for _, s := range strings.Split(rest, `\`) {
+		switch s {
+		case "", ".":
+			continue
+		case "..":
+			if len(out) > 0 {
+				out = out[:len(out)-1]
+			}
+			continue
+		}
+		t := strings.TrimRight(s, ". ")
+		if t == "" || strings.Contains(t, ":") {
+			return "", false
+		}
+		out = append(out, t)
+	}
+	norm = prefix + strings.Join(out, `\`)
+	if rooted {
+		norm = prefix + `\` + strings.Join(out, `\`)
+	}
+	return norm, true
+}
+
+// normalizedOrRaw is normalizeWinPath for trusted system locations, where an
+// unparseable value should still be compared rather than discarded.
+func normalizedOrRaw(p string) string {
+	if n, ok := normalizeWinPath(p); ok {
+		return n
+	}
+	return strings.ToLower(p)
 }
 
 // IsSystemProtectedPath checks if a path falls under protected Windows directories.
 // Non-negotiable safety rules: C:\Windows\System32, C:\Program Files, and roots of drives are protected.
+// Any path it cannot confidently normalize is treated as protected (fail closed).
 func IsSystemProtectedPath(path string) bool {
-	resolved := strings.ToLower(filepath.Clean(ResolveEnvPath(path)))
-
-	// Normalize slashes to backslashes for Windows standard auditing
-	resolved = strings.ReplaceAll(resolved, "/", "\\")
-
-	// Strip \\?\ / \\.\ device prefixes before any comparison; otherwise
-	// "\\?\C:\Windows" would defeat every stem check below.
-	resolved = stripExtendedPrefix(resolved)
+	resolved, ok := normalizeWinPath(ResolveEnvPath(path))
+	if !ok {
+		return true
+	}
 
 	// Canonicalize 8.3 short names (e.g. PROGRA~1 -> program files) so they
 	// cannot alias past the long-form protected stems. No-op off Windows and
 	// for paths that don't exist on disk.
 	if long := getLongPathName(resolved); long != "" {
-		resolved = strings.ToLower(strings.ReplaceAll(filepath.Clean(long), "/", "\\"))
+		if resolved, ok = normalizeWinPath(long); !ok {
+			return true
+		}
 	}
 
 	// Bare drive roots, dotted/relative drives, and UNC share roots are
@@ -123,12 +194,17 @@ func IsSystemProtectedPath(path string) bool {
 	}
 
 	// Get system directory locations (normalized to lowercase)
-	winDir := strings.ToLower(strings.ReplaceAll(filepath.Clean(ResolveEnvPath("%WINDIR%")), "/", "\\"))
-	sysDrive := strings.ToLower(strings.ReplaceAll(filepath.Clean(ResolveEnvPath("%SYSTEMDRIVE%")), "/", "\\"))
+	winDir := normalizedOrRaw(ResolveEnvPath("%WINDIR%"))
+	// Just the drive ("c:"): %SYSTEMDRIVE% normalizes to "c:\" on POSIX but
+	// "c:." on Windows (filepath.Clean("C:")), so take the first two bytes.
+	sysDrive := "c:"
+	if d := normalizedOrRaw(ResolveEnvPath("%SYSTEMDRIVE%")); len(d) >= 2 && d[1] == ':' {
+		sysDrive = d[:2]
+	}
 
 	// Native Windows API overrides to completely defeat environment spoofing
 	if secureWin, err := GetSecureWindowsDirectory(); err == nil && secureWin != "" {
-		winDir = strings.ToLower(strings.ReplaceAll(filepath.Clean(secureWin), "/", "\\"))
+		winDir = normalizedOrRaw(secureWin)
 		// Derive the system drive from the kernel-provided Windows dir so a
 		// spoofed %SYSTEMDRIVE% cannot unprotect Program Files / Boot / EFI.
 		if len(winDir) >= 2 && winDir[1] == ':' {
@@ -138,10 +214,8 @@ func IsSystemProtectedPath(path string) bool {
 
 	system32 := winDir + "\\system32"
 	if secureSys, err := GetSecureSystemDirectory(); err == nil && secureSys != "" {
-		system32 = strings.ToLower(strings.ReplaceAll(filepath.Clean(secureSys), "/", "\\"))
+		system32 = normalizedOrRaw(secureSys)
 	}
-	programFiles := sysDrive + "\\program files"
-	programFilesX86 := sysDrive + "\\program files (x86)"
 
 	// 1. Never delete C:\Windows\System32 or anything inside it
 	if resolved == system32 || strings.HasPrefix(resolved, system32+"\\") {
@@ -178,12 +252,13 @@ func IsSystemProtectedPath(path string) bool {
 		}
 	}
 
-	// 3. Never delete C:\Program Files or C:\Program Files (x86) directly
-	if resolved == programFiles || strings.HasPrefix(resolved, programFiles+"\\") {
-		return true
-	}
-	if resolved == programFilesX86 || strings.HasPrefix(resolved, programFilesX86+"\\") {
-		return true
+	// 3. Never delete Program Files or Program Files (x86), on any drive
+	if len(resolved) >= 3 && resolved[1] == ':' {
+		for _, pf := range []string{`\program files`, `\program files (x86)`} {
+			if stem := resolved[2:]; stem == pf || strings.HasPrefix(stem, pf+`\`) {
+				return true
+			}
+		}
 	}
 
 	// 4. Never delete boot, recovery, or volume-metadata structures

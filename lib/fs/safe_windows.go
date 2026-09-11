@@ -30,16 +30,25 @@ func getLongPathName(path string) string {
 	if err != nil {
 		return ""
 	}
-	buf := make([]uint16, 320)
-	ret, _, _ := procGetLongPathName.Call(
-		uintptr(unsafe.Pointer(p)),
-		uintptr(unsafe.Pointer(&buf[0])),
-		uintptr(len(buf)),
-	)
-	if ret == 0 || int(ret) > len(buf) {
-		return ""
+	// A fixed buffer silently skipped expansion for long paths; when it is too
+	// small the API returns the required size (incl. NUL), so retry once.
+	n := 320
+	for attempt := 0; attempt < 2; attempt++ {
+		buf := make([]uint16, n)
+		ret, _, _ := procGetLongPathName.Call(
+			uintptr(unsafe.Pointer(p)),
+			uintptr(unsafe.Pointer(&buf[0])),
+			uintptr(len(buf)),
+		)
+		if ret == 0 {
+			return ""
+		}
+		if int(ret) < len(buf) {
+			return syscall.UTF16ToString(buf[:ret])
+		}
+		n = int(ret)
 	}
-	return syscall.UTF16ToString(buf[:ret])
+	return ""
 }
 
 const (

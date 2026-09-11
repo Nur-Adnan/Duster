@@ -116,20 +116,9 @@ func runHeadlessAnalyze(target string) {
 		})
 	}
 
-	// Count child directories and files
-	dirsCount := 0
-	filesCount := 0
-	_ = filepath.WalkDir(target, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() {
-			dirsCount++
-		} else {
-			filesCount++
-		}
-		return nil
-	})
+	// Counts come from the scanned tree, so they agree with total_size (both
+	// skip .git, node_modules, ...); a second full walk cost ~28% of runtime.
+	filesCount, dirsCount := countFilesAndFolders(root)
 
 	output := AnalyzeJSONOutput{
 		Path:          target,
@@ -183,6 +172,7 @@ type analyzeModel struct {
 	tree           *FolderNode
 	selectedIdx    int
 	historyStack   []*FolderNode
+	stale          bool // a recycle happened: in-memory ancestors may be out of date
 	showLargeFiles bool
 	largeFiles     []FileNode
 	confirmRecycle bool
@@ -268,6 +258,7 @@ func (m analyzeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				} else {
 					m.errorMsg = ""
 					m.selectedIdx = 0
+					m.stale = true // ancestors in historyStack still count the recycled item
 					// Re-trigger scanning on the current folder node's path to refresh sizes
 					m.scanning = true
 					m.scanChan = make(chan scanProgressInfo, 100)
@@ -331,6 +322,15 @@ func (m analyzeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(m.tree.Entries) > 0 {
 				entry := m.tree.Entries[m.selectedIdx]
 				if entry.IsDir {
+					// Descend in memory: the subtree was scanned with its parent,
+					// so rescanning it (seconds on large trees) is wasted work.
+					for _, sub := range m.tree.SubFolders {
+						if sub.Path == entry.Path {
+							m.historyStack = append(m.historyStack, m.tree)
+							m.showNode(sub)
+							return m, nil
+						}
+					}
 					// Move downward, save history stack
 					m.historyStack = append(m.historyStack, m.tree)
 					m.scanning = true
@@ -355,6 +355,12 @@ func (m analyzeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				parent := m.historyStack[lastIdx]
 				m.historyStack = m.historyStack[:lastIdx]
 
+				// The parent is still in memory; rescan only when a recycle
+				// since then may have left its sizes stale.
+				if !m.stale {
+					m.showNode(parent)
+					return m, nil
+				}
 				m.scanning = true
 				m.selectedIdx = 0
 				m.scanChan = make(chan scanProgressInfo, 100)
@@ -585,7 +591,6 @@ func scanDirectory(root string, progressChan chan<- scanProgressInfo) (*FolderNo
 	root = filepath.Clean(root)
 
 	folderMap := make(map[string]*FolderNode)
-	var allFiles []FileNode
 
 	rootNode := &FolderNode{
 		Path:  root,
@@ -640,7 +645,6 @@ func scanDirectory(root string, progressChan chan<- scanProgressInfo) (*FolderNo
 					Path: path,
 					Size: size,
 				}
-				allFiles = append(allFiles, fileNode)
 
 				parentPath := filepath.Dir(path)
 				if parent, pExists := folderMap[parentPath]; pExists {
@@ -686,54 +690,94 @@ func scanDirectory(root string, progressChan chan<- scanProgressInfo) (*FolderNo
 			size += sub.Size
 		}
 		node.Size = size
+	}
 
-		var entries []EntryInfo
-		for _, sub := range node.SubFolders {
-			entries = append(entries, EntryInfo{
-				Name:  sub.Name + "\\",
-				Path:  sub.Path,
-				Size:  sub.Size,
-				IsDir: true,
-				Items: len(sub.SubFolders) + len(sub.Files),
-			})
-		}
-		for _, f := range node.Files {
-			entries = append(entries, EntryInfo{
-				Name:  filepath.Base(f.Path),
-				Path:  f.Path,
-				Size:  f.Size,
-				IsDir: false,
-			})
-		}
+	// Entries are built per displayed folder (showNode). Building them for
+	// every folder, plus a global list of all files, stored each file 3 times.
+	buildEntries(rootNode)
+	return rootNode, topFiles(rootNode, 10), nil
+}
 
-		// Sort items inside folder by size descending
-		sort.Slice(entries, func(i, j int) bool {
-			return entries[i].Size > entries[j].Size
+// buildEntries fills n.Entries (subfolders and files, largest first) once.
+func buildEntries(n *FolderNode) {
+	if n.Entries != nil {
+		return
+	}
+	entries := make([]EntryInfo, 0, len(n.SubFolders)+len(n.Files))
+	for _, sub := range n.SubFolders {
+		entries = append(entries, EntryInfo{
+			Name:  sub.Name + "\\",
+			Path:  sub.Path,
+			Size:  sub.Size,
+			IsDir: true,
+			Items: len(sub.SubFolders) + len(sub.Files),
 		})
-		node.Entries = entries
 	}
-
-	// Sort large files list globally (descending by size, keep top 10)
-	sort.Slice(allFiles, func(i, j int) bool {
-		return allFiles[i].Size > allFiles[j].Size
+	for _, f := range n.Files {
+		entries = append(entries, EntryInfo{
+			Name:  filepath.Base(f.Path),
+			Path:  f.Path,
+			Size:  f.Size,
+			IsDir: false,
+		})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Size > entries[j].Size
 	})
-	if len(allFiles) > 10 {
-		allFiles = allFiles[:10]
-	}
+	n.Entries = entries
+}
 
-	return rootNode, allFiles, nil
+// topFiles returns the k largest files under n, largest first, in one pass
+// with a k-sized buffer instead of sorting every file.
+func topFiles(n *FolderNode, k int) []FileNode {
+	top := make([]FileNode, 0, k+1)
+	var walk func(*FolderNode)
+	walk = func(n *FolderNode) {
+		for _, f := range n.Files {
+			if len(top) == k && f.Size <= top[k-1].Size {
+				continue
+			}
+			i := sort.Search(len(top), func(i int) bool { return top[i].Size < f.Size })
+			top = append(top, FileNode{})
+			copy(top[i+1:], top[i:])
+			top[i] = f
+			if len(top) > k {
+				top = top[:k]
+			}
+		}
+		for _, sub := range n.SubFolders {
+			walk(sub)
+		}
+	}
+	walk(n)
+	return top
+}
+
+// showNode displays an already-scanned folder without touching the disk.
+func (m *analyzeModel) showNode(n *FolderNode) {
+	buildEntries(n)
+	m.tree = n
+	m.selectedIdx = 0
+	m.largeFiles = topFiles(n, 10)
+	m.fileCount, m.folderCount = countFilesAndFolders(n)
 }
 
 // Premium System Operations & Safety Controls
 func openInExplorer(path string) error {
+	// Absolute path: a bare "explorer.exe" is resolved through PATH.
+	explorer := filepath.Join(secureWindowsDir(), "explorer.exe")
 	var cmd *exec.Cmd
 	info, err := os.Stat(path)
 	if err == nil && info.IsDir() {
-		cmd = exec.Command("explorer.exe", path)
+		cmd = exec.Command(explorer, path)
 	} else {
-		cmd = exec.Command("explorer.exe", "/select,", path)
+		cmd = exec.Command(explorer, "/select,", path)
 	}
-	return cmd.Start()
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	go func() { _ = cmd.Wait() }() // reap the process handle
+	return nil
 }
 
 func recyclePath(path string, size int64) error {

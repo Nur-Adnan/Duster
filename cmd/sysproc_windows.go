@@ -18,3 +18,12 @@ func setProcessGroup(c *exec.Cmd) {
 	}
 	c.SysProcAttr.CreationFlags = syscall.CREATE_NEW_PROCESS_GROUP
 }
+
+// setRawCmdLine hands line to CreateProcess as-is instead of re-escaping
+// c.Args. c.Path still names the executable, so the line cannot redirect it.
+func setRawCmdLine(c *exec.Cmd, line string) {
+	if c.SysProcAttr == nil {
+		c.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	c.SysProcAttr.CmdLine = line
+}

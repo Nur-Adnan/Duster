@@ -35,15 +35,20 @@ var developerArtifacts = map[string]string{
 // %USERPROFILE%\go\bin holds installed tools, Documents\build may be real data),
 // so without this check `purge -y` would permanently delete them. Entries
 // starting with "." are matched against a file extension; others against the
-// full file name. Names absent from this map (node_modules, .m2, .gradle, ...)
-// are unambiguous enough to match on name alone.
+// full file name. Names absent from this map (.serverless, .sst) are
+// unambiguous enough to match on name alone. node_modules, .gradle and .m2 need
+// a marker too: without one they are the global npm prefix, the Gradle home or
+// the local Maven repository, none of which is disposable build output.
 var artifactMarkers = map[string][]string{
-	"target": {"Cargo.toml", "pom.xml", "build.sbt"}, // Rust (cargo), Maven, sbt
-	"bin":    {".csproj", ".sln", ".vbproj", ".fsproj"},
-	"obj":    {".csproj", ".sln", ".vbproj", ".fsproj"},
-	"build":  {"package.json", "build.gradle", "build.gradle.kts", "pom.xml", "CMakeLists.txt"},
-	"dist":   {"package.json"},
-	"vendor": {"go.mod", "composer.json"},
+	"node_modules": {"package.json"},
+	".gradle":      {"build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts"},
+	".m2":          {"pom.xml"},
+	"target":       {"Cargo.toml", "pom.xml", "build.sbt"}, // Rust (cargo), Maven, sbt
+	"bin":          {".csproj", ".sln", ".vbproj", ".fsproj"},
+	"obj":          {".csproj", ".sln", ".vbproj", ".fsproj"},
+	"build":        {"package.json", "build.gradle", "build.gradle.kts", "pom.xml", "CMakeLists.txt"},
+	"dist":         {"package.json"},
+	"vendor":       {"go.mod", "composer.json"},
 }
 
 // isLikelyBuildArtifact reports whether a directory named `name` (lowercased) at
@@ -265,44 +270,8 @@ func listenToScanProgress(ch chan scanProgressMsg) tea.Cmd {
 
 func runScanCmd(root string, ch chan scanProgressMsg) tea.Cmd {
 	return func() tea.Msg {
-		var list []DiscoveredArtifact
-		_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-			if err != nil {
-				return nil
-			}
-			if !d.IsDir() {
-				return nil
-			}
-			name := d.Name()
-			if name == ".git" || name == ".svn" || name == ".vscode" || name == "$Recycle.Bin" || name == "System Volume Information" {
-				return filepath.SkipDir
-			}
-			if !fs.IsValidPath(path) {
-				return filepath.SkipDir
-			}
-
-			if framework, exists := developerArtifacts[strings.ToLower(name)]; exists {
-				if !isLikelyBuildArtifact(strings.ToLower(name), path) {
-					return nil // ambiguous folder with no project marker — keep scanning inside
-				}
-				size := calculateDirSize(path)
-				art := DiscoveredArtifact{
-					Path:      path,
-					Name:      name,
-					Type:      strings.ToLower(name),
-					Framework: framework,
-					Size:      size,
-					Selected:  true,
-				}
-				list = append(list, art)
-				ch <- scanProgressMsg{
-					LatestFound: path,
-					Size:        size,
-					Count:       len(list),
-				}
-				return filepath.SkipDir
-			}
-			return nil
+		list, _ := scanArtifacts(root, func(a DiscoveredArtifact, count int) {
+			ch <- scanProgressMsg{LatestFound: a.Path, Size: a.Size, Count: count}
 		})
 		close(ch)
 		return scanCompleteMsg{artifacts: list}
@@ -704,7 +673,7 @@ func logPurgeOperation(action, target string, size int64, success bool) {
 
 // Headless non-interactive execution supporting pipes/snapshots
 func runHeadlessPurge(target string) {
-	list, err := scanDeveloperArtifactsHeadless(target)
+	list, err := scanArtifacts(target, nil)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error scanning: %v\n", err)
 		os.Exit(1)
@@ -737,7 +706,11 @@ func runHeadlessPurge(target string) {
 	fmt.Println(string(data))
 }
 
-func scanDeveloperArtifactsHeadless(root string) ([]DiscoveredArtifact, error) {
+// scanArtifacts walks root for purgeable build artifacts, calling onFound (if
+// non-nil) with each artifact and the running count. It is the single scanner
+// for the TUI and headless paths, so the two can never disagree about what is
+// eligible for deletion.
+func scanArtifacts(root string, onFound func(DiscoveredArtifact, int)) ([]DiscoveredArtifact, error) {
 	list := []DiscoveredArtifact{} // non-nil so JSON renders [] instead of null
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -747,10 +720,15 @@ func scanDeveloperArtifactsHeadless(root string) ([]DiscoveredArtifact, error) {
 			return nil
 		}
 		name := d.Name()
-		// Keep this skip list identical to the TUI scan (runScanCmd): the two
-		// modes must never disagree about what is eligible for deletion.
-		if name == ".git" || name == ".svn" || name == ".vscode" || name == "$Recycle.Bin" || name == "System Volume Information" {
+		switch strings.ToLower(name) {
+		case ".git", ".svn", ".vscode", "$recycle.bin", "system volume information":
 			return filepath.SkipDir
+		case "appdata":
+			// Installed apps (Electron resources\app\node_modules, global npm)
+			// live here, not workspaces; only scan it if explicitly targeted.
+			if path != root {
+				return filepath.SkipDir
+			}
 		}
 		if !fs.IsValidPath(path) {
 			return filepath.SkipDir
@@ -760,15 +738,18 @@ func scanDeveloperArtifactsHeadless(root string) ([]DiscoveredArtifact, error) {
 			if !isLikelyBuildArtifact(strings.ToLower(name), path) {
 				return nil // ambiguous folder with no project marker — keep scanning inside
 			}
-			size := calculateDirSize(path)
-			list = append(list, DiscoveredArtifact{
+			a := DiscoveredArtifact{
 				Path:      path,
 				Name:      name,
 				Type:      strings.ToLower(name),
 				Framework: framework,
-				Size:      size,
+				Size:      calculateDirSize(path),
 				Selected:  true,
-			})
+			}
+			list = append(list, a)
+			if onFound != nil {
+				onFound(a, len(list))
+			}
 			return filepath.SkipDir
 		}
 		return nil
@@ -778,7 +759,7 @@ func scanDeveloperArtifactsHeadless(root string) ([]DiscoveredArtifact, error) {
 
 // Bulk headless non-interactive deletion if -y/--yes is flagged
 func runNonInteractivePurge(target string) {
-	list, err := scanDeveloperArtifactsHeadless(target)
+	list, err := scanArtifacts(target, nil)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error scanning target: %v\n", err)
 		os.Exit(1)
