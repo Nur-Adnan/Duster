@@ -49,6 +49,7 @@ func executeStatus(cmd *cobra.Command, args []string) {
 			fmt.Fprintf(os.Stderr, "Error gathering stats: %v\n", err)
 			os.Exit(1)
 		}
+		stats.TopProcesses = sysinfo.TopProcesses(time.Second)
 		data, err := json.MarshalIndent(stats, "", "  ")
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error encoding JSON: %v\n", err)

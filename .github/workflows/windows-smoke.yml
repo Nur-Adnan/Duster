@@ -57,7 +57,14 @@ jobs:
 
           $a = .\du.exe analyze --json . | Out-String | ConvertFrom-Json
           if ($a.total_size -le 0) { throw "analyze reported no size" }
+
+          $s = .\du.exe status --json | Out-String | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $s.RAMTotal -le 0) { throw "status --json failed" }
+          $s.TopProcesses | ForEach-Object { Write-Host "  top $($_.Name) cpu=$([math]::Round($_.CPU, 1))%" }
           exit 0
+
+      - name: Status polling cost (per-tick benchmark)
+        run: go test -run '^$' -bench . -benchtime 20x -benchmem ./lib/sysinfo
 
       - name: Clean (junction root, locked file)
         timeout-minutes: 15
