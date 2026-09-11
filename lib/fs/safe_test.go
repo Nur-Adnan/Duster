@@ -99,6 +99,27 @@ func TestIsSystemProtectedPath(t *testing.T) {
 		{"UNC share root", `\\server\share`, true},
 		{"UNC server only", `\\server`, true},
 		{"UNC deep path is fine", `\\server\share\sub\file`, false},
+		// Spellings the Win32 path parser resolves to a protected target.
+		{"NT prefix System32", `\??\C:\Windows\System32`, true},
+		{"Trailing dot on component", `C:\Windows.\System32`, true},
+		{"Trailing dot and space", `C:\Windows. \System32`, true},
+		{"Dotdot out of allowed Temp", `C:\Windows\Temp\..\System32`, true},
+		{"Forward-slash dotdot", `C:/Windows/Temp/../System32`, true},
+		{"Dots-only component", `C:\Users\x\...\y`, true},
+		{"ADS index allocation", `C:\Windows::$INDEX_ALLOCATION\System32`, true},
+		{"ADS on file", `C:\Users\x\file.txt:secret`, true},
+		{"GLOBALROOT device path", `\\?\GLOBALROOT\Device\HarddiskVolume3\Windows\System32`, true},
+		{"Volume GUID path", `\\?\Volume{12345678-1234-1234-1234-123456789abc}\Windows\System32`, true},
+		{"Physical drive", `\\.\PhysicalDrive0`, true},
+		{"Admin share System32", `\\localhost\C$\Windows\System32`, true},
+		{"Extended UNC admin share", `\\?\UNC\localhost\c$\Windows\System32`, true},
+		{"Admin share root", `\\server\d$`, true},
+		{"admin$ share (Windows dir)", `\\localhost\admin$\System32`, true},
+		{"print$ share (spool drivers)", `\\server\print$\x64`, true},
+		{"Program Files on D", `D:\Program Files\App`, true},
+		{"Program Files x86 on E", `E:\Program Files (x86)`, true},
+		{"Trailing dot on safe file", `C:\Users\x\Downloads\setup.exe.`, false},
+		{"Admin share safe temp", `\\localhost\c$\Windows\Temp\x`, false},
 	}
 
 	// Force env fallbacks (empty reads as unset); t.Setenv auto-restores.
@@ -125,6 +146,8 @@ func TestIsValidPath(t *testing.T) {
 		{"Relative path", `.\relative\path`, false},
 		{"Absolute safe path", `C:\Users\Default\AppData\Local\Temp\duster`, true},
 		{"Absolute unsafe path", `C:\Windows\System32`, false},
+		{"NT prefix unsafe path", `\??\C:\Windows\System32`, false},
+		{"Trailing-dot unsafe path", `C:\Windows.\System32`, false},
 	}
 
 	for _, tt := range tests {
