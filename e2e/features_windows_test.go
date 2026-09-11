@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -24,7 +25,10 @@ func TestReportScreensFinishAndQuit(t *testing.T) {
 			tm := start(t, name)
 			tm.waitFor("Press [q/esc] to exit.", 3*time.Minute)
 			if name == "verify" && !tm.onScreen("SECURED & CERTIFIED") {
-				t.Error("verify did not certify the build")
+				// Same checks, same folder, no terminal: tells a Duster fault from
+				// a screen-replay one.
+				out, err := exec.Command(duBin(t), "verify", "--json").CombinedOutput()
+				t.Errorf("verify did not certify the build; screen:\n%s\nverify --json (err %v):\n%s", tm.screen(), err, out)
 			}
 			tm.send("q")
 			if code := tm.waitExit(10 * time.Second); code != 0 {
