@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Nur-Adnan/duster/internal/logging"
+	"github.com/Nur-Adnan/duster/lib/elevation"
 	"github.com/Nur-Adnan/duster/lib/fs"
 	"github.com/Nur-Adnan/duster/lib/uninstall"
 	tea "github.com/charmbracelet/bubbletea"
@@ -187,6 +188,12 @@ func scanAppsCmd() tea.Cmd {
 // and a blocking Update() freezes the whole TUI on the confirm screen.
 func runNativeUninstallCmd(app uninstall.InstalledApp) tea.Cmd {
 	return func() tea.Msg {
+		// A per-user (HKCU) uninstaller lives in a folder any of the user's
+		// processes can write; running it elevated would run whatever was
+		// planted there as admin.
+		if app.RegistryHive == "HKCU" && elevation.IsAdmin() {
+			return nativeUninstallDoneMsg{err: errors.New("per-user app: run Duster without administrator rights to uninstall it")}
+		}
 		if uninstDryRun {
 			return nativeUninstallDoneMsg{}
 		}
@@ -757,22 +764,22 @@ func countSelectedLeftovers(list []leftoverItem) int {
 	return c
 }
 
-// parseUninstallString splits an uninstaller command line into executable + args.
-// A quoted executable is taken verbatim. An UNQUOTED path may still contain
-// spaces (e.g. `C:\Program Files\App\uninst.exe /S`), so rather than naively
-// splitting on the first space — which yields `C:\Program`, hijackable by a
-// planted C:\Program.exe — it splits at the first executable-extension boundary.
-func parseUninstallString(uninstStr string) (string, []string) {
+// splitUninstallString splits an uninstaller command line into the executable
+// and its argument tail, which is returned untouched. A quoted executable is
+// taken verbatim. An UNQUOTED path may still contain spaces (e.g.
+// `C:\Program Files\App\uninst.exe /S`), so rather than naively splitting on
+// the first space — which yields `C:\Program`, hijackable by a planted
+// C:\Program.exe — it splits at the first executable-extension boundary.
+func splitUninstallString(uninstStr string) (exe, tail string) {
 	uninstStr = strings.TrimSpace(uninstStr)
 	if uninstStr == "" {
-		return "", nil
+		return "", ""
 	}
 
 	// Quoted executable: the exe is exactly the first quoted span.
 	if uninstStr[0] == '"' {
 		if end := strings.IndexByte(uninstStr[1:], '"'); end >= 0 {
-			exe := uninstStr[1 : 1+end]
-			return exe, splitArgs(strings.TrimSpace(uninstStr[end+2:]))
+			return uninstStr[1 : 1+end], strings.TrimSpace(uninstStr[end+2:])
 		}
 		// Malformed (no closing quote): fall through to boundary detection.
 	}
@@ -789,59 +796,52 @@ func parseUninstallString(uninstStr string) (string, []string) {
 			}
 			end := from + rel + len(ext)
 			if end == len(uninstStr) || uninstStr[end] == ' ' || uninstStr[end] == '\t' {
-				return uninstStr[:end], splitArgs(strings.TrimSpace(uninstStr[end:]))
+				return uninstStr[:end], strings.TrimSpace(uninstStr[end:])
 			}
 			from = end
 		}
 	}
 
-	// No executable extension found: fall back to whitespace tokenization.
-	fields := strings.Fields(uninstStr)
-	if len(fields) == 0 {
-		return "", nil
+	// No executable extension found: the exe is the first whitespace field.
+	if i := strings.IndexAny(uninstStr, " \t"); i >= 0 {
+		return uninstStr[:i], strings.TrimSpace(uninstStr[i:])
 	}
-	return fields[0], fields[1:]
+	return uninstStr, ""
 }
 
-// splitArgs tokenizes an argument tail on whitespace, honoring double quotes so
-// a switch like `"/dir=C:\My Projects"` stays a single argument.
-func splitArgs(s string) []string {
-	if s == "" {
-		return nil
+// newUninstallCmd builds the process for an UninstallString without running it.
+func newUninstallCmd(uninstStr string) (*exec.Cmd, error) {
+	exe, tail := splitUninstallString(uninstStr)
+	if exe == "" {
+		return nil, fmt.Errorf("empty uninstall string command")
 	}
-	var args []string
-	var cur strings.Builder
-	inQuotes := false
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		switch {
-		case c == '"':
-			inQuotes = !inQuotes
-		case c == ' ' && !inQuotes:
-			if cur.Len() > 0 {
-				args = append(args, cur.String())
-				cur.Reset()
-			}
-		default:
-			cur.WriteByte(c)
+	// A bare name (MsiExec.exe, RunDll32) is a Windows tool: resolve it in
+	// System32, never through PATH, where a planted copy would run with
+	// Duster's (possibly elevated) token.
+	if !strings.ContainsAny(exe, `\/`) {
+		if filepath.Ext(exe) == "" {
+			exe += ".exe"
 		}
+		exe = systemExecutable(exe)
 	}
-	if cur.Len() > 0 {
-		args = append(args, cur.String())
+
+	cmd := exec.Command(exe)
+	// Pass the registry's arguments through verbatim. Re-tokenizing and
+	// re-quoting them breaks uninstallers that parse their own command line
+	// (rundll32 entry points, InstallShield).
+	line := `"` + exe + `"`
+	if tail != "" {
+		line += " " + tail
 	}
-	return args
+	setRawCmdLine(cmd, line)
+	return cmd, nil
 }
 
 func runNativeUninstaller(uninstStr string) error {
-	execName, args := parseUninstallString(uninstStr)
-	if execName == "" {
-		return fmt.Errorf("empty uninstall string command")
+	cmd, err := newUninstallCmd(uninstStr)
+	if err != nil {
+		return err
 	}
-
-	// Native execution on Windows
-	cmd := exec.Command(execName, args...)
-
-	// Set default silent switches if applicable to maximize speed, though many are handled natively
 	return cmd.Run()
 }
 

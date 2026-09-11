@@ -64,4 +64,5 @@ func getStartupEntries() ([]startupEntry, error) { return nil, errNotWindows }
 func toggleStartupApproval(startupEntry) error   { return errNotWindows }
 func removeStartupEntry(startupEntry) error      { return errNotWindows }
 
-func setProcessGroup(*exec.Cmd) {}
+func setProcessGroup(*exec.Cmd)       {}
+func setRawCmdLine(*exec.Cmd, string) {}
