@@ -105,6 +105,23 @@ function Invoke-WithRetry {
     }
 }
 
+# Quote a value as a PowerShell single-quoted literal: nothing inside expands.
+function ConvertTo-PSLiteral {
+    param([string]$Value)
+    return "'" + ($Value -replace "'", "''") + "'"
+}
+
+# Exact PATH entry match (case-insensitive, trailing backslash ignored), so an
+# existing C:\Tools\Duster-old entry never counts as containing C:\Tools\Duster.
+function Test-PathEntry {
+    param([string]$PathValue, [string]$Dir)
+    $want = $Dir.Trim().TrimEnd('\')
+    foreach ($entry in ($PathValue -split ';')) {
+        if ($entry.Trim().TrimEnd('\') -eq $want) { return $true }
+    }
+    return $false
+}
+
 # == Banner ============================================================
 if (-not $Silent) {
     Write-Host ""
@@ -180,49 +197,59 @@ if ($IsDefaultLocalAppData) {
 
             # Forward every user-supplied parameter — dropping any of them
             # (e.g. a pinned -Version) silently changes what gets installed.
-            $forwardArgs = " -InstallDir `"$InstallDir`""
-            if ($Version -ne "") { $forwardArgs += " -Version `"$Version`"" }
+            # Values are single-quoted literals, so a path with spaces, quotes
+            # or `$` reaches the elevated copy intact.
+            $forwardArgs = " -InstallDir $(ConvertTo-PSLiteral $InstallDir)"
+            if ($Version -ne "") { $forwardArgs += " -Version $(ConvertTo-PSLiteral $Version)" }
             if ($PSBoundParameters.ContainsKey('AddToPath')) { $forwardArgs += " -AddToPath `$$AddToPath" }
             if ($Silent) { $forwardArgs += " -Silent" }
             if ($Force) { $forwardArgs += " -Force" }
             if ($SkipChecksum) { $forwardArgs += " -SkipChecksum" }
 
+            $redownloadUrl = "https://raw.githubusercontent.com/Nur-Adnan/Duster/main/scripts/install.ps1"
+            # Piped into iex from inside another script, $MyInvocation names THAT
+            # script; re-running it elevated would run the caller as admin. Only
+            # re-run a file that is this installer.
             $scriptPath = $MyInvocation.MyCommand.Path
-            if ($scriptPath) {
-                $elevateArgs = "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`"$forwardArgs"
-                try {
-                    Start-Process powershell.exe -Verb RunAs -ArgumentList $elevateArgs -Wait
-                    Write-OK "Elevated install completed."
-                    return
-                } catch {
-                    Write-Fail "Administrator privileges are required to install to $InstallDir.`n  Please run PowerShell as Administrator and try again.`n`n  Or install to a user-writable location:`n    .\\install.ps1 -InstallDir `"$env:LOCALAPPDATA\\Duster`"`n`n  Note: This may still be blocked by your organization's security policy."
-                }
-            } else {
-                # Piped script (irm | iex) — auto-elevate by re-downloading to a
-                # temp file so the same parameters can be forwarded to it.
-                Write-Step "Auto-elevating: spawning elevated installer..."
-                $redownloadUrl = "https://raw.githubusercontent.com/Nur-Adnan/Duster/main/scripts/install.ps1"
-                $innerCmd = "[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12; " +
-                    "`$f = Join-Path `$env:TEMP 'duster-install-elevated.ps1'; " +
-                    "Invoke-WebRequest -Uri '$redownloadUrl' -OutFile `$f -UseBasicParsing -TimeoutSec 120; " +
-                    "& `$f$forwardArgs"
-                try {
-                    Start-Process powershell.exe -Verb RunAs -ArgumentList @(
-                        "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", $innerCmd
-                    ) -Wait
-                    Write-OK "Elevated install completed successfully."
-                    return
-                } catch {
-                    Write-Host ""
-                    Write-Warn "Could not obtain administrator privileges (UAC denied or unavailable)."
-                    Write-Host ""
-                    Write-Host "  To fix this manually, open PowerShell as Administrator:" -ForegroundColor White
-                    Write-Host "    1. Right-click PowerShell -> 'Run as administrator'" -ForegroundColor Gray
-                    Write-Host "    2. Run: irm $redownloadUrl | iex" -ForegroundColor Cyan
-                    Write-Host ""
-                    Write-Fail "Administrator privileges required to install to $InstallDir."
-                }
+            if ($scriptPath -and -not (Select-String -LiteralPath $scriptPath -SimpleMatch 'Duster - Official PowerShell Installer' -Quiet)) {
+                $scriptPath = $null
             }
+            if ($scriptPath) {
+                $invoke = "& $(ConvertTo-PSLiteral $scriptPath)$forwardArgs"
+            } else {
+                # Piped (irm | iex): there is no file to re-run, so the elevated
+                # process fetches the script straight into memory. Never through
+                # a temp file, which a non-admin process could swap before it
+                # runs as admin.
+                Write-Step "Auto-elevating: spawning elevated installer..."
+                $invoke = "[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12; " +
+                    "& ([scriptblock]::Create((Invoke-WebRequest -Uri '$redownloadUrl' -UseBasicParsing -TimeoutSec 120).Content))$forwardArgs"
+            }
+            # -EncodedCommand (Base64 UTF-16LE) needs no command-line quoting. On
+            # failure the elevated window waits so the error can be read.
+            $pause = if ($Silent) { "" } else { "Read-Host '  Press Enter to close'; " }
+            $innerCmd = "try { $invoke; exit 0 } catch { Write-Host `"  `$_`" -ForegroundColor Red; ${pause}exit 1 }"
+            $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($innerCmd))
+            $powershellExe = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+
+            try {
+                $proc = Start-Process $powershellExe -Verb RunAs -Wait -PassThru -ArgumentList "-NoProfile -ExecutionPolicy Bypass -EncodedCommand $encoded"
+            } catch {
+                Write-Host ""
+                Write-Warn "Could not obtain administrator privileges (UAC denied or unavailable)."
+                Write-Host ""
+                Write-Host "  To fix this manually, open PowerShell as Administrator:" -ForegroundColor White
+                Write-Host "    1. Right-click PowerShell -> 'Run as administrator'" -ForegroundColor Gray
+                Write-Host "    2. Run: irm $redownloadUrl | iex" -ForegroundColor Cyan
+                Write-Host ""
+                Write-Fail "Administrator privileges required to install to $InstallDir."
+            }
+            # ExitCode can read as $null for an elevated child; only a real non-zero fails.
+            if ($null -ne $proc.ExitCode -and $proc.ExitCode -ne 0) {
+                Write-Fail "The elevated installer failed (exit code $($proc.ExitCode))."
+            }
+            Write-OK "Elevated install completed."
+            return
         }
     }
 }
@@ -505,7 +532,7 @@ if ($AddToPath) {
 
     $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
 
-    if ($UserPath -notlike "*$InstallDir*") {
+    if (-not (Test-PathEntry $UserPath $InstallDir)) {
         if ([string]::IsNullOrEmpty($UserPath)) {
             $NewPath = $InstallDir
         } elseif ($UserPath.EndsWith(";")) {
