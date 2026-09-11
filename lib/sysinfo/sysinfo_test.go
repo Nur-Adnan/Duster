@@ -3,6 +3,7 @@
 package sysinfo
 
 import (
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -19,17 +20,12 @@ func TestGetSystemStatsSkipsProcessWalk(t *testing.T) {
 
 func TestTopProcessesFindsBusyProcess(t *testing.T) {
 	// Keep one core busy in this process during the window, so something is.
-	stop := make(chan struct{})
+	var stop atomic.Bool
 	go func() {
-		for {
-			select {
-			case <-stop:
-				return
-			default:
-			}
+		for !stop.Load() {
 		}
 	}()
-	defer close(stop)
+	defer stop.Store(true)
 
 	if top := TopProcesses(500 * time.Millisecond); len(top) == 0 {
 		t.Fatal("a one-shot TopProcesses call must report busy processes")

@@ -825,7 +825,6 @@ func newUninstallCmd(uninstStr string) (*exec.Cmd, error) {
 		exe = systemExecutable(exe)
 	}
 
-	cmd := exec.Command(exe)
 	// Pass the registry's arguments through verbatim. Re-tokenizing and
 	// re-quoting them breaks uninstallers that parse their own command line
 	// (rundll32 entry points, InstallShield).
@@ -833,6 +832,20 @@ func newUninstallCmd(uninstStr string) (*exec.Cmd, error) {
 	if tail != "" {
 		line += " " + tail
 	}
+
+	// Windows runs a batch file through an implicit cmd /c, which strips the
+	// first and last quote of any line holding more than two, so
+	// "C:\Old App\uninstall.bat" "/dir=C:\My Projects" never starts. Run
+	// cmd.exe ourselves: /s strips only the outer pair added here, and /d
+	// skips AutoRun commands, which would otherwise run with our token.
+	if ext := strings.ToLower(filepath.Ext(exe)); ext == ".bat" || ext == ".cmd" {
+		shell := systemExecutable("cmd.exe")
+		cmd := exec.Command(shell)
+		setRawCmdLine(cmd, `"`+shell+`" /d /s /c "`+line+`"`)
+		return cmd, nil
+	}
+
+	cmd := exec.Command(exe)
 	setRawCmdLine(cmd, line)
 	return cmd, nil
 }
