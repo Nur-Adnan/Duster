@@ -168,13 +168,12 @@ func scanInstallerItems(minSizeMB int64) []installerItem {
 			return nil
 		}
 
-		// Skip OneDrive placeholders: reading them forces a download.
-		if fs.IsOfflineFile(path) {
-			return nil
-		}
-
 		info, err := d.Info()
 		if err != nil {
+			return nil
+		}
+		// Skip OneDrive placeholders: reading them forces a download.
+		if fs.IsOfflineInfo(info) {
 			return nil
 		}
 

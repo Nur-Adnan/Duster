@@ -62,7 +62,7 @@ type cleanTuiItem struct {
 	Size      int64
 	FileCount int
 	Checked   bool
-	Status    string // "scanning", "ok", "cleaning", "deleting", "done", "skipped", "adminonly", "noaccess", "failed"
+	Status    string // "scanning", "ok", "deleting", "done", "skipped", "adminonly", "noaccess", "failed"
 	Scanning  bool
 	Progress  float64
 }
@@ -157,29 +157,8 @@ func scanItemCmd(itemIdx int, item *cleanTuiItem) tea.Cmd {
 		var files int
 		var err error
 
-		// Whitelist guard
-		whitelistMap := make(map[string]bool)
-		for _, id := range whitelist {
-			whitelistMap[strings.ToLower(strings.TrimSpace(id))] = true
-		}
-
-		// The --whitelist flag documents getCategories() IDs, but this TUI's
-		// combined "logs" item spans two of them, and users may pass browser
-		// names. Map both vocabularies onto TUI item IDs so protection always
-		// errs on the side of skipping more, never less.
-		aliases := map[string][]string{
-			"chrome":   {"browsers"},
-			"edge":     {"browsers"},
-			"brave":    {"browsers"},
-			"firefox":  {"browsers"},
-			"wer":      {"logs"},
-			"logfiles": {"logs"},
-		}
-		for id := range whitelistMap {
-			for _, tuiID := range aliases[id] {
-				whitelistMap[tuiID] = true
-			}
-		}
+		// Whitelist guard, shared with the CLI so both accept the same names.
+		whitelistMap, _ := whitelistSet(whitelist)
 
 		if whitelistMap[item.ID] {
 			return cleanScanProgressMsg{
@@ -386,7 +365,7 @@ func initialCleanModel(startDryRun bool) cleanModel {
 	freeBytes := getDiskFreeBytes(os.TempDir())
 	freeSpaceStr := formatBytes(freeBytes)
 
-	wlText := fmt.Sprintf("%d protected paths, %d whitelisted categories", len(getCategories()), len(whitelist))
+	wlText := fmt.Sprintf("%d categories, %d whitelisted", len(getCategories()), len(whitelist))
 
 	m.osVersion = osVer
 	m.freeSpace = freeSpaceStr
@@ -496,16 +475,14 @@ func (m cleanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if m.state == cleanStateCleaning {
-			// Find the active item being cleaned and animate its bar
+			// The active item started deleting when it became active; its bar
+			// only shows motion (capped at 95%) until the deletion reports.
 			if m.activeItemIdx >= 0 && m.activeItemIdx < len(m.items) {
 				item := m.items[m.activeItemIdx]
-				if item.Status == "cleaning" {
+				if item.Status == "deleting" && item.Progress < 95 {
 					item.Progress += 8.0
-					if item.Progress >= 100 {
-						item.Progress = 100
-						// Animation finished, trigger actual deletion
-						item.Status = "deleting"
-						return m, cleanItemCmd(m.activeItemIdx, item, m.dryRun)
+					if item.Progress > 95 {
+						item.Progress = 95
 					}
 				}
 			}
@@ -574,19 +551,9 @@ func (m cleanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.logLines = append(m.logLines, fmt.Sprintf("✗ %s: %s freed, incomplete: %v", item.Name, formatBytes(msg.SizeFreed), msg.Err))
 		}
 
-		// Find and clean next checked item
-		nextIdx, nextItem := m.getNextItemToClean()
-		if nextItem != nil {
-			nextItem.Status = "cleaning"
-			nextItem.Progress = 0.0
-			m.activeItemIdx = nextIdx
-			// Re-arm the animation chain; the tick that reached 100% returned
-			// cleanItemCmd instead of a new tick, so without this the next item
-			// would never animate or delete (the whole run would stall here).
-			return m, animateTickCmd()
-		}
-		m.state = cleanStateDone
-		return m, nil
+		// Start the next checked item. The animation tick chain is still
+		// running, so arming another tick here would double the bar speed.
+		return m, m.beginNextItem()
 
 	case tea.KeyMsg:
 		keyStr := msg.String()
@@ -656,14 +623,8 @@ func (m cleanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Enter must respect it. Users can still force a real clean with "c"
 				// or an explicit dry run with "d".
 				m.startCleanup()
-				nextIdx, nextItem := m.getNextItemToClean()
-				if nextItem != nil {
-					nextItem.Status = "cleaning"
-					nextItem.Progress = 0.0
-					m.activeItemIdx = nextIdx
-					return m, animateTickCmd()
-				} else {
-					m.state = cleanStateDone
+				if cmd := m.beginNextItem(); cmd != nil {
+					return m, tea.Batch(animateTickCmd(), cmd)
 				}
 
 			case "v", "V":
@@ -675,14 +636,8 @@ func (m cleanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Run in Dry Run mode
 				m.dryRun = true
 				m.startCleanup()
-				nextIdx, nextItem := m.getNextItemToClean()
-				if nextItem != nil {
-					nextItem.Status = "cleaning"
-					nextItem.Progress = 0.0
-					m.activeItemIdx = nextIdx
-					return m, animateTickCmd()
-				} else {
-					m.state = cleanStateDone
+				if cmd := m.beginNextItem(); cmd != nil {
+					return m, tea.Batch(animateTickCmd(), cmd)
 				}
 
 			case "r", "R":
@@ -716,14 +671,8 @@ func (m cleanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Real execution
 				m.dryRun = false
 				m.startCleanup()
-				nextIdx, nextItem := m.getNextItemToClean()
-				if nextItem != nil {
-					nextItem.Status = "cleaning"
-					nextItem.Progress = 0.0
-					m.activeItemIdx = nextIdx
-					return m, animateTickCmd()
-				} else {
-					m.state = cleanStateDone
+				if cmd := m.beginNextItem(); cmd != nil {
+					return m, tea.Batch(animateTickCmd(), cmd)
 				}
 			}
 		} else if m.state == cleanStateDone {
@@ -760,6 +709,22 @@ func (m cleanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // TUI Controller Helpers
 // ─────────────────────────────────────────────
 
+// beginNextItem starts deleting the next checked item right away; its bar
+// animates while the deletion runs. With nothing left it ends the run and
+// returns nil. Callers arm the animation tick only when starting a run: the
+// chain then lives until the run ends.
+func (m *cleanModel) beginNextItem() tea.Cmd {
+	idx, item := m.getNextItemToClean()
+	if item == nil {
+		m.state = cleanStateDone
+		return nil
+	}
+	item.Status = "deleting"
+	item.Progress = 0
+	m.activeItemIdx = idx
+	return cleanItemCmd(idx, item, m.dryRun)
+}
+
 func (m *cleanModel) recalculateReclaim() {
 	var total int64
 	var count int
@@ -784,7 +749,7 @@ func (m *cleanModel) startCleanup() {
 
 func (m *cleanModel) getNextItemToClean() (int, *cleanTuiItem) {
 	for iIdx, item := range m.items {
-		if item.Checked && item.Status != "done" && item.Status != "cleaning" && item.Status != "deleting" && item.Status != "skipped" && item.Status != "adminonly" && item.Status != "noaccess" && item.Status != "failed" {
+		if item.Checked && item.Status != "done" && item.Status != "deleting" && item.Status != "skipped" && item.Status != "adminonly" && item.Status != "noaccess" && item.Status != "failed" {
 			return iIdx, item
 		}
 	}
@@ -875,7 +840,7 @@ func (m cleanModel) View() string {
 		switch item.Status {
 		case "scanning":
 			statusStr = styleSuccess.Render("Scanning")
-		case "cleaning", "deleting":
+		case "deleting":
 			statusStr = styleSuccess.Render("Cleaning")
 		case "done":
 			statusStr = styleSuccess.Render("Done")

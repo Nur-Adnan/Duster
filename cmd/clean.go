@@ -84,6 +84,7 @@ func firefoxCachePaths(localAppData string) []string {
 func getCategories() []CleanCategory {
 	localAppData := fs.ResolveEnvPath("%LOCALAPPDATA%")
 	appData := fs.ResolveEnvPath("%APPDATA%")
+	winDir := secureWindowsDir() // kernel-resolved: follows Windows off C: and ignores a spoofed %WINDIR%
 
 	browserPaths := []string{
 		filepath.Join(localAppData, `Google\Chrome\User Data\Default\Cache\Cache_Data`),
@@ -102,7 +103,7 @@ func getCategories() []CleanCategory {
 			Description: "System temp folders and active user temp caches",
 			Paths: []string{
 				fs.ResolveEnvPath("%TEMP%"),
-				`C:\Windows\Temp`,
+				winDir + `\Temp`,
 			},
 		},
 		{
@@ -110,7 +111,7 @@ func getCategories() []CleanCategory {
 			Name:        "Windows Update Cache",
 			Description: "Downloaded system installer leftovers",
 			Paths: []string{
-				`C:\Windows\SoftwareDistribution\Download`,
+				winDir + `\SoftwareDistribution\Download`,
 			},
 		},
 		{
@@ -118,7 +119,7 @@ func getCategories() []CleanCategory {
 			Name:        "Prefetch Files",
 			Description: "Windows pre-cached applications loading data",
 			Paths: []string{
-				`C:\Windows\Prefetch`,
+				winDir + `\Prefetch`,
 			},
 		},
 		{
@@ -182,7 +183,6 @@ func getCategories() []CleanCategory {
 			Description: "Yarn package manager local cache",
 			Paths: []string{
 				filepath.Join(localAppData, `Yarn\Cache`),
-				filepath.Join(localAppData, `yarn\cache`),
 			},
 		},
 		{
@@ -263,7 +263,7 @@ func getCategories() []CleanCategory {
 			Name:        "Delivery Optimization",
 			Description: "Windows peer-to-peer update delivery cache",
 			Paths: []string{
-				`C:\Windows\SoftwareDistribution\DeliveryOptimization`,
+				winDir + `\SoftwareDistribution\DeliveryOptimization`,
 			},
 		},
 		{
@@ -368,7 +368,7 @@ func getCategories() []CleanCategory {
 			Name:        "Memory Dump Files",
 			Description: "System crash memory dumps and minidumps",
 			Paths: []string{
-				`C:\Windows\Minidump`,
+				winDir + `\Minidump`,
 			},
 		},
 		{
@@ -384,31 +384,23 @@ func getCategories() []CleanCategory {
 			Name:        "System Log Files",
 			Description: "CBS, DISM, and setup diagnostic log files",
 			Paths: []string{
-				`C:\Windows\Logs\CBS`,
-				`C:\Windows\Logs\DISM`,
+				winDir + `\Logs\CBS`,
+				winDir + `\Logs\DISM`,
 			},
 			Pattern:   "*.log",
 			FilesOnly: true,
 		},
 		{
-			ID:          "recent",
-			Name:        "Recent Items Cache",
-			Description: "Windows Explorer recent file shortcuts and jump list cache",
+			ID:   "recent",
+			Name: "Recent Items Cache",
+			// Only the Recent shortcuts: the jump-list files next to them also
+			// hold the user's pinned items, so they are never targeted.
+			Description: "Windows Explorer recent file shortcuts",
 			Paths: []string{
 				filepath.Join(appData, `Microsoft\Windows\Recent`),
-				filepath.Join(appData, `Microsoft\Windows\Recent\AutomaticDestinations`),
-				filepath.Join(appData, `Microsoft\Windows\Recent\CustomDestinations`),
 			},
 			Pattern:   "*.lnk",
 			FilesOnly: true,
-		},
-		{
-			ID:          "installer_patches",
-			Name:        "Installer Patch Cache",
-			Description: "Orphaned MSI installer patch cache files",
-			Paths: []string{
-				filepath.Join(localAppData, `Temp\msohtmlclip`),
-			},
 		},
 	}
 }
@@ -429,9 +421,9 @@ func executeCleanCLI(cmd *cobra.Command, args []string) {
 	categories := getCategories()
 	totalCategories := len(categories)
 
-	whitelistMap := make(map[string]bool)
-	for _, id := range whitelist {
-		whitelistMap[strings.ToLower(strings.TrimSpace(id))] = true
+	whitelistMap, unknownIDs := whitelistSet(whitelist)
+	for _, id := range unknownIDs {
+		fmt.Fprintf(os.Stderr, "  warning: --whitelist %q matches no category, so it protects nothing\n", id)
 	}
 
 	// Spinners only make sense on a live terminal; carriage-return animation
@@ -448,7 +440,7 @@ func executeCleanCLI(cmd *cobra.Command, args []string) {
 		{name: "System Core", icon: "⚙", catID: map[string]bool{
 			"temp": true, "update": true, "prefetch": true, "wer": true,
 			"recycle": true, "dns": true, "delivery_opt": true, "memdumps": true,
-			"logfiles": true, "recent": true, "installer_patches": true, "fontcache": true,
+			"logfiles": true, "recent": true, "fontcache": true,
 		}},
 		{name: "Web Browsers", icon: "🌐", catID: map[string]bool{
 			"browsers": true, "opera": true,
@@ -822,14 +814,6 @@ func scanDirCategory(cat CleanCategory) (int64, int, error) {
 			}
 
 			if !d.IsDir() {
-				// Skip offline OneDrive placeholders to prevent forced network downloads
-				if fs.IsOfflineFile(path) {
-					if debug {
-						fmt.Printf("[Debug] Skipping offline OneDrive placeholder: %s\n", path)
-					}
-					return nil
-				}
-
 				// Match pattern if configured (e.g. thumbcache_*.db)
 				if cat.Pattern != "" {
 					matched, globErr := filepath.Match(cat.Pattern, d.Name())
@@ -840,6 +824,14 @@ func scanDirCategory(cat CleanCategory) (int64, int, error) {
 
 				info, err := d.Info()
 				if err != nil {
+					return nil
+				}
+				// Skip offline OneDrive placeholders to prevent forced network
+				// downloads; the directory listing already carries the attributes.
+				if fs.IsOfflineInfo(info) {
+					if debug {
+						fmt.Printf("[Debug] Skipping offline OneDrive placeholder: %s\n", path)
+					}
 					return nil
 				}
 
@@ -875,6 +867,9 @@ func cleanDirCategory(cat CleanCategory) (int64, int, error) {
 	}
 
 	for _, root := range cat.Paths {
+		// A long-form root keeps "~" out of every child path, so the per-file
+		// IsValidPath below skips its GetLongPathNameW disk lookup.
+		root = fs.LongPath(root)
 		if !fs.IsValidPath(root) || skipCategoryRoot(root) {
 			continue
 		}
@@ -886,11 +881,6 @@ func cleanDirCategory(cat CleanCategory) (int64, int, error) {
 					return nil
 				}
 				if !d.IsDir() {
-					// Skip offline OneDrive placeholders to prevent forced network downloads
-					if fs.IsOfflineFile(path) {
-						return nil
-					}
-
 					if cat.Pattern != "" {
 						matched, globErr := filepath.Match(cat.Pattern, d.Name())
 						if globErr != nil || !matched {
@@ -899,7 +889,8 @@ func cleanDirCategory(cat CleanCategory) (int64, int, error) {
 					}
 
 					info, err := d.Info()
-					if err != nil {
+					// Skip offline OneDrive placeholders to prevent forced network downloads
+					if err != nil || fs.IsOfflineInfo(info) {
 						return nil
 					}
 
@@ -1005,7 +996,7 @@ func scanAndEmptyRecycleBin(dryRunOnly bool, debug bool) (int64, int, error) {
 		// Fallback walk only when the WinAPI itself failed (or on non-Windows
 		// test hosts). A successful "0 items" answer must NOT trigger it: the
 		// walk counts $I metadata and desktop.ini as phantom reclaimable junk.
-		recycleBinPath := `C:\$Recycle.Bin`
+		recycleBinPath := secureWindowsDir()[:2] + `\$Recycle.Bin` // the system drive, wherever Windows is
 		if fs.IsValidPath(recycleBinPath) {
 			_ = filepath.WalkDir(recycleBinPath, func(path string, d os.DirEntry, walkErr error) error {
 				if walkErr != nil {
@@ -1066,71 +1057,39 @@ func formatBytes(bytes int64) string {
 	return fmt.Sprintf("%.2f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
 
-// scanJetBrainsCaches dynamically discovers JetBrains IDE cache directories.
-// JetBrains products store caches in %LOCALAPPDATA%/JetBrains/<ProductVersion>/caches/
-func scanJetBrainsCaches(dryRun bool, debugMode bool) (int64, int, error) {
-	jetbrainsRoot := filepath.Join(fs.ResolveEnvPath("%LOCALAPPDATA%"), "JetBrains")
-	if _, err := os.Stat(jetbrainsRoot); os.IsNotExist(err) {
-		return 0, 0, nil
+// scanJetBrainsCaches cleans each JetBrains product's caches, index and tmp
+// folders (%LOCALAPPDATA%\JetBrains\<ProductVersion>\...) through the shared
+// category engine, so they get its root, link and per-file safety checks and
+// its failure reporting.
+func scanJetBrainsCaches(dryRun bool, _ bool) (int64, int, error) {
+	cat := CleanCategory{Name: "JetBrains IDE Caches", Paths: jetBrainsCachePaths(), FilesOnly: true}
+	if dryRun {
+		return scanDirCategory(cat)
 	}
+	return cleanDirCategory(cat)
+}
 
-	var totalSize int64
-	var totalFiles int
-
-	products, err := os.ReadDir(jetbrainsRoot)
+// jetBrainsCachePaths lists the cache folders of every installed JetBrains
+// product. A linked JetBrains root or product folder is skipped, never followed.
+func jetBrainsCachePaths() []string {
+	root := filepath.Join(fs.ResolveEnvPath("%LOCALAPPDATA%"), "JetBrains")
+	if skipCategoryRoot(root) {
+		return nil
+	}
+	products, err := os.ReadDir(root)
 	if err != nil {
-		return 0, 0, nil
+		return nil
 	}
-
+	var paths []string
 	for _, product := range products {
 		if !product.IsDir() {
 			continue
 		}
-		cachePaths := []string{
-			filepath.Join(jetbrainsRoot, product.Name(), "caches"),
-			filepath.Join(jetbrainsRoot, product.Name(), "index"),
-			filepath.Join(jetbrainsRoot, product.Name(), "tmp"),
-		}
-
-		for _, cachePath := range cachePaths {
-			if _, statErr := os.Stat(cachePath); os.IsNotExist(statErr) {
-				continue
-			}
-
-			_ = filepath.WalkDir(cachePath, func(path string, d os.DirEntry, walkErr error) error {
-				if walkErr != nil {
-					return nil
-				}
-				if !d.IsDir() {
-					if fs.IsOfflineFile(path) {
-						return nil
-					}
-					info, infoErr := d.Info()
-					if infoErr == nil {
-						if dryRun {
-							if onScanProgress != nil {
-								onScanProgress(path, info)
-							}
-							totalSize += info.Size()
-							totalFiles++
-						} else {
-							fileSize := info.Size()
-							if onCleanProgress != nil {
-								onCleanProgress(path, info)
-							}
-							if removeFileSafe(path) == nil {
-								totalSize += fileSize
-								totalFiles++
-							}
-						}
-					}
-				}
-				return nil
-			})
+		for _, sub := range []string{"caches", "index", "tmp"} {
+			paths = append(paths, filepath.Join(root, product.Name(), sub))
 		}
 	}
-
-	return totalSize, totalFiles, nil
+	return paths
 }
 
 type cliSpinner struct {
