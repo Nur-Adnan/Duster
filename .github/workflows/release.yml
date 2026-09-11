@@ -302,7 +302,9 @@ jobs:
           body: |
             ## Duster v${{ steps.version.outputs.version }} — Windows Deep Cleaner & System Optimizer
 
-            Production release for Windows 10/11 (x64 and ARM64).
+            Production release for Windows 10/11 (x64 and ARM64). What changed: [CHANGELOG.md](https://github.com/Nur-Adnan/Duster/blob/v${{ steps.version.outputs.version }}/CHANGELOG.md)
+
+            > **Upgrading from v1.0.2 or earlier:** `du update` in those versions cannot install new releases. Reinstall once with the Quick Install command below; after that, `du update` works.
 
             ---
 

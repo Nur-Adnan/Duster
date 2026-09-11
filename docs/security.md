@@ -32,6 +32,14 @@ Duster is a system utility designed for deep-cleaning operations. Because file d
 * **Resource Threat**: If a user cancels optimization tasks (like SSD TRIM) or exits the TUI mid-sweep, subprocesses (`defrag.exe`) can continue thrumming in the background as orphans.
 * **Mitigation**: Long-running optimization subprocesses are spawned with `exec.CommandContext` tied to a cancellation context, so quitting the optimizer explicitly kills them. `CREATE_NEW_PROCESS_GROUP` additionally detaches children from the console's Ctrl+C group so cancellation stays under Duster's control. Note: if the Duster process itself is killed abruptly (e.g. `taskkill`), in-flight children are not auto-terminated — that would require Windows Job objects, which are not currently used.
 
+### E. Third-Party Uninstallers
+* **Threat**: `du uninstall` runs the command an app registered under the registry's Uninstall keys. A bare `MsiExec.exe` looked up through `PATH` could run a planted copy with Duster's token, and a per-user (HKCU) entry points into a folder any process of that user can write.
+* **Mitigation**: Bare executable names resolve only inside the System32 directory (`GetSystemDirectoryW`), never through `PATH`. The executable is fixed separately and the registered arguments reach `CreateProcess` verbatim, so nothing is re-tokenized. HKCU entries are refused while Duster is elevated. The leftover sweep runs only after the uninstaller succeeded and its registry entry is gone, matches exact folder names, and starts with nothing selected.
+
+### F. Installer Script Elevation
+* **Threat**: When an application-control policy forces a Program Files install, `install.ps1` re-launches itself elevated. Re-running a script saved under `%TEMP%` would let a non-admin process swap it before it runs as admin.
+* **Mitigation**: The elevated process receives its command through `-EncodedCommand`, with every forwarded value as a single-quoted literal. A piped (`irm | iex`) install fetches the script straight into memory over HTTPS, never through a file.
+
 ---
 
 ## 3. Cryptographic Self-Updater Security
