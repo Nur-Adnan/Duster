@@ -63,8 +63,11 @@ jobs:
           $s.TopProcesses | ForEach-Object { Write-Host "  top $($_.Name) cpu=$([math]::Round($_.CPU, 1))%" }
           exit 0
 
-      - name: Status polling cost (per-tick benchmark)
-        run: go test -run '^$' -bench . -benchtime 20x -benchmem ./lib/sysinfo
+      - name: Performance benchmarks (status tick, clean scan, path checks)
+        run: |
+          go test -run '^$' -bench . -benchtime 20x -benchmem ./lib/sysinfo
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          go test -run '^$' -bench 'ScanDirCategory|IsValidPath' -count 3 -benchmem ./cmd ./lib/fs
 
       - name: Clean (junction root, locked file)
         timeout-minutes: 15
