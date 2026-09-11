@@ -42,8 +42,11 @@ func calculateDirSize(dirPath string) int64 {
 	return size
 }
 
-// removeAllSafe handles the classic Windows read-only file lock issues.
-// Iterates and strips the read-only file attribute recursively before wiping directories to prevent silent deletion failures.
+// removeAllSafe deletes path without ever following a symlink or junction.
+// A plain RemoveAll succeeds in the common case; only when it fails (e.g.
+// read-only entries) are read-only attributes stripped from the tree and the
+// delete retried. The old code walked and chmod'ed every entry up front,
+// roughly doubling the syscalls of every delete.
 func removeAllSafe(path string) error {
 	// Lstat BEFORE any chmod: os.Chmod follows symlinks, so chmod'ing a reparse
 	// point would clear the read-only attribute on its target — a file outside the
@@ -61,6 +64,11 @@ func removeAllSafe(path string) error {
 		return os.Remove(path)
 	}
 
+	if err := os.RemoveAll(path); err == nil {
+		return nil
+	}
+
+	// Slow path: clear read-only attributes (never through links), then retry.
 	_ = os.Chmod(path, 0777)
 
 	if info.IsDir() {
