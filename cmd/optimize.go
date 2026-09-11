@@ -316,7 +316,7 @@ func (m optimizeModel) View() string {
 		doc.WriteString("  |  " + optSuccessStyle.Render("LIVE ACTIVE MODE"))
 	}
 	doc.WriteString("\n")
-	doc.WriteString(optDividerStyle.Render("  ═══════════════════════════════════════════════════════════════════════\n\n"))
+	doc.WriteString(optDividerStyle.Render("  ═══════════════════════════════════════════════════════════════════════") + "\n\n")
 
 	var boxLayout strings.Builder
 
@@ -327,7 +327,7 @@ func (m optimizeModel) View() string {
 		}
 		boxLayout.WriteString("\n")
 		if !m.isAdmin {
-			boxLayout.WriteString(optWarnStyle.Render("  ⚠️  Notice: Duster is running in Standard user mode.\n"))
+			boxLayout.WriteString(optWarnStyle.Render("  ⚠️  Notice: Duster is running in Standard user mode.") + "\n")
 			boxLayout.WriteString(optGrayText("      Volume SSD TRIM optimization requires Administrative privileges and will be skipped.\n\n"))
 		}
 		boxLayout.WriteString("  Press [Enter] to run the optimization workflow, or [q] to Exit.")
@@ -369,7 +369,7 @@ func (m optimizeModel) View() string {
 		}
 
 		if m.currentIdx == len(m.tasks) {
-			boxLayout.WriteString(optDividerStyle.Render("  ───────────────────────────────────────────────────────────────────────\n"))
+			boxLayout.WriteString(optDividerStyle.Render("  ───────────────────────────────────────────────────────────────────────") + "\n")
 			failed := 0
 			for _, t := range m.tasks {
 				if t.Status == statusFailed {
@@ -520,6 +520,20 @@ func runHeadlessOptimize() {
 		os.Exit(1)
 	}
 	fmt.Println(string(data))
+	// Like doctor, verify and update: a failed task must fail the command, so
+	// scripts can tell a failed DNS flush or TRIM from success.
+	if anyTaskFailed(tasks) {
+		os.Exit(1)
+	}
+}
+
+func anyTaskFailed(tasks []optimizeTask) bool {
+	for _, t := range tasks {
+		if t.Status == statusFailed {
+			return true
+		}
+	}
+	return false
 }
 
 // Local helper style functions — delegate to canonical shared helpers

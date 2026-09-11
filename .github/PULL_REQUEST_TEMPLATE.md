@@ -19,10 +19,10 @@ Please select the option that applies:
 
 Before submitting this Pull Request, please ensure:
 
-- [ ] My code follows the code style guidelines detailed in [CONTRIBUTING.md](file:///absolute/path/to/CONTRIBUTING.md).
+- [ ] My code follows the code style guidelines detailed in [CONTRIBUTING.md](https://github.com/Nur-Adnan/Duster/blob/main/CONTRIBUTING.md).
 - [ ] I have run unit tests locally using `go test ./...` and confirmed all tests pass.
 - [ ] I have formatted my code using standard Go formatting tools (`go fmt` / `goimports`).
 - [ ] My changes do not widen destructive cleanup boundaries to folders outside standard temp/AppCaches without explicit user confirmation.
 - [ ] All dynamic reparse points, junctions, or symbolic links are safely handled to prevent recursive directory traversal.
-- [ ] Offline placeholders (e.g. OneDrive cloud-only files) are skipped using standard attributes (`FILE_ATTRIBUTE_OFFLINE`).
+- [ ] Cloud placeholders (e.g. OneDrive cloud-only files) are skipped with `fs.IsOfflineInfo` on the walk's FileInfo (offline, recall-on-open and recall-on-data-access attributes).
 - [ ] I have verified this change works stably across Windows Terminal, standard CMD, and PowerShell.

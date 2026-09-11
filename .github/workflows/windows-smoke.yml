@@ -230,6 +230,92 @@ jobs:
           if ($j.status -ne 'UP_TO_DATE') { throw "update after reinstalling: $($j.status)" }
           exit 0
 
+      # Wrong input must fail cleanly (non-zero exit, no crash), and the safety
+      # promises must hold without a terminal: nothing is deleted without
+      # --yes, --dry-run deletes nothing, and repeated or concurrent runs work.
+      - name: Invalid input, safety promises, repeated and concurrent runs
+        timeout-minutes: 15
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $du = (Resolve-Path .\du.exe).Path
+          $script:failures = @()
+          function Check([string]$label, [string[]]$argv, [int[]]$want) {
+            $out = & $du @argv 2>&1 | Out-String
+            $code = $LASTEXITCODE
+            $ok = ($want -contains $code) -and ($out -notmatch 'panic:|goroutine \d+ \[')
+            $first = $out -split "`n" | Where-Object { $_.Trim() } | Select-Object -First 1
+            Write-Host ('{0,-4} exit={1,-2} {2}: {3}' -f $(if ($ok) { 'ok' } else { 'FAIL' }), $code, $label, $first)
+            if (-not $ok) { $script:failures += "$label (exit $code): $out" }
+            return $out
+          }
+          $tmp = Join-Path $env:RUNNER_TEMP 'edge'
+          New-Item -ItemType Directory -Force "$tmp\empty", "$tmp\rm" | Out-Null
+          Set-Content "$tmp\file.txt" 'x'
+
+          $null = Check 'unknown command' @('nosuchcmd') @(1)
+          $null = Check 'unknown flag' @('clean', '--nosuchflag') @(1)
+          $null = Check 'analyze: two paths' @('analyze', '--json', 'a', 'b') @(1)
+          $null = Check 'analyze: missing path' @('analyze', '--json', "$tmp\missing") @(1)
+          $null = Check 'analyze: a file' @('analyze', '--json', "$tmp\file.txt") @(0, 1)
+          $e = Check 'analyze: empty folder' @('analyze', '--json', "$tmp\empty") @(0)
+          if (($e | ConvertFrom-Json).total_size -ne 0) { $script:failures += 'analyze: an empty folder reported a size' }
+          $null = Check 'purge: missing path' @('purge', '--json', '--path', "$tmp\missing") @(1)
+          $null = Check 'purge: drive root' @('purge', '--json', '--path', 'C:\') @(1)
+          $null = Check 'purge: Windows folder' @('purge', '--json', '--path', $env:windir) @(1)
+          $null = Check 'installer: not a number' @('installer', '--json', '--min-size', 'abc') @(1)
+          $null = Check 'installer: negative size' @('installer', '--json', '--min-size', '-5') @(0)
+          $u = Check 'uninstall --json' @('uninstall', '--json') @(0)
+          $null = $u | ConvertFrom-Json
+          $null = Check 'optimize preview' @('optimize', '--json') @(0)
+          $null = Check 'benchmark --json' @('benchmark', '--json') @(0)
+          Copy-Item $du "$tmp\rm\du.exe"
+          $null = & "$tmp\rm\du.exe" remove --json 2>&1
+          Write-Host "     exit=$LASTEXITCODE remove --json (a copy)"
+          Start-Sleep -Seconds 4
+          if (-not (Test-Path "$tmp\rm\du.exe")) { $script:failures += 'remove --json without --force deleted the binary' }
+
+          # Nothing is deleted without --yes, and --dry-run deletes nothing.
+          $bait = Join-Path $env:TEMP 'duster-headless-bait.txt'
+          Set-Content $bait 'x'
+          $w = Check 'clean piped, no --yes, unknown --whitelist' @('clean', '--whitelist', 'nosuchcategory') @(0)
+          if ($w -notmatch 'nosuchcategory') { $script:failures += 'clean did not warn about an unknown --whitelist name' }
+          $null = Check 'clean --dry-run --yes' @('clean', '--dry-run', '--yes') @(0)
+          if (-not (Test-Path $bait)) { $script:failures += 'clean deleted a temp file without --yes, or with --dry-run' }
+          $ws = Join-Path $env:RUNNER_TEMP 'ws-noyes'
+          New-Item -ItemType Directory -Force "$ws\app\node_modules\x" | Out-Null
+          Set-Content "$ws\app\package.json" '{}'
+          $null = Check 'purge piped, no --yes' @('purge', '--path', $ws) @(0)
+          $d = Check 'purge --dry-run --yes' @('purge', '--path', $ws, '--dry-run', '--yes') @(0)
+          if (-not (Test-Path "$ws\app\node_modules")) { $script:failures += 'purge deleted without --yes, or with --dry-run' }
+          if ($d -notmatch 'nothing was deleted') { $script:failures += 'purge --dry-run did not say that nothing was deleted' }
+
+          # Repeated: a second real clean right after the first (the Clean step) still works.
+          $null = Check 'clean --yes again' @('clean', '--yes') @(0)
+          Remove-Item $bait -ErrorAction SilentlyContinue
+
+          # Concurrent: three purges at once, all appending to one operations.log.
+          $log = Join-Path $env:LOCALAPPDATA 'Duster\operations.log'
+          $before = if (Test-Path $log) { @(Get-Content $log).Count } else { 0 }
+          $procs = foreach ($n in 1..3) {
+            $c = Join-Path $env:RUNNER_TEMP "ws-c$n"
+            New-Item -ItemType Directory -Force "$c\app\node_modules\x" | Out-Null
+            Set-Content "$c\app\package.json" '{}'
+            Set-Content "$c\app\node_modules\x\f.js" 'x'
+            $p = Start-Process -FilePath $du -ArgumentList 'purge', '--path', "`"$c`"", '--yes' -PassThru -NoNewWindow -RedirectStandardOutput "$c.out"
+            $null = $p.Handle
+            $p
+          }
+          $procs | Wait-Process -Timeout 120
+          foreach ($p in $procs) { if ($p.ExitCode -ne 0) { $script:failures += "a concurrent purge exited $($p.ExitCode)" } }
+          foreach ($n in 1..3) { if (Test-Path "$env:RUNNER_TEMP\ws-c$n\app\node_modules") { $script:failures += "concurrent purge $n left node_modules" } }
+          $lines = @(Get-Content $log | Select-Object -Skip $before)
+          $bad = @($lines | Where-Object { $_ -notmatch '^\S.* \| Command: \w+ \| Action: \w+ \| Target: .+ \| Size: \d+ bytes \| Status: \w+$' })
+          Write-Host "     operations.log: $($lines.Count) new lines after the concurrent purges, $($bad.Count) malformed"
+          if ($bad.Count) { $script:failures += "operations.log has malformed lines: $($bad -join ' // ')" }
+
+          if ($script:failures) { $script:failures | ForEach-Object { Write-Host "FAIL: $_" }; exit 1 }
+          exit 0
+
       - name: Remove (self-uninstall)
         run: |
           $dir = Join-Path $env:LOCALAPPDATA 'Duster'

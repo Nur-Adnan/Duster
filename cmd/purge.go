@@ -153,6 +153,10 @@ func executePurge(cmd *cobra.Command, args []string) {
 		fmt.Fprintf(os.Stderr, "Error: The target path '%s' is critical/system protected. Scanning is blocked for safety.\n", absPath)
 		os.Exit(1)
 	}
+	if err := scanTargetError(absPath, true); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: cannot scan %s: %v\n", absPath, err)
+		os.Exit(1)
+	}
 
 	// Explicit --json always wins: snapshot and exit
 	if purgeJSON {
@@ -486,7 +490,7 @@ func (m purgeModel) View() string {
 		doc.WriteString("  |  " + purgeFailStyle.Render("PERMANENT CLEAN MODE"))
 	}
 	doc.WriteString("\n")
-	doc.WriteString(purgeDividerStyle.Render("  ═══════════════════════════════════════════════════════════════════════\n\n"))
+	doc.WriteString(purgeDividerStyle.Render("  ═══════════════════════════════════════════════════════════════════════") + "\n\n")
 
 	var boxContent strings.Builder
 
@@ -511,7 +515,7 @@ func (m purgeModel) View() string {
 			boxContent.WriteString(fmt.Sprintf("Discovered %d build artifact directories. Select folders to purge:\n\n", len(m.artifacts)))
 
 			boxContent.WriteString(purgeGrayText("     Target Path                                      Tech Tag       Size\n"))
-			boxContent.WriteString(purgeDividerStyle.Render("     ───────────────────────────────────────────────────────────────────────\n"))
+			boxContent.WriteString(purgeDividerStyle.Render("     ───────────────────────────────────────────────────────────────────────") + "\n")
 
 			maxVisible := 12
 			endIdx := m.scrollOffset + maxVisible
@@ -788,19 +792,24 @@ func runNonInteractivePurge(target string) {
 			}
 		}
 
-		if errDelete == nil {
-			reclaimed += a.Size
-			cleaned++
-			fmt.Println(purgeSuccessStyle.Render("SUCCESS"))
-		} else {
+		switch {
+		case errDelete != nil:
 			fmt.Printf("%s: %v\n", purgeFailStyle.Render("FAILED"), errDelete)
+			continue
+		case purgeDryRun:
+			fmt.Println(purgeSuccessStyle.Render("WOULD PURGE"))
+		default:
+			fmt.Println(purgeSuccessStyle.Render("SUCCESS"))
 		}
+		reclaimed += a.Size
+		cleaned++
 	}
 
-	fmt.Printf("\n✓ Purged %d / %d directories.\n", cleaned, len(list))
 	if purgeDryRun {
+		fmt.Printf("\n✓ Dry run: %d / %d directories would be purged; nothing was deleted.\n", cleaned, len(list))
 		fmt.Printf("Simulated reclaiming of %s.\n", formatBytes(reclaimed))
 	} else {
+		fmt.Printf("\n✓ Purged %d / %d directories.\n", cleaned, len(list))
 		fmt.Printf("Total active disk space reclaimed: %s\n", formatBytes(reclaimed))
 	}
 }

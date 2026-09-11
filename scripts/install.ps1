@@ -113,13 +113,35 @@ function ConvertTo-PSLiteral {
 
 # Exact PATH entry match (case-insensitive, trailing backslash ignored), so an
 # existing C:\Tools\Duster-old entry never counts as containing C:\Tools\Duster.
+# Entries are compared expanded, so %LOCALAPPDATA%\Duster matches too.
 function Test-PathEntry {
     param([string]$PathValue, [string]$Dir)
     $want = $Dir.Trim().TrimEnd('\')
     foreach ($entry in ($PathValue -split ';')) {
-        if ($entry.Trim().TrimEnd('\') -eq $want) { return $true }
+        if ([Environment]::ExpandEnvironmentVariables($entry).Trim().TrimEnd('\') -eq $want) { return $true }
     }
     return $false
+}
+
+# The user PATH exactly as stored: unexpanded (%USERPROFILE%\...) and
+# REG_EXPAND_SZ. [Environment]::Get/SetEnvironmentVariable would expand every
+# %VAR% entry and rewrite the value as REG_SZ, freezing the user's other entries.
+function Get-UserPath {
+    $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment')
+    if (-not $key) { return '' }
+    try { return [string]$key.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames) }
+    finally { $key.Close() }
+}
+
+function Set-UserPath {
+    param([string]$Value)
+    $key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')
+    try { $key.SetValue('Path', $Value, [Microsoft.Win32.RegistryValueKind]::ExpandString) }
+    finally { $key.Close() }
+    # A registry write alone doesn't reach Explorer. Setting and clearing a
+    # throwaway variable broadcasts WM_SETTINGCHANGE, so new terminals see PATH.
+    [Environment]::SetEnvironmentVariable('DusterPathRefresh', '1', 'User')
+    [Environment]::SetEnvironmentVariable('DusterPathRefresh', $null, 'User')
 }
 
 # == Banner ============================================================
@@ -530,7 +552,7 @@ Write-OK "Installed: $ExePath"
 if ($AddToPath) {
     Write-Step "Updating PATH..."
 
-    $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    $UserPath = Get-UserPath
 
     if (-not (Test-PathEntry $UserPath $InstallDir)) {
         if ([string]::IsNullOrEmpty($UserPath)) {
@@ -540,7 +562,7 @@ if ($AddToPath) {
         } else {
             $NewPath = "$UserPath;$InstallDir"
         }
-        [Environment]::SetEnvironmentVariable("Path", $NewPath, "User")
+        Set-UserPath $NewPath
 
         # Also update the current PowerShell session so du works immediately in PS
         $env:Path = "$env:Path;$InstallDir"
