@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -60,6 +61,21 @@ func TestCleanStartsDeletingImmediately(t *testing.T) {
 	m = updated.(cleanModel)
 	if m.state != cleanStateDone || cmd != nil {
 		t.Fatalf("after the last item: state %v, cmd %v; want done and no further work", m.state, cmd)
+	}
+}
+
+// A finished dry run must not tell the user that files were removed.
+func TestCleanDryRunDoneSaysNothingDeleted(t *testing.T) {
+	m := dryRunCleanModel()
+	m.state = cleanStateDone
+	v := m.View()
+	if !strings.Contains(v, "nothing was deleted") {
+		t.Error("a finished dry run does not say that nothing was deleted")
+	}
+	for _, claim := range []string{"cleaned successfully", "files removed", "space recovered"} {
+		if strings.Contains(v, claim) {
+			t.Errorf("a finished dry run claims %q", claim)
+		}
 	}
 }
 

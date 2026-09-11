@@ -77,17 +77,25 @@ func TestRecycleBinTooSmallAsksFirst(t *testing.T) {
 }
 
 // `du clean --dry-run` promises to delete nothing: c (force a real clean) must
-// do nothing, while d still runs the dry run.
+// do nothing, while d still runs the dry run and says nothing was deleted.
 func TestCleanDryRunIgnoresC(t *testing.T) {
+	duBin(t)
+	bait := filepath.Join(os.TempDir(), "duster-e2e-bait.txt") // Windows Temp Files would take it
+	mustWrite(t, bait, 1<<10)
+	t.Cleanup(func() { os.Remove(bait) })
+
 	tm := start(t, "clean", "--dry-run")
 	tm.waitFor("Ready to clean", 5*time.Minute)
 	tm.send("c")
 	time.Sleep(5 * time.Second)
-	if s := tm.screen(); strings.Contains(s, "freed") || strings.Contains(s, "Cleaning...") {
+	if !tm.onScreen("Ready to clean") || !exists(bait) {
 		t.Fatal("c started a clean in a --dry-run session")
 	}
 	tm.send("d")
-	tm.waitFor("would be freed", 3*time.Minute)
+	tm.waitFor("nothing was deleted", 3*time.Minute)
+	if !exists(bait) {
+		t.Fatal("the dry run deleted a temp file")
+	}
 	tm.send("q")
 	tm.waitExit(10 * time.Second)
 }
