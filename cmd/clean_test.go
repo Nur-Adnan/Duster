@@ -4,8 +4,85 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
+
+// Regression: a category root that is a symlink/junction must be skipped, not
+// followed (os.Stat/ReadDir follow links, so its target used to be emptied).
+func TestCleanDirCategorySkipsSymlinkedRoot(t *testing.T) {
+	tmp := t.TempDir()
+	victim := filepath.Join(tmp, "victim")
+	if err := os.MkdirAll(victim, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(victim, "important.txt"), []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(tmp, "cache")
+	if err := os.Symlink(victim, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	cat := CleanCategory{ID: "linkroot", Name: "Test Link Root", Paths: []string{link}}
+	if size, files, _ := scanDirCategory(cat); size != 0 || files != 0 {
+		t.Errorf("scan must skip a linked root, got %d bytes / %d files", size, files)
+	}
+	if _, _, err := cleanDirCategory(cat); err != nil {
+		t.Fatalf("cleanDirCategory: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(victim, "important.txt")); err != nil {
+		t.Fatalf("symlink target was emptied: %v", err)
+	}
+}
+
+// A root the user can't list (C:\Windows\Temp for a standard user) is skipped
+// like the scan skips it, not reported as a failed delete.
+func TestCleanDirCategorySkipsUnlistableRoot(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs POSIX directory permissions")
+	}
+	root := t.TempDir()
+	if err := os.Chmod(root, 0o300); err != nil { // write+search, no read: can't list
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(root, 0o755) })
+	cat := CleanCategory{ID: "unlistable", Name: "Test Unlistable", Paths: []string{root}}
+	if _, _, err := cleanDirCategory(cat); err != nil {
+		t.Fatalf("unlistable root must be skipped, not failed: %v", err)
+	}
+}
+
+// Delete failures must be returned (not only logged) while bytes that were
+// freed still count.
+func TestCleanDirCategoryReportsFailures(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a read-only directory does not block deleting its children on Windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	okRoot, lockedRoot := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(okRoot, "a.tmp"), []byte("12345"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(lockedRoot, "b.tmp"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(lockedRoot, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(lockedRoot, 0o755) })
+
+	cat := CleanCategory{ID: "partial", Name: "Test Partial", Paths: []string{okRoot, lockedRoot}}
+	freed, _, err := cleanDirCategory(cat)
+	if err == nil {
+		t.Fatal("expected an error for the undeletable entry")
+	}
+	if freed != 5 {
+		t.Errorf("freed = %d, want 5 (the deletable file still counts)", freed)
+	}
+}
 
 func TestFormatBytes(t *testing.T) {
 	tests := []struct {

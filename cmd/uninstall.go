@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -139,6 +140,7 @@ type uninstallModel struct {
 	selectedSize int64
 	sweepSize    int64
 	uninstErr    error
+	sweepSkipped bool // uninstaller failed or the app is still installed: nothing is swept
 	width        int
 	height       int
 }
@@ -150,7 +152,8 @@ type scanAppsCompleteMsg struct {
 }
 
 type nativeUninstallDoneMsg struct {
-	err error
+	err            error
+	stillInstalled bool // uninstaller returned but the app's registry entry remains
 }
 
 type scanLeftoversCompleteMsg struct {
@@ -184,12 +187,42 @@ func scanAppsCmd() tea.Cmd {
 // and a blocking Update() freezes the whole TUI on the confirm screen.
 func runNativeUninstallCmd(app uninstall.InstalledApp) tea.Cmd {
 	return func() tea.Msg {
-		var err error
-		if !uninstDryRun {
-			err = runNativeUninstaller(app.UninstallString)
+		if uninstDryRun {
+			return nativeUninstallDoneMsg{}
 		}
-		return nativeUninstallDoneMsg{err: err}
+		err := runNativeUninstaller(app.UninstallString)
+		// msiexec reports a successful uninstall that needs a reboot as 3010
+		// (ERROR_SUCCESS_REBOOT_REQUIRED) or 1641 (reboot initiated).
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && (exitErr.ExitCode() == 3010 || exitErr.ExitCode() == 1641) {
+			err = nil
+		}
+		// A cancelled wizard, or an uninstaller that hands off to a temp copy
+		// and exits at once, returns success while the app is still present.
+		// If we can't tell, assume it is (fail closed: skip the sweep).
+		still := false
+		if err == nil {
+			var verr error
+			if still, verr = appStillInstalled(app); verr != nil {
+				still = true
+			}
+		}
+		return nativeUninstallDoneMsg{err: err, stillInstalled: still}
 	}
+}
+
+// appStillInstalled reports whether app's uninstall registry entry still exists.
+func appStillInstalled(app uninstall.InstalledApp) (bool, error) {
+	apps, err := uninstall.GetInstalledApps()
+	if err != nil {
+		return false, err
+	}
+	for _, a := range apps {
+		if a.Name == app.Name && a.UninstallString == app.UninstallString {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func scanLeftoversCmd(app uninstall.InstalledApp) tea.Cmd {
@@ -198,11 +231,9 @@ func scanLeftoversCmd(app uninstall.InstalledApp) tea.Cmd {
 		var list []leftoverItem
 		for _, f := range folders {
 			size := calculateDirSize(f)
-			list = append(list, leftoverItem{
-				Path:     f,
-				Size:     size,
-				Selected: true,
-			})
+			// Nothing is pre-selected: leftovers are matched heuristically and
+			// deletion is permanent, so the user opts in per folder.
+			list = append(list, leftoverItem{Path: f, Size: size})
 		}
 		return scanLeftoversCompleteMsg{items: list}
 	}
@@ -382,6 +413,16 @@ func (m uninstallModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case nativeUninstallDoneMsg:
 		m.uninstErr = msg.err
+		if msg.err == nil && msg.stillInstalled {
+			m.uninstErr = fmt.Errorf("%s is still installed (uninstaller cancelled or still finishing)", m.selectedApp.Name)
+		}
+		if m.uninstErr != nil {
+			// Never sweep the data of an app that may still be installed.
+			m.leftovers = nil
+			m.sweepSkipped = true
+			m.state = stateSelectingLeftovers
+			return m, nil
+		}
 		m.state = stateScanningLeftovers
 		return m, scanLeftoversCmd(m.selectedApp)
 
@@ -583,7 +624,11 @@ func (m uninstallModel) View() string {
 		}
 		leftBox.WriteString("Discovered application folder remnants & local caches:\n\n")
 
-		if len(m.leftovers) == 0 {
+		if m.sweepSkipped {
+			leftBox.WriteString("  Leftover sweep skipped so no data of a still-installed app is deleted.\n")
+			leftBox.WriteString("  Nothing was removed. Re-run uninstall once the app is gone.\n\n")
+			leftBox.WriteString("  Press [Enter] to complete.")
+		} else if len(m.leftovers) == 0 {
 			leftBox.WriteString("  ✓ No leftover folder caches or registry remnants identified!\n")
 			leftBox.WriteString("  This system was cleaned cleanly by the native uninstaller.\n\n")
 			leftBox.WriteString("  Press [Enter] to complete.")
@@ -650,9 +695,16 @@ func (m uninstallModel) View() string {
 
 	case uninstStateFinished:
 		var finBox strings.Builder
-		finBox.WriteString("✓  " + uninstSuccessStyle.Render("SYSTEM CLEAN UNINSTALL COMPLETED") + "\n\n")
+		title := "✓  " + uninstSuccessStyle.Render("SYSTEM CLEAN UNINSTALL COMPLETED")
+		if m.sweepSkipped {
+			title = "⚠  " + uninstFailStyle.Render("UNINSTALL NOT CONFIRMED")
+		}
+		finBox.WriteString(title + "\n\n")
 		finBox.WriteString(fmt.Sprintf("  Application : %s\n", uninstWhiteText(m.selectedApp.Name)))
-		if uninstDryRun {
+		if m.sweepSkipped {
+			finBox.WriteString(fmt.Sprintf("  Status      : %s\n", uninstFailStyle.Render("LEFTOVER SWEEP SKIPPED")))
+			finBox.WriteString(fmt.Sprintf("  Reason      : %s\n\n", uninstGrayText(m.uninstErr.Error())))
+		} else if uninstDryRun {
 			finBox.WriteString(fmt.Sprintf("  Status      : %s (Simulation only)\n", uninstSuccessStyle.Render("SIMULATED")))
 			finBox.WriteString(fmt.Sprintf("  Est Reclaim : %s simulated\n\n", formatBytes(m.selectedSize)))
 		} else {
@@ -793,21 +845,68 @@ func runNativeUninstaller(uninstStr string) error {
 	return cmd.Run()
 }
 
-func scanAppLeftovers(appName, publisher string) []string {
-	var folders []string
-	searchTerms := []string{strings.ToLower(appName)}
-	if publisher != "" {
-		pubWords := strings.Fields(strings.ToLower(publisher))
-		if len(pubWords) > 0 {
-			searchTerms = append(searchTerms, pubWords[0])
+// leftoverStopWords are folder names too generic to attribute to a single app.
+var leftoverStopWords = map[string]bool{
+	"microsoft": true, "windows": true, "commonfiles": true, "temp": true, "tmp": true,
+	"packages": true, "programs": true, "crashdumps": true, "cache": true, "caches": true,
+	"logs": true, "data": true, "update": true, "updates": true, "updater": true,
+	"tools": true, "drivers": true, "config": true, "settings": true,
+}
+
+// leftoverKey reduces a name to lowercase ASCII letters and digits, so "7-Zip"
+// and "7zip", or "Notepad++" and "notepad", compare equal.
+func leftoverKey(s string) string {
+	return strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			return r
 		}
+		return -1
+	}, strings.ToLower(s))
+}
+
+// leftoverCandidates returns the folder keys that identify an app: its display
+// name without version/architecture decoration ("7-Zip 23.01 (x64)" -> 7zip)
+// and, when the name starts with the publisher's first word, the name without
+// that vendor prefix ("Mozilla Thunderbird" -> thunderbird). A bare vendor name
+// is never a candidate: vendor folders (Mozilla, Google, Adobe) hold other
+// apps' data.
+func leftoverCandidates(appName, publisher string) []string {
+	name := strings.ToLower(appName)
+	if i := strings.IndexAny(name, "(["); i >= 0 {
+		name = name[:i]
+	}
+	fields := strings.Fields(name)
+	for len(fields) > 1 {
+		last := fields[len(fields)-1]
+		isVersion := last[0] >= '0' && last[0] <= '9' || (len(last) > 1 && last[0] == 'v' && last[1] >= '0' && last[1] <= '9')
+		if !isVersion && last != "x64" && last != "x86" && last != "64-bit" && last != "32-bit" && last != "-" {
+			break
+		}
+		fields = fields[:len(fields)-1]
 	}
 
-	for i, term := range searchTerms {
-		term = strings.ReplaceAll(term, " llc", "")
-		term = strings.ReplaceAll(term, " inc.", "")
-		term = strings.ReplaceAll(term, " corporation", "")
-		searchTerms[i] = strings.TrimSpace(term)
+	var out []string
+	add := func(words []string) {
+		if k := leftoverKey(strings.Join(words, "")); len(k) >= 3 && !leftoverStopWords[k] {
+			out = append(out, k)
+		}
+	}
+	add(fields)
+	if pub := strings.Fields(publisher); len(pub) > 0 && len(fields) > 1 && leftoverKey(fields[0]) == leftoverKey(pub[0]) {
+		add(fields[1:])
+	}
+	return out
+}
+
+// scanAppLeftovers lists top-level AppData folders whose name exactly matches
+// one of the app's candidate names. Substring and publisher-word matching were
+// removed: they swept shared folders such as Roaming\Mozilla (Firefox profiles)
+// when uninstalling Thunderbird, or Local\Google (Chrome data) for Google Drive.
+func scanAppLeftovers(appName, publisher string) []string {
+	var folders []string
+	candidates := leftoverCandidates(appName, publisher)
+	if len(candidates) == 0 {
+		return nil
 	}
 
 	// Roaming/Local AppData + standard Program folders
@@ -846,19 +945,10 @@ func scanAppLeftovers(appName, publisher string) []string {
 				continue
 			}
 
-			entryName := strings.ToLower(entry.Name())
-			if entryName == "microsoft" || entryName == "windows" || entryName == "common files" || entryName == "temp" {
-				continue
-			}
-
+			key := leftoverKey(entry.Name())
 			matched := false
-			for _, term := range searchTerms {
-				// Terms shorter than 3 chars (an app named "Go", publisher "EA")
-				// would substring-match half the filesystem; skip them.
-				if len(term) < 3 {
-					continue
-				}
-				if strings.Contains(entryName, term) || (len(entryName) >= 3 && strings.Contains(term, entryName)) {
+			for _, c := range candidates {
+				if key == c {
 					matched = true
 					break
 				}

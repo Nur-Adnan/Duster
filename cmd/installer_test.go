@@ -162,4 +162,22 @@ func TestScanInstallersCrawler(t *testing.T) {
 	if discItem.Name != "outdated_large_setup.exe" {
 		t.Errorf("Expected discovered installer to be 'outdated_large_setup.exe', got %q", discItem.Name)
 	}
+
+	// Installers inside subfolders are extracted/portable apps: never swept.
+	nestedDir := filepath.Join(downloadsDir, "GameFolder")
+	_ = os.MkdirAll(nestedDir, 0755)
+	nested := filepath.Join(nestedDir, "Game.exe")
+	_ = os.WriteFile(nested, oldBulkyData, 0644)
+	_ = os.Chtimes(nested, oldTime, oldTime)
+	if items := scanInstallerItems(10); len(items) != 1 {
+		t.Errorf("subfolder installer must be ignored, got %d items: %v", len(items), items)
+	}
+
+	// Out-of-range --min-size values are clamped instead of selecting everything.
+	if items := scanInstallerItems(-5); len(items) != 1 {
+		t.Errorf("min-size -5 must clamp to 1MB (1 item), got %d", len(items))
+	}
+	if items := scanInstallerItems(1 << 62); len(items) != 0 {
+		t.Errorf("huge min-size must not overflow into selecting everything, got %d", len(items))
+	}
 }
