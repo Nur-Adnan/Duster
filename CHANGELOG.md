@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.5] - 2026-09-11
 
 ### Fixed
 - `install.cmd` now works when the install folder contains a space or an apostrophe; it used to split `C:\Users\John Smith\...` into two arguments. It also no longer passes `-InstallDir` when you didn't give `--dir`, which had disabled install.ps1's Program Files fallback on PCs with WDAC or AppLocker policies.
