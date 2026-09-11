@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"sort"
 	"testing"
+
+	"github.com/Nur-Adnan/duster/lib/fs"
 )
 
 // scanArtifacts must flag real build output and keep look-alikes that are not
@@ -44,9 +46,12 @@ func TestScanArtifactsRequiresProjectMarkers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("scanArtifacts: %v", err)
 	}
+	// The walk expands an 8.3 root (the Windows runner's RUNNER~1) to its long
+	// form, so artifact paths are relative to that.
+	base := fs.LongPath(root)
 	var rel []string
 	for _, a := range got {
-		r, _ := filepath.Rel(root, a.Path)
+		r, _ := filepath.Rel(base, a.Path)
 		rel = append(rel, filepath.ToSlash(r))
 	}
 	sort.Strings(rel)
