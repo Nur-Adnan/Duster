@@ -334,7 +334,7 @@ jobs:
             | `install.ps1` | Any | PowerShell installer script |
             | `install.cmd` | Any | CMD installer script |
             | `uninstall.ps1` | Any | PowerShell uninstaller |
-            | `checksums-sha256.txt` | — | SHA-256 checksums for all files |
+            | `checksums-sha256.txt` | — | SHA-256 checksums for the binaries, zips and setup exe |
 
             ### 🚀 Quick Start
             ```powershell
@@ -347,7 +347,7 @@ jobs:
 
             ### 🔒 Security
             - Compiled with `CGO_ENABLED=0` — fully static, no C runtime
-            - Built with `-trimpath` for reproducible builds
+            - Built with `-trimpath`, so no build-machine paths are embedded
             - Stripped with `-s -w` for minimal binary size
             - SHA-256 checksums provided — verify before running
 
@@ -401,11 +401,13 @@ jobs:
           name: duster-windows-amd64
           path: dist/
 
-      - name: Install Inno Setup
+      - name: Check Inno Setup
+        # Inno Setup 6 is preinstalled, and versioned, on GitHub's Windows runner
+        # images. The Chocolatey community package it replaces ran unpinned code
+        # in a job that holds release write access.
         shell: powershell
         run: |
-          choco install innosetup -y --no-progress
-          echo "C:\Program Files (x86)\Inno Setup 6" | Out-File -Append -FilePath $env:GITHUB_PATH -Encoding utf8
+          if (-not (Test-Path 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe')) { throw 'Inno Setup 6 is not preinstalled on this runner image' }
 
       - name: Compile Installer
         shell: cmd
