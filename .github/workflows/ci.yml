@@ -123,15 +123,25 @@ jobs:
           function Count-Entry($d) { @([Environment]::GetEnvironmentVariable('Path', 'User') -split ';' | Where-Object { $_.TrimEnd('\') -eq $d }).Count }
           # An entry that merely contains $dir as a substring must not satisfy the PATH check.
           [Environment]::SetEnvironmentVariable('Path', "$dir-old;" + [Environment]::GetEnvironmentVariable('Path', 'User'), 'User')
+          # PATH must stay REG_EXPAND_SZ, with %VAR% entries left unexpanded.
+          $envKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true)
+          $envKey.SetValue('Path', $envKey.GetValue('Path', '', 'DoNotExpandEnvironmentNames') + ';%USERPROFILE%\duster-var-probe', 'ExpandString')
+          function Assert-RawPath($when) {
+            $k = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment')
+            if ("$($k.GetValueKind('Path'))" -ne 'ExpandString') { throw "after ${when}: the user PATH is no longer REG_EXPAND_SZ" }
+            if ($k.GetValue('Path', '', 'DoNotExpandEnvironmentNames') -notlike '*%USERPROFILE%\duster-var-probe*') { throw "after ${when}: a %VAR% entry in the user PATH was expanded" }
+          }
 
           .\scripts\install.ps1 -InstallDir $dir -Version 1.0.2 -Silent
           .\scripts\install.ps1 -InstallDir $dir -Version 1.0.2 -Silent -Force
           if ((Count-Entry $dir) -ne 1) { throw "install dir should be in the user PATH exactly once" }
+          Assert-RawPath 'install'
           & "$dir\du.exe" --version
           if ($LASTEXITCODE -ne 0) { throw "du --version failed" }
 
           .\scripts\uninstall.ps1 -InstallDir $dir -Silent
           if ((Count-Entry $dir) -ne 0) { throw "uninstall left the install dir in the user PATH" }
+          Assert-RawPath 'uninstall'
           if ((Count-Entry "$dir-old") -ne 1) { throw "uninstall removed an unrelated PATH entry" }
           if (Test-Path "$dir\du.exe") { throw "uninstall left du.exe behind" }
 
