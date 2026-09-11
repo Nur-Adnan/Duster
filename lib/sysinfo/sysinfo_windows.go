@@ -186,8 +186,9 @@ func GetSystemStats() (SystemStats, error) {
 	}
 	ioMu.Unlock()
 
-	// 8. Process metrics (Top 5 CPU-hungry)
-	stats.TopProcesses = getTopProcesses()
+	// 8. Top processes are NOT gathered here: walking every process on each
+	// UI tick cost more than everything else combined, and no view shows
+	// them. One-shot snapshots call TopProcesses instead.
 
 	// 9. Health Score (Weighted: CPU 30%, RAM 30%, Disk 25%, Temp/Uptime 15%)
 	cpuPenalty := stats.CPUPercent * 0.3
@@ -523,4 +524,13 @@ func getTopProcesses() []ProcessInfo {
 	}
 
 	return results
+}
+
+// TopProcesses returns the five busiest processes by CPU, measured over
+// window. CPU use is a delta between two samples, so it walks every process
+// twice: call it for one-shot snapshots (status --json), never per UI tick.
+func TopProcesses(window time.Duration) []ProcessInfo {
+	getTopProcesses() // baseline sample
+	time.Sleep(window)
+	return getTopProcesses()
 }
