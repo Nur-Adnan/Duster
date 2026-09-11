@@ -4,9 +4,10 @@ CI already runs:
 - unit tests on Windows and Linux
 - cross-builds
 - govulncheck
-- install.ps1 and uninstall.ps1 on Windows PowerShell 5.1
+- install.ps1 and uninstall.ps1 on Windows PowerShell 5.1, and install.cmd from a folder with a space and an apostrophe
+- the setup exe and the Chocolatey package: build, install, uninstall
 
-Everything below touches real user data, UAC or the Recycle Bin, so it is manual. Use a throwaway Windows 10/11 VM with a snapshot, never a daily machine.
+The steps below touch real user data, UAC or the Recycle Bin. The Windows Smoke Test runs them on a throwaway runner. By hand, use a throwaway Windows 10/11 VM with a snapshot, never a daily machine.
 
 ## 1. Prepare
 
@@ -17,19 +18,30 @@ Everything below touches real user data, UAC or the Recycle Bin, so it is manual
 
 ## 2. Smoke test
 
-First run **Windows Smoke Test** (Actions tab > Run workflow, or push a `smoke/**` branch). On a real Windows runner it checks:
+Run **Windows Smoke Test** (Actions tab > Run workflow, or push a `smoke/**` branch). On a real Windows runner it checks:
 - `--version`, the `verify` and `doctor` exit codes, and `analyze`
 - `clean` against a junction root and a locked file
 - `purge` project markers, and `--safe` sending to the Recycle Bin
 - the Downloads `installer` scan
 - an end-to-end `update`
+- in a real terminal (`e2e/`, a Windows pseudo console):
+  - `status` renders and `q` quits
+  - `analyze`: Enter and Backspace, then `d` sends a file to the Recycle Bin
+  - the Recycle Bin size prompt: with the bin set to 1 MB, Windows asks before deleting a larger file, and No keeps it
+  - `c` does nothing in a `clean --dry-run` screen, while `d` still runs the dry run
+  - the landing Startup view: `d` asks, any other key cancels, `d` twice removes
+- real uninstalls of an Inno Setup app:
+  - the uninstaller runs, its entry disappears, and leftovers are listed with nothing selected
+  - a cancelled wizard shows "UNINSTALL NOT CONFIRMED" and "LEFTOVER SWEEP SKIPPED"
+  - a per-user app is refused while elevated
+- install.ps1's admin path, from a folder with a space and an apostrophe: the elevated re-launch (file and piped), and a denied prompt
+- upgrading a v1.0.2 install by reinstalling
 - `du remove`
 
-Once it passes, only the steps that need a desktop or UAC are left:
-- the Recycle Bin size prompt
-- the TUI keys (`c` in a dry-run clean, `d` in the landing startup view)
-- real uninstalls
-- the admin install path
+What the runner can't do, so check these by hand:
+- click a real UAC prompt (the runner is already elevated, so none appears)
+- uninstall a per-user app from a non-admin terminal
+- MSI (7-Zip) and InstallShield or rundll32 uninstallers
 
 The full list below stays, so a failure can be reproduced by hand.
 
@@ -92,8 +104,9 @@ Run everything from a normal (non-admin) terminal unless a step says elevated. E
    - both portable zips, both exes and the setup exe are attached
    - `checksums-sha256.txt` lists all of them
    - it is marked Latest (unless it is a pre-release)
+   - the **Attest Release Files** job passed (it runs `gh attestation verify` on every file)
 4. On the VM, run `irm https://raw.githubusercontent.com/Nur-Adnan/Duster/main/scripts/install.ps1 | iex`. It installs the new version.
 5. Afterwards:
    - set `$FallbackVersion` in `scripts/install.ps1` to the new version
-   - update `scripts/manifests/*` (version, URLs, SHA-256 values from `checksums-sha256.txt`)
+   - update `scripts/manifests/*` (version, URLs, SHA-256 values from `checksums-sha256.txt`), including `$checksum64` in `scripts/manifests/tools/chocolateyinstall.ps1`
    - date the CHANGELOG entry

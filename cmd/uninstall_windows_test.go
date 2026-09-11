@@ -38,6 +38,33 @@ func TestNewUninstallCmdRunsBatchUninstallerVerbatim(t *testing.T) {
 	}
 }
 
+// Inno Setup and NSIS uninstallers start a copy of themselves and exit at
+// once. runTree must wait for the copy, not just the first process.
+func TestRunTreeWaitsForHandedOffUninstaller(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "second-phase-done")
+	phase2 := filepath.Join(dir, "phase2.bat")
+	unins := filepath.Join(dir, "unins.bat")
+	if err := os.WriteFile(phase2, []byte("@ping -n 3 127.0.0.1 >nul\r\n@echo done> \""+marker+"\"\r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// start /b returns at once, like the first phase handing off to its temp copy.
+	if err := os.WriteFile(unins, []byte("@start \"\" /b \""+phase2+"\"\r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c, err := newUninstallCmd(`"` + unins + `"`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runTree(c, func() bool { return false }); err != nil {
+		t.Fatalf("runTree: %v", err)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatal("runTree returned before the handed-off process finished")
+	}
+}
+
 func TestNewUninstallCmdResolvesBareNamesAndKeepsArgs(t *testing.T) {
 	msiexec := systemExecutable("MsiExec.exe")
 	rundll := systemExecutable("RunDll32.exe")
