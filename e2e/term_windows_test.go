@@ -57,7 +57,12 @@ func duBin(t *testing.T) string {
 // start runs du.exe with args in a new pseudo console.
 func start(t *testing.T, args ...string) *term {
 	t.Helper()
-	bin := duBin(t)
+	return startBin(t, duBin(t), args...)
+}
+
+// startBin runs bin with args in a new pseudo console.
+func startBin(t *testing.T, bin string, args ...string) *term {
+	t.Helper()
 
 	var inR, inW, outR, outW windows.Handle
 	if err := windows.CreatePipe(&inR, &inW, nil, 0); err != nil {
@@ -118,6 +123,12 @@ func start(t *testing.T, args ...string) *term {
 		}
 	}()
 	t.Cleanup(func() {
+		tm.mu.Lock()
+		crashed := strings.Contains(tm.out.String(), "panic:")
+		tm.mu.Unlock()
+		if crashed {
+			t.Error("du panicked")
+		}
 		if t.Failed() {
 			t.Logf("du %s, last screen:\n%s", strings.Join(args, " "), tm.screen())
 		}

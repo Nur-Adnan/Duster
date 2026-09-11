@@ -260,7 +260,9 @@ func runSweepCmd(items []leftoverItem, dry bool) tea.Cmd {
 			}
 
 			success := err == nil
-			logUninstOperation("sweep", item.Path, item.Size, success)
+			if !dry { // a dry run deleted nothing, so there is nothing to log
+				logUninstOperation("sweep", item.Path, item.Size, success)
+			}
 			if success {
 				reclaimed += item.Size
 			}

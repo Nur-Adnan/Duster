@@ -85,17 +85,26 @@ Write-Step "Cleaning PATH..."
 
 # Exact entry match (case-insensitive, trailing backslash ignored): a substring
 # test would also strip or misreport entries like C:\Tools\Duster-old.
+# PATH is read and written as stored (unexpanded, REG_EXPAND_SZ):
+# [Environment]::Get/SetEnvironmentVariable would expand every %VAR% entry and
+# rewrite the value as REG_SZ, freezing the user's other entries.
 $Target   = $InstallDir.Trim().TrimEnd('\')
-$UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
+$EnvKey   = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')
+$UserPath = [string]$EnvKey.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
 $Parts    = @($UserPath -split ";" | Where-Object { $_ -ne "" })
-$Keep     = @($Parts | Where-Object { $_.Trim().TrimEnd('\') -ne $Target })
+$Keep     = @($Parts | Where-Object { [Environment]::ExpandEnvironmentVariables($_).Trim().TrimEnd('\') -ne $Target })
 if ($Keep.Count -lt $Parts.Count) {
-    [Environment]::SetEnvironmentVariable("Path", ($Keep -join ";"), "User")
+    $EnvKey.SetValue('Path', ($Keep -join ";"), [Microsoft.Win32.RegistryValueKind]::ExpandString)
+    # A registry write alone doesn't reach Explorer. Setting and clearing a
+    # throwaway variable broadcasts WM_SETTINGCHANGE, so new terminals see PATH.
+    [Environment]::SetEnvironmentVariable('DusterPathRefresh', '1', 'User')
+    [Environment]::SetEnvironmentVariable('DusterPathRefresh', $null, 'User')
     $env:Path = ($env:Path -split ";" | Where-Object { $_.Trim().TrimEnd('\') -ne $Target }) -join ";"
     Write-OK "Removed $InstallDir from user PATH"
 } else {
     Write-Info "PATH entry not found - nothing to remove."
 }
+$EnvKey.Close()
 
 # == 4. Clean Registry Keys ============================================
 Write-Step "Cleaning registry entries..."

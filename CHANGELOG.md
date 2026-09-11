@@ -5,6 +5,10 @@
 ### Fixed
 - `du uninstall` now waits for the whole uninstaller. Inno Setup and NSIS uninstallers, which many apps use, start a copy of themselves and exit at once. Duster checked too early, so it showed "UNINSTALL NOT CONFIRMED" and skipped the leftover scan while the app's own "Are you sure?" dialog was still open. It now waits until every process the uninstaller started has exited, or until the app is gone.
 - A finished dry run in the clean screen said "System cache cleaned successfully!" and counted "Total files removed", although nothing was deleted. It now says "Dry run complete: nothing was deleted." and labels the totals as space and files to remove.
+- `du optimize --json --yes` now exits 1 when a task fails. It reported the failure in its JSON but exited 0, so scripts couldn't tell a failed DNS flush or TRIM from success.
+- `install.ps1` and `uninstall.ps1` no longer rewrite your user PATH. They read it expanded and saved it back as a plain string (REG_SZ), which froze every `%VAR%` entry, including Windows' own `%USERPROFILE%\AppData\Local\Microsoft\WindowsApps`, into a fixed path. They now keep the value exactly as stored, as `REG_EXPAND_SZ`, like the setup exe does.
+- Dry runs of the uninstall leftover sweep and the installer sweep no longer write "success" entries to `operations.log` for deletions that never happened.
+- `du purge --dry-run --yes` no longer prints "SUCCESS" and "Purged N / N directories"; it says what would be purged and that nothing was deleted.
 - The Chocolatey package (`scripts/manifests/duster.nuspec`) pointed at a `tools/` folder that didn't exist, so it couldn't be built. It now has an install script that downloads the release and checks its SHA-256, and CI builds, installs and uninstalls it.
 
 ### Added

@@ -520,6 +520,20 @@ func runHeadlessOptimize() {
 		os.Exit(1)
 	}
 	fmt.Println(string(data))
+	// Like doctor, verify and update: a failed task must fail the command, so
+	// scripts can tell a failed DNS flush or TRIM from success.
+	if anyTaskFailed(tasks) {
+		os.Exit(1)
+	}
+}
+
+func anyTaskFailed(tasks []optimizeTask) bool {
+	for _, t := range tasks {
+		if t.Status == statusFailed {
+			return true
+		}
+	}
+	return false
 }
 
 // Local helper style functions — delegate to canonical shared helpers

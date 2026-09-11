@@ -788,19 +788,24 @@ func runNonInteractivePurge(target string) {
 			}
 		}
 
-		if errDelete == nil {
-			reclaimed += a.Size
-			cleaned++
-			fmt.Println(purgeSuccessStyle.Render("SUCCESS"))
-		} else {
+		switch {
+		case errDelete != nil:
 			fmt.Printf("%s: %v\n", purgeFailStyle.Render("FAILED"), errDelete)
+			continue
+		case purgeDryRun:
+			fmt.Println(purgeSuccessStyle.Render("WOULD PURGE"))
+		default:
+			fmt.Println(purgeSuccessStyle.Render("SUCCESS"))
 		}
+		reclaimed += a.Size
+		cleaned++
 	}
 
-	fmt.Printf("\n✓ Purged %d / %d directories.\n", cleaned, len(list))
 	if purgeDryRun {
+		fmt.Printf("\n✓ Dry run: %d / %d directories would be purged; nothing was deleted.\n", cleaned, len(list))
 		fmt.Printf("Simulated reclaiming of %s.\n", formatBytes(reclaimed))
 	} else {
+		fmt.Printf("\n✓ Purged %d / %d directories.\n", cleaned, len(list))
 		fmt.Printf("Total active disk space reclaimed: %s\n", formatBytes(reclaimed))
 	}
 }
