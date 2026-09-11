@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Fixed
+- `uninstall` can now run batch-file uninstallers (`.bat`, `.cmd`) whose registered arguments contain quotes. Windows' implicit `cmd /c` stripped the outer quotes, so the uninstaller never started. This affected 1.0.2 and 1.0.3.
 - `du status --json` now lists the busiest processes. It always returned an empty list, because it measured CPU use against an earlier call that a one-shot run never makes.
 
 ### Performance

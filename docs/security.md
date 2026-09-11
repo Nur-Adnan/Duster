@@ -34,7 +34,7 @@ Duster is a system utility designed for deep-cleaning operations. Because file d
 
 ### E. Third-Party Uninstallers
 * **Threat**: `du uninstall` runs the command an app registered under the registry's Uninstall keys. A bare `MsiExec.exe` looked up through `PATH` could run a planted copy with Duster's token, and a per-user (HKCU) entry points into a folder any process of that user can write.
-* **Mitigation**: Bare executable names resolve only inside the System32 directory (`GetSystemDirectoryW`), never through `PATH`. The executable is fixed separately and the registered arguments reach `CreateProcess` verbatim, so nothing is re-tokenized. HKCU entries are refused while Duster is elevated. The leftover sweep runs only after the uninstaller succeeded and its registry entry is gone, matches exact folder names, and starts with nothing selected.
+* **Mitigation**: Bare executable names resolve only inside the System32 directory (`GetSystemDirectoryW`), never through `PATH`. The executable is fixed separately and the registered arguments reach `CreateProcess` verbatim, so nothing is re-tokenized. Batch-file uninstallers run through System32's `cmd.exe /d /s /c`: `/s` keeps their quoting intact, and `/d` stops registry AutoRun commands from running with Duster's token. HKCU entries are refused while Duster is elevated. The leftover sweep runs only after the uninstaller succeeded and its registry entry is gone, matches exact folder names, and starts with nothing selected.
 
 ### F. Installer Script Elevation
 * **Threat**: When an application-control policy forces a Program Files install, `install.ps1` re-launches itself elevated. Re-running a script saved under `%TEMP%` would let a non-admin process swap it before it runs as admin.
