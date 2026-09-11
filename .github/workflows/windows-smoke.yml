@@ -1,0 +1,156 @@
+name: Windows Smoke Test
+
+# Runs Duster's destructive commands for real on a throwaway Windows runner:
+# everything in docs/release-checklist.md that needs no desktop UI or UAC.
+# Run it before tagging (Actions > Windows Smoke Test > Run workflow); it also
+# runs on pushes to smoke/** branches.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'smoke/**'
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Windows Smoke Test
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Build
+        env:
+          CGO_ENABLED: 0
+        run: |
+          go build -o du.exe .
+          # An older version string, so the update step has something to update.
+          go build -ldflags "-X main.Version=1.0.1" -o du-old.exe .
+
+      - name: Read-only commands and exit codes
+        run: |
+          $v = .\du.exe --version
+          if ("$v" -notmatch '^Duster version \d+\.\d+\.\d+') { throw "unexpected --version output: $v" }
+
+          $r = .\du.exe verify --json | Out-String | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or -not $r.healthy) { throw "verify: healthy=$($r.healthy) exit=$LASTEXITCODE" }
+
+          $d = .\du.exe doctor --json | Out-String | ConvertFrom-Json
+          $code = $LASTEXITCODE
+          $d.results | ForEach-Object { Write-Host "  doctor $($_.status) $($_.name)" }
+          if ($d.healthy -ne ($code -eq 0)) { throw "doctor exit code $code does not match healthy=$($d.healthy)" }
+
+          $a = .\du.exe analyze --json . | Out-String | ConvertFrom-Json
+          if ($a.total_size -le 0) { throw "analyze reported no size" }
+          exit 0
+
+      - name: Clean (junction root, locked file)
+        timeout-minutes: 15
+        run: |
+          # A category root that is a junction must be skipped, never followed.
+          New-Item -ItemType Directory -Force C:\JTarget | Out-Null
+          Set-Content C:\JTarget\keep.txt 'keep'
+          $pip = Join-Path $env:LOCALAPPDATA 'pip\Cache'
+          if (Test-Path $pip) { Remove-Item -Recurse -Force $pip }
+          New-Item -ItemType Directory -Force (Split-Path $pip) | Out-Null
+          cmd /c mklink /J "$pip" C:\JTarget | Out-Null
+
+          # A locked temp file must be reported as a failure; an unlocked one deleted.
+          $locked = Join-Path $env:TEMP 'duster-locked.txt'
+          $loose = Join-Path $env:TEMP 'duster-loose.txt'
+          Set-Content $loose 'x'
+          $h = [IO.File]::Open($locked, 'Create', 'ReadWrite', 'None')
+          try { $out = .\du.exe clean --yes | Out-String } finally { $h.Close() }
+          Write-Host $out
+
+          if (-not (Test-Path C:\JTarget\keep.txt)) { throw 'clean followed the junction at the pip cache root' }
+          if (Test-Path $loose) { throw 'clean left an unlocked temp file behind' }
+          if ($out -notmatch 'could not be deleted') { throw 'clean did not report the locked file' }
+          exit 0
+
+      - name: Purge (project markers, --safe to Recycle Bin)
+        timeout-minutes: 5
+        run: |
+          $ws = Join-Path $env:USERPROFILE 'duster-ws'
+          New-Item -ItemType Directory -Force "$ws\bare\node_modules\x", "$ws\app\node_modules\x" | Out-Null
+          Set-Content "$ws\app\package.json" '{}'
+          Set-Content "$ws\app\node_modules\x\f.js" 'x'
+
+          $j = .\du.exe purge --path $ws --json | Out-String | ConvertFrom-Json
+          $found = @($j.artifacts | ForEach-Object { $_.path })
+          if ($found.Count -ne 1 -or $found[0] -notlike '*\app\node_modules') { throw "purge found: $($found -join ', ')" }
+
+          $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          $bin = "C:\`$Recycle.Bin\$sid"
+          $before = @(Get-ChildItem -Force $bin -Filter '$R*' -ErrorAction SilentlyContinue).Count
+          .\du.exe purge --path $ws --safe --yes | Out-Host
+          $after = @(Get-ChildItem -Force $bin -Filter '$R*' -ErrorAction SilentlyContinue).Count
+
+          if (Test-Path "$ws\app\node_modules") { throw 'purge --safe left node_modules in place' }
+          if ($after -le $before) { throw 'purge --safe did not move node_modules to the Recycle Bin' }
+          if (-not (Test-Path "$ws\bare\node_modules")) { throw 'purge touched a node_modules with no project marker' }
+          exit 0
+
+      - name: Installer (top level of Downloads only)
+        run: |
+          $dl = Join-Path $env:USERPROFILE 'Downloads'
+          New-Item -ItemType Directory -Force "$dl\Portable" | Out-Null
+          foreach ($f in 'old-setup.exe', 'new-setup.exe', 'Portable\game.exe') { fsutil file createnew "$dl\$f" 62914560 | Out-Null }
+          $old = (Get-Date).AddDays(-10)
+          (Get-Item "$dl\old-setup.exe").LastWriteTime = $old
+          (Get-Item "$dl\Portable\game.exe").LastWriteTime = $old
+
+          $j = .\du.exe installer --json | Out-String | ConvertFrom-Json
+          $names = @($j.discovered_setups | ForEach-Object { $_.name })
+          Write-Host "found: $($names -join ', ')"
+          if ('old-setup.exe' -notin $names) { throw 'installer missed a week-old setup file' }
+          if ('new-setup.exe' -in $names) { throw 'installer listed a setup file newer than 7 days' }
+          if ('game.exe' -in $names) { throw 'installer listed a file inside a Downloads subfolder' }
+          exit 0
+
+      - name: Update end to end (check, then --yes)
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'upd'
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          Copy-Item du-old.exe "$dir\du.exe"
+
+          $j = & "$dir\du.exe" update --json | Out-String | ConvertFrom-Json
+          if ($j.status -ne 'NEW_VERSION_AVAILABLE') { throw "without --yes: $($j.status)" }
+          if ((& "$dir\du.exe" --version) -notmatch '1\.0\.1') { throw 'update installed without --yes' }
+
+          $j = & "$dir\du.exe" update --json --yes | Out-String | ConvertFrom-Json
+          if ($j.status -ne 'UPDATE_SUCCESSFULLY_INSTALLED') { throw "with --yes: $($j.status)" }
+          $v = & "$dir\du.exe" --version
+          Write-Host "after update: $v"
+          if ("$v" -notmatch [regex]::Escape($j.latest_version)) { throw "expected $($j.latest_version) after update" }
+          exit 0
+
+      - name: Remove (self-uninstall)
+        run: |
+          $dir = Join-Path $env:LOCALAPPDATA 'Duster'
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          Copy-Item du.exe "$dir\du.exe"
+          Set-Content "$dir\operations.log" 'x'
+
+          $j = & "$dir\du.exe" remove --json --force | Out-String | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $j.status -ne 'SUCCESS') { throw "remove: $($j.status) exit=$LASTEXITCODE" }
+          if (Test-Path "$dir\operations.log") { throw 'remove left the data folder contents' }
+          # The binary deletes itself ~2 s after exit.
+          for ($i = 0; $i -lt 30 -and (Test-Path "$dir\du.exe"); $i++) { Start-Sleep -Seconds 1 }
+          if (Test-Path "$dir\du.exe") { throw 'remove did not delete the binary' }
+          exit 0
