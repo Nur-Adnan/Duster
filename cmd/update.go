@@ -567,7 +567,7 @@ func (m updateModel) View() string {
 	doc.WriteString("\n")
 	doc.WriteString(upHeaderStyle.Render("Duster Exe Self-Updater"))
 	doc.WriteString("\n")
-	doc.WriteString(upDividerStyle.Render("  ═══════════════════════════════════════════════════════════════════════\n\n"))
+	doc.WriteString(upDividerStyle.Render("  ═══════════════════════════════════════════════════════════════════════") + "\n\n")
 
 	var boxLayout strings.Builder
 
@@ -583,7 +583,7 @@ func (m updateModel) View() string {
 		boxLayout.WriteString(fmt.Sprintf("  Status: %s\n\n", m.statusMsg))
 
 		if m.updateFound {
-			boxLayout.WriteString(upSuccessStyle.Render("  Update Details:\n"))
+			boxLayout.WriteString(upSuccessStyle.Render("  Update Details:") + "\n")
 			boxLayout.WriteString(fmt.Sprintf("    Latest Release tag : %s\n", upWhiteText(m.latestRelease.TagName)))
 			if len(m.latestRelease.PublishedAt) >= 10 {
 				boxLayout.WriteString(fmt.Sprintf("    Release Date       : %s\n", upWhiteText(m.latestRelease.PublishedAt[:10])))

@@ -486,7 +486,7 @@ func (m purgeModel) View() string {
 		doc.WriteString("  |  " + purgeFailStyle.Render("PERMANENT CLEAN MODE"))
 	}
 	doc.WriteString("\n")
-	doc.WriteString(purgeDividerStyle.Render("  ═══════════════════════════════════════════════════════════════════════\n\n"))
+	doc.WriteString(purgeDividerStyle.Render("  ═══════════════════════════════════════════════════════════════════════") + "\n\n")
 
 	var boxContent strings.Builder
 
@@ -511,7 +511,7 @@ func (m purgeModel) View() string {
 			boxContent.WriteString(fmt.Sprintf("Discovered %d build artifact directories. Select folders to purge:\n\n", len(m.artifacts)))
 
 			boxContent.WriteString(purgeGrayText("     Target Path                                      Tech Tag       Size\n"))
-			boxContent.WriteString(purgeDividerStyle.Render("     ───────────────────────────────────────────────────────────────────────\n"))
+			boxContent.WriteString(purgeDividerStyle.Render("     ───────────────────────────────────────────────────────────────────────") + "\n")
 
 			maxVisible := 12
 			endIdx := m.scrollOffset + maxVisible

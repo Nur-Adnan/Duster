@@ -316,7 +316,7 @@ func (m optimizeModel) View() string {
 		doc.WriteString("  |  " + optSuccessStyle.Render("LIVE ACTIVE MODE"))
 	}
 	doc.WriteString("\n")
-	doc.WriteString(optDividerStyle.Render("  ═══════════════════════════════════════════════════════════════════════\n\n"))
+	doc.WriteString(optDividerStyle.Render("  ═══════════════════════════════════════════════════════════════════════") + "\n\n")
 
 	var boxLayout strings.Builder
 
@@ -327,7 +327,7 @@ func (m optimizeModel) View() string {
 		}
 		boxLayout.WriteString("\n")
 		if !m.isAdmin {
-			boxLayout.WriteString(optWarnStyle.Render("  ⚠️  Notice: Duster is running in Standard user mode.\n"))
+			boxLayout.WriteString(optWarnStyle.Render("  ⚠️  Notice: Duster is running in Standard user mode.") + "\n")
 			boxLayout.WriteString(optGrayText("      Volume SSD TRIM optimization requires Administrative privileges and will be skipped.\n\n"))
 		}
 		boxLayout.WriteString("  Press [Enter] to run the optimization workflow, or [q] to Exit.")
@@ -369,7 +369,7 @@ func (m optimizeModel) View() string {
 		}
 
 		if m.currentIdx == len(m.tasks) {
-			boxLayout.WriteString(optDividerStyle.Render("  ───────────────────────────────────────────────────────────────────────\n"))
+			boxLayout.WriteString(optDividerStyle.Render("  ───────────────────────────────────────────────────────────────────────") + "\n")
 			failed := 0
 			for _, t := range m.tasks {
 				if t.Status == statusFailed {

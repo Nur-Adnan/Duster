@@ -215,7 +215,7 @@ func (m removeModel) View() string {
 	doc.WriteString("\n")
 	doc.WriteString(rmHeaderStyle.Render("Duster Uninstaller & Cleanup"))
 	doc.WriteString("\n")
-	doc.WriteString(rmDividerStyle.Render("  ═══════════════════════════════════════════════════════════════════════\n\n"))
+	doc.WriteString(rmDividerStyle.Render("  ═══════════════════════════════════════════════════════════════════════") + "\n\n")
 
 	var boxLayout strings.Builder
 
@@ -227,7 +227,7 @@ func (m removeModel) View() string {
 		boxLayout.WriteString(fmt.Sprintf("    • Local configuration files: %s\n", rmWhiteText(m.logDir)))
 		boxLayout.WriteString("    • Operational logs and transaction history\n\n")
 		if rmDryRun {
-			boxLayout.WriteString(rmSuccessStyle.Render("  [DRY-RUN SIMULATION ACTIVE] — No bytes will actually be deleted.\n\n"))
+			boxLayout.WriteString(rmSuccessStyle.Render("  [DRY-RUN SIMULATION ACTIVE] — No bytes will actually be deleted.") + "\n\n")
 		}
 		boxLayout.WriteString("  Are you sure you want to proceed? [y to Confirm / n to Cancel]")
 

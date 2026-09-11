@@ -374,7 +374,7 @@ func (m installerModel) View() string {
 		doc.WriteString("  |  " + instSuccessStyle.Render("LIVE ACTIVE MODE"))
 	}
 	doc.WriteString("\n")
-	doc.WriteString(instDividerStyle.Render("  ═══════════════════════════════════════════════════════════════════════\n\n"))
+	doc.WriteString(instDividerStyle.Render("  ═══════════════════════════════════════════════════════════════════════") + "\n\n")
 
 	var boxLayout string
 
@@ -395,7 +395,7 @@ func (m installerModel) View() string {
 		} else {
 			leftBox.WriteString(instWhiteText("Discovered bulky outdated installers (older than 7 days):\n\n"))
 			leftBox.WriteString(instGrayText("     Target Setup Name                             Size            Age\n"))
-			leftBox.WriteString(instDividerStyle.Render("     ───────────────────────────────────────────────────────────────────────\n"))
+			leftBox.WriteString(instDividerStyle.Render("     ───────────────────────────────────────────────────────────────────────") + "\n")
 
 			maxVisible := 12
 			endIdx := m.scrollOffset + maxVisible
