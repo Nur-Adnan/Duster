@@ -197,7 +197,7 @@ func runNativeUninstallCmd(app uninstall.InstalledApp) tea.Cmd {
 		if uninstDryRun {
 			return nativeUninstallDoneMsg{}
 		}
-		err := runNativeUninstaller(app.UninstallString)
+		err := runNativeUninstaller(app)
 		// msiexec reports a successful uninstall that needs a reboot as 3010
 		// (ERROR_SUCCESS_REBOOT_REQUIRED) or 1641 (reboot initiated).
 		var exitErr *exec.ExitError
@@ -850,12 +850,17 @@ func newUninstallCmd(uninstStr string) (*exec.Cmd, error) {
 	return cmd, nil
 }
 
-func runNativeUninstaller(uninstStr string) error {
-	cmd, err := newUninstallCmd(uninstStr)
+// runNativeUninstaller runs the app's uninstaller and waits for every process
+// it starts (runTree), stopping early once the app's entry is gone.
+func runNativeUninstaller(app uninstall.InstalledApp) error {
+	cmd, err := newUninstallCmd(app.UninstallString)
 	if err != nil {
 		return err
 	}
-	return cmd.Run()
+	return runTree(cmd, func() bool {
+		still, err := appStillInstalled(app)
+		return err == nil && !still
+	})
 }
 
 // leftoverStopWords are folder names too generic to attribute to a single app.

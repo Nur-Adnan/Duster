@@ -458,3 +458,38 @@ jobs:
           gh release download "$TAG" --pattern checksums-sha256.txt --output checksums-sha256.txt
           (cd dist/installer && sha256sum Duster-Setup-*.exe) >> checksums-sha256.txt
           gh release upload "$TAG" checksums-sha256.txt --clobber
+
+  # ── Stage 5: Provenance ────────────────────────────────────────────
+  # Signed build provenance for every published file: Sigstore, keyless (no
+  # key to hold), recorded in the public transparency log. A file replaced by
+  # hand on the release page fails it. Check a download with
+  # `gh attestation verify <file> --repo Nur-Adnan/Duster`.
+  attest:
+    name: Attest Release Files
+    needs: [release, installer]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download Release Files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}
+        run: |
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir release
+          ls -l release
+
+      - name: Attest Build Provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: 'release/*'
+
+      - name: Verify Attestations
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for f in release/*; do
+            gh attestation verify "$f" --repo "$GITHUB_REPOSITORY"
+          done
