@@ -97,4 +97,6 @@ journal/
 !/.github/**/*.md
 !/docs/*.md
 !/docs/**/*.md
+# OpenSpec specs and change proposals are source; they must be versioned.
+!/openspec/**/*.md
 duster

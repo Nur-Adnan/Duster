@@ -1,0 +1,47 @@
+schema: spec-driven
+
+# Injected into every artifact prompt. Keep it to facts an AI can't infer quickly.
+context: |
+  Duster: Windows-native deep cleaner and system optimization CLI. Ships as a
+  single static binary `du.exe` (Go 1.25, CGO_ENABLED=0, windows/amd64 + arm64).
+  Stack: Cobra (CLI), Bubble Tea + Lipgloss (TUI), gopsutil v3, Win32 APIs via
+  golang.org/x/sys/windows. No shelling out to external tools.
+
+  Layout:
+  - cmd/: one file per `du` subcommand (analyze, benchmark, clean, doctor,
+    installer, optimize, purge, remove, status, uninstall, update, verify)
+    plus TUI rendering. Parsing and presentation only.
+  - lib/: Windows engine (elevation, fs, sysinfo, uninstall). Real code lives
+    in *_windows.go; every package has a *_stub.go for non-Windows builds.
+  - internal/logging: operations log (disabled in tests with DU_NO_OPLOG=1).
+
+  Safety invariants (this tool deletes user data, treat as hard requirements):
+  - Never traverse symlinks, junctions, or reparse points; unlink them directly.
+  - Skip files with FILE_ATTRIBUTE_OFFLINE (OneDrive placeholders).
+  - Resolve system dirs via Win32 (GetSystemDirectoryW, GetWindowsDirectoryW),
+    never via mutable env vars like %SYSTEMROOT%.
+  - Open registry keys read-only unless the change explicitly requires writes.
+
+  Quality gates (CI): gofmt -s, go vet, go test -race on Linux (stubs only),
+  go test on windows-latest (real code), scripts/verify_build.sh.
+  Tests are table-driven. Commits follow Conventional Commits.
+
+rules:
+  proposal:
+    - Name the affected `du` subcommands and lib/ packages
+    - State whether the change deletes, moves, or modifies files, registry, or services, and whether it needs elevation
+    - Include a Non-goals section
+  specs:
+    - For any destructive behavior, add scenarios for permission denied, locked or in-use files, and reparse points
+  design:
+    - Keep Cobra/TUI code in cmd/ and Windows logic in lib/; new Windows code needs a matching *_stub.go
+    - Prefer Win32 APIs over spawning processes; justify any exception
+  tasks:
+    - Pair each implementation task with its test
+    - End with gofmt -s -l ., go vet ./..., GOOS=windows go vet ./..., and go test ./...
+
+operations:
+  apply:
+    guidance:
+      - Run focused package tests before the full suite
+      - Never run destructive du commands (clean, purge, remove, uninstall, optimize) on the host machine to test changes
