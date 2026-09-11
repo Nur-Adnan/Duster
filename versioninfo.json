@@ -3,13 +3,13 @@
     "FileVersion": {
       "Major": 1,
       "Minor": 0,
-      "Patch": 4,
+      "Patch": 5,
       "Build": 0
     },
     "ProductVersion": {
       "Major": 1,
       "Minor": 0,
-      "Patch": 4,
+      "Patch": 5,
       "Build": 0
     },
     "FileFlagsMask": "3f",
@@ -22,14 +22,14 @@
     "Comments": "Duster — Windows-native deep cleaner and system optimization utility",
     "CompanyName": "Nur Adnan",
     "FileDescription": "Duster System Cleaner & Optimizer",
-    "FileVersion": "1.0.4.0",
+    "FileVersion": "1.0.5.0",
     "InternalName": "duster",
     "LegalCopyright": "Copyright (c) 2026 Nur Adnan. MIT License.",
     "LegalTrademarks": "",
     "OriginalFilename": "duster.exe",
     "PrivateBuild": "",
     "ProductName": "Duster",
-    "ProductVersion": "1.0.4.0",
+    "ProductVersion": "1.0.5.0",
     "SpecialBuild": ""
   },
   "VarFileInfo": {
