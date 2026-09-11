@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.0.3] - Unreleased
+## [1.0.3] - 2026-09-11
 
 ### Upgrading from 1.0.2
 `du update` in 1.0.2 cannot install new releases. Reinstall once with the install command in the README; after that, `du update` works.
