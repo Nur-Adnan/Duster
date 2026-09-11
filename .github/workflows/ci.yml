@@ -58,6 +58,14 @@ jobs:
           "$(go env GOPATH)/bin/govulncheck" ./...
           GOOS=windows "$(go env GOPATH)/bin/govulncheck" ./...
 
+      - name: Staticcheck (host and Windows targets)
+        # Windows-only files (*_windows.go, windows-tagged tests) are invisible
+        # to a host-only run; a spinning select loop slipped through that way.
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@v0.7.0
+          "$(go env GOPATH)/bin/staticcheck" ./...
+          GOOS=windows "$(go env GOPATH)/bin/staticcheck" ./...
+
   # ── Step 2: Test Suite ────────────────────────────────────────────────
   test:
     name: Unit Test Suite
