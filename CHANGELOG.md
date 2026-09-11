@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.4] - 2026-09-11
 
 ### Fixed
 - `uninstall` can now run batch-file uninstallers (`.bat`, `.cmd`) whose registered arguments contain quotes. Windows' implicit `cmd /c` stripped the outer quotes, so the uninstaller never started. This affected 1.0.2 and 1.0.3.
