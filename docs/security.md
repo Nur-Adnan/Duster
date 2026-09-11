@@ -18,6 +18,7 @@ Duster is a system utility designed for deep-cleaning operations. Because file d
 ### A. TOCTOU (Time-of-Check to Time-of-Use) Redirection Defense
 * **Vulnerability Threat**: Standard recursive directory deletion walk routines can be hijacked if a concurrent unprivileged process swaps a cleanable subfolder with an NTFS Junction pointing to a protected folder (e.g. `C:\Windows\System32`) between Duster's path checks and file removals.
 * **Mitigation**: Inside `removeAllSafe` (`utils.go`), Duster executes an `os.Lstat()` check prior to any action. If the mode mask matches `os.ModeSymlink` **or** `os.ModeIrregular` (Go 1.23+ reports NTFS junction points as irregular, not as symlinks), **Duster immediately halts traversal and deletes the link itself directly** via `os.Remove()`, rather than recursing.
+* **Deletion roots**: a clean category's root folder is `Lstat`ed first and skipped if it is itself a symlink or junction (`skipCategoryRoot`), so a junction planted at a cache path cannot redirect a clean into another folder.
 
 ### B. Environment Variable Spoofing Mitigation
 * **Vulnerability Threat**: Command-line path boundaries (e.g., preventing deletions under `%WINDIR%`) can be subverted if a parent process launches Duster with custom-spoofed environment variables (e.g., setting `WINDIR=C:\Users\Public\Dummy`).
@@ -40,6 +41,7 @@ The Duster self-update engine verifies release integrity with **SHA-256 checksum
 2. Each release publishes a `checksums-sha256.txt` asset. The updater downloads it and looks up the expected digest for the platform archive; a release without checksums is treated as not installable.
 3. The downloaded archive's SHA-256 digest must match the published entry exactly, or the update aborts before anything is written.
 4. The new binary is swapped in atomically on the same volume, with the previous binary preserved for rollback if any step fails.
+5. In headless / `--json` mode an update is installed only with `--yes`. Pre-release tags are never offered to users on a stable version, and a tag that doesn't parse as a version never counts as newer (no downgrade through a malformed tag).
 
 > **Trust model:** integrity is rooted in GitHub's TLS and the release checksums file. This protects against corrupted or man-in-the-middle-tampered downloads, but not against a compromised release-publishing account (which could publish a matching checksum). The release pipeline includes an optional Authenticode signing stage for both binaries and the installer, activated by configuring the `WINDOWS_CODESIGN_PFX_BASE64` / `WINDOWS_CODESIGN_PFX_PASSWORD` repository secrets; until a certificate is provisioned, releases ship unsigned and SmartScreen prompts are expected.
 
@@ -50,7 +52,9 @@ The Duster self-update engine verifies release integrity with **SHA-256 checksum
 Duster hard-blocks deletions on the following directory stems (case-insensitive), enforced by `fs.IsSystemProtectedPath`:
 * `C:\Windows` and all subdirs, excluding exactly the cache/log subtrees the clean categories target: `Temp`, `Prefetch`, `SoftwareDistribution\Download`, `SoftwareDistribution\DeliveryOptimization`, `Minidump`, `Logs\CBS`, `Logs\DISM`
 * `C:\Windows\System32` (strictly absolute protection, resolved via `GetSystemDirectoryW`)
-* `C:\Program Files` & `C:\Program Files (x86)`
+* `Program Files` & `Program Files (x86)` on any drive
 * `C:\Boot`, `C:\Recovery`, `C:\EFI`, `C:\$WinREAgent`
 * `C:\System Volume Information`
-* Root paths (e.g. `C:\`, `D:\`)
+* Root paths (e.g. `C:\`, `D:\`, `\\server\share`, `\\host\c$`)
+
+Before comparison, paths are normalized the way Windows resolves them: `\\?\`, `\\.\` and `\??\` prefixes are removed, admin shares (`\\host\c$\...`) map to their drive while other hidden `$` shares (`admin$`, `print$`) are refused, trailing dots and spaces are trimmed from each component (`C:\Windows.\System32` is `C:\Windows\System32`), and `..` is resolved. Device and volume paths (`\\?\GLOBALROOT\...`, `\\?\Volume{...}`), alternate data streams, and anything else that can't be normalized are treated as protected.
