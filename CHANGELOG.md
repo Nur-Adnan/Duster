@@ -20,7 +20,7 @@
 - `clean` opened with `--dry-run` can no longer start a real clean from the TUI.
 - `purge` only flags `node_modules`, `.gradle` and `.m2` folders that sit next to their project file.
 - `installer` scans only the top level of Downloads, skips OneDrive placeholders, and clamps `--min-size`.
-- `remove` never falls back to the current directory, keeps the running binary while it clears the Duster folder, and exits 1 if the uninstall is incomplete.
+- `remove` never falls back to the current directory, keeps the running binary while it clears the Duster folder, and exits 1 if the uninstall is incomplete. It also no longer writes its log entry back into the folder it has just deleted.
 - Deleting to the Recycle Bin now warns before permanently deleting an item that is too large for the bin.
 - `optimize` reports only the space it actually freed, and runs system tools by absolute path.
 - install.ps1: the admin install works when the script is piped (`irm | iex`) and with paths that contain spaces. Adding and removing the PATH entry now matches whole entries only.
