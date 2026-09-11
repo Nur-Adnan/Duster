@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -9,6 +11,8 @@ import (
 )
 
 func TestRemoveModelInitialization(t *testing.T) {
+	local := t.TempDir()
+	t.Setenv("LOCALAPPDATA", local)
 	exePath := `C:\Users\Default\AppData\Local\Temp\duster.exe`
 	m := initialRemoveModel(exePath)
 
@@ -20,8 +24,10 @@ func TestRemoveModelInitialization(t *testing.T) {
 		t.Errorf("Expected currentExe path to be %s, got %s", exePath, m.currentExe)
 	}
 
-	if m.logDir == "" {
-		t.Error("Expected logDir directory to be resolved, got empty string")
+	// The data dir must come from the profile, never a working-directory
+	// fallback: `du remove` deletes whatever this resolves to.
+	if want := filepath.Join(local, "Duster"); m.logDir != want {
+		t.Errorf("logDir = %q, want %q", m.logDir, want)
 	}
 }
 
@@ -118,15 +124,58 @@ func TestCleanDusterDirSafety(t *testing.T) {
 	}
 
 	for _, path := range unsafePaths {
-		err := cleanDusterDir(path, false)
+		err := cleanDusterDir(path, "", false)
 		if err == nil {
 			t.Errorf("Expected error for unsafe path %q, but deletion was allowed", path)
 		}
 	}
 
 	// Verify that a safe path is allowed
-	err := cleanDusterDir(`C:\Users\Default\AppData\Local\Duster`, true)
+	err := cleanDusterDir(`C:\Users\Default\AppData\Local\Duster`, "", true)
 	if err != nil {
 		t.Errorf("Expected safe path to be allowed in dry-run, got error: %v", err)
+	}
+}
+
+// The default install puts du.exe inside the data dir; removal must delete
+// everything else and leave the running exe for the delayed self-delete.
+func TestCleanDusterDirKeepsRunningExe(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "Duster")
+	if err := os.MkdirAll(filepath.Join(dir, "cache"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	exe := filepath.Join(dir, "du.exe")
+	for _, f := range []string{exe, filepath.Join(dir, "operations.log"), filepath.Join(dir, "cache", "x")} {
+		if err := os.WriteFile(f, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Spell the exe path differently (macOS /var -> /private/var): identity,
+	// not string equality, must decide what is kept.
+	exeAlias, err := filepath.EvalSymlinks(exe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cleanDusterDir(dir, exeAlias, false); err != nil {
+		t.Fatalf("cleanDusterDir: %v", err)
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 || entries[0].Name() != "du.exe" {
+		t.Fatalf("want only du.exe left, got %v", entries)
+	}
+
+	// Exe installed elsewhere: the whole data dir goes, including the dir.
+	other := filepath.Join(t.TempDir(), "Duster")
+	if err := os.MkdirAll(filepath.Join(other, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(other, "sub", "f"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := cleanDusterDir(other, exe, false); err != nil {
+		t.Fatalf("cleanDusterDir(other): %v", err)
+	}
+	if _, err := os.Stat(other); !os.IsNotExist(err) {
+		t.Fatalf("data dir should be gone when the exe lives elsewhere, err=%v", err)
 	}
 }

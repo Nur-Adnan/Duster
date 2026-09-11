@@ -83,13 +83,15 @@ if ((Test-Path $InstallDir) -and ((Get-ChildItem $InstallDir | Measure-Object).C
 # == 3. Remove from PATH ===============================================
 Write-Step "Cleaning PATH..."
 
+# Exact entry match (case-insensitive, trailing backslash ignored): a substring
+# test would also strip or misreport entries like C:\Tools\Duster-old.
+$Target   = $InstallDir.Trim().TrimEnd('\')
 $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
-if ($UserPath -like "*$InstallDir*") {
-    # Remove all occurrences, handle trailing/leading semicolons
-    $Parts   = $UserPath -split ";" | Where-Object { $_ -ne $InstallDir -and $_ -ne "" }
-    $NewPath = $Parts -join ";"
-    [Environment]::SetEnvironmentVariable("Path", $NewPath, "User")
-    $env:Path = ($env:Path -split ";" | Where-Object { $_ -ne $InstallDir }) -join ";"
+$Parts    = @($UserPath -split ";" | Where-Object { $_ -ne "" })
+$Keep     = @($Parts | Where-Object { $_.Trim().TrimEnd('\') -ne $Target })
+if ($Keep.Count -lt $Parts.Count) {
+    [Environment]::SetEnvironmentVariable("Path", ($Keep -join ";"), "User")
+    $env:Path = ($env:Path -split ";" | Where-Object { $_.Trim().TrimEnd('\') -ne $Target }) -join ";"
     Write-OK "Removed $InstallDir from user PATH"
 } else {
     Write-Info "PATH entry not found - nothing to remove."

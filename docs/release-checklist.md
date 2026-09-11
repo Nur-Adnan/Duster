@@ -1,0 +1,83 @@
+# Release checklist
+
+CI already runs:
+- unit tests on Windows and Linux
+- cross-builds
+- govulncheck
+- install.ps1 and uninstall.ps1 on Windows PowerShell 5.1
+
+Everything below touches real user data, UAC or the Recycle Bin, so it is manual. Use a throwaway Windows 10/11 VM with a snapshot, never a daily machine.
+
+## 1. Prepare
+
+- [ ] CI is green on the commit you will tag.
+- [ ] `CHANGELOG.md` has an entry for the version.
+- [ ] Build it: `GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o du.exe .`
+- [ ] Copy `du.exe` and `scripts/` to the VM, then take a snapshot.
+
+## 2. Smoke test
+
+Run everything from a normal (non-admin) terminal unless a step says elevated. Each step lists its expected result.
+
+**Read-only**
+- [ ] `du --version`: prints the new version.
+- [ ] `du doctor --json; $LASTEXITCODE`: prints JSON. Exit code is 0 when `healthy` is true and 1 when any check has `FAIL`.
+- [ ] `du verify --json; $LASTEXITCODE`: all 8 cases pass, exit code 0.
+- [ ] `du status`: the dashboard renders, and `q` quits.
+- [ ] `du analyze $env:USERPROFILE`:
+  - Enter a folder and go back (Enter, then Backspace). The view is instant with no rescan.
+  - `d` on a scratch file sends it to the Recycle Bin.
+- [ ] Set the Recycle Bin's maximum size to 1 MB. Then `d` on a larger file: Windows asks before permanently deleting it. Restore the size afterwards.
+
+**Clean, purge, installer, optimize**
+- [ ] `du clean --dry-run`: lists sizes and deletes nothing. In its TUI, `c` does nothing.
+- [ ] Locked file: `$h = [IO.File]::Open("$env:TEMP\duster-locked.txt", 'Create', 'ReadWrite', 'None')`, then `du clean --yes --debug`.
+  - The temp category prints a ✗ line saying items could not be deleted, and the run ends with a warning.
+  - Run `$h.Close()` afterwards.
+- [ ] Junction root:
+  1. `mkdir C:\JTarget; "keep" > C:\JTarget\keep.txt`
+  2. Remove `%LOCALAPPDATA%\pip\Cache` if it exists.
+  3. `cmd /c mklink /J "%LOCALAPPDATA%\pip\Cache" C:\JTarget`
+  4. `du clean --yes --debug`
+
+  `C:\JTarget\keep.txt` must survive.
+- [ ] `du purge --path <dir> --dry-run`: a `node_modules` with no `package.json` beside it is not listed; add a `package.json` and it is. `--safe` sends items to the Recycle Bin.
+- [ ] `du installer --dry-run`: lists only top-level Downloads files that are at least 7 days old and at least 50 MB. Files in subfolders are ignored.
+- [ ] Elevated `du optimize`: flushes DNS, reports the Delivery Optimization space it freed, then runs `defrag /O`.
+- [ ] Landing screen: run `du`, open Startup, press `d`. It asks first; any other key cancels; `d` twice removes the entries.
+
+**Uninstall**
+- [ ] Install 7-Zip (MSI), then uninstall it with `du uninstall`. The uninstaller runs, the app entry disappears, and its leftover folders are listed with nothing selected.
+- [ ] Start an uninstall and cancel the vendor's wizard. Duster shows "UNINSTALL NOT CONFIRMED" and "LEFTOVER SWEEP SKIPPED".
+- [ ] An InstallShield or rundll32-based app, if you have one: its uninstaller starts with its arguments intact.
+- [ ] A per-user app (for example the VS Code user installer):
+  - From an elevated terminal, `du uninstall` refuses with "per-user app: run Duster without administrator rights".
+  - From a normal terminal, it uninstalls.
+
+**Update and remove**
+- [ ] Build with `-ldflags "-X main.Version=1.0.1"` and run `du update --json`. It reports an update and installs nothing.
+- [ ] `du update --json --yes`: downloads the latest release, verifies its SHA-256 and swaps the binary. `du --version` then shows the release.
+- [ ] Last: `du remove`. The binary and `%LOCALAPPDATA%\Duster` are gone, and the exit code is 0.
+
+**Installer script** (restore the snapshot first)
+- [ ] `.\scripts\install.ps1 -Version 1.0.2`: installs to `%LOCALAPPDATA%\Duster`, and the user PATH contains that folder exactly once.
+- [ ] Admin path:
+  1. In a copy of `install.ps1`, make `Test-WDACBlocked` return `$true`.
+  2. Run the copy from a folder whose path contains a space. You get a UAC prompt, then it installs to `C:\Program Files\Duster`.
+  3. Run it again and deny UAC. You get a clear error.
+
+  The piped (`irm | iex`) admin path downloads main's script, so it can only be checked after merging.
+
+## 3. Release
+
+1. Merge to main and wait for CI to pass.
+2. `git tag vX.Y.Z && git push origin vX.Y.Z`. This runs `release.yml`.
+3. Check the release:
+   - both portable zips, both exes and the setup exe are attached
+   - `checksums-sha256.txt` lists all of them
+   - it is marked Latest (unless it is a pre-release)
+4. On the VM, run `irm https://raw.githubusercontent.com/Nur-Adnan/Duster/main/scripts/install.ps1 | iex`. It installs the new version.
+5. Afterwards:
+   - set `$FallbackVersion` in `scripts/install.ps1` to the new version
+   - update `scripts/manifests/*` (version, URLs, SHA-256 values from `checksums-sha256.txt`)
+   - date the CHANGELOG entry

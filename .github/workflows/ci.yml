@@ -13,7 +13,9 @@ permissions:
   contents: read
 
 env:
-  GO_VERSION: '1.25.x'
+  # Build/test on a supported toolchain (Go supports the two latest majors);
+  # go.mod still declares 1.25 as the minimum language version.
+  GO_VERSION: '1.26.x'
 
 jobs:
   # ── Step 1: Static Analysis & Linting ──────────────────────────────────
@@ -47,6 +49,14 @@ jobs:
 
       - name: Go Vet Static Analysis
         run: go vet ./...
+
+      - name: Vulnerability Scan (host and Windows targets)
+        # Fails on known-vulnerable stdlib/dependency code reachable from
+        # Duster (the shipped v1.0.2 binary carried 14 such findings).
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
+          "$(go env GOPATH)/bin/govulncheck" ./...
+          GOOS=windows "$(go env GOPATH)/bin/govulncheck" ./...
 
   # ── Step 2: Test Suite ────────────────────────────────────────────────
   test:
@@ -94,6 +104,28 @@ jobs:
           CGO_ENABLED: 0
           DU_NO_OPLOG: "1"
         run: go test -count=1 -v ./...
+
+      # install.ps1 is served from main, so it ships the moment it merges. Run it
+      # (and uninstall.ps1) on real Windows PowerShell 5.1 against a published
+      # release: download, checksum, extract, and exact PATH add/remove.
+      - name: Installer Smoke Test (Windows PowerShell 5.1)
+        shell: powershell
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'Duster'
+          function Count-Entry($d) { @([Environment]::GetEnvironmentVariable('Path', 'User') -split ';' | Where-Object { $_.TrimEnd('\') -eq $d }).Count }
+          # An entry that merely contains $dir as a substring must not satisfy the PATH check.
+          [Environment]::SetEnvironmentVariable('Path', "$dir-old;" + [Environment]::GetEnvironmentVariable('Path', 'User'), 'User')
+
+          .\scripts\install.ps1 -InstallDir $dir -Version 1.0.2 -Silent
+          .\scripts\install.ps1 -InstallDir $dir -Version 1.0.2 -Silent -Force
+          if ((Count-Entry $dir) -ne 1) { throw "install dir should be in the user PATH exactly once" }
+          & "$dir\du.exe" --version
+          if ($LASTEXITCODE -ne 0) { throw "du --version failed" }
+
+          .\scripts\uninstall.ps1 -InstallDir $dir -Silent
+          if ((Count-Entry $dir) -ne 0) { throw "uninstall left the install dir in the user PATH" }
+          if ((Count-Entry "$dir-old") -ne 1) { throw "uninstall removed an unrelated PATH entry" }
+          if (Test-Path "$dir\du.exe") { throw "uninstall left du.exe behind" }
 
   # ── Step 4: Build Verification ─────────────────────────────────────────
   build-verification:

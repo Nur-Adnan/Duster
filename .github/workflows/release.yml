@@ -11,11 +11,15 @@ on:
         required: true
         type: string
 
+# Least privilege: only the jobs that publish (release, installer) get write
+# access; the test/build jobs run third-party code and stay read-only.
 permissions:
-  contents: write
+  contents: read
 
 env:
-  GO_VERSION: '1.25.x'
+  # Shipped binaries embed the toolchain's stdlib: build with a supported Go
+  # (1.25 no longer receives security fixes; v1.0.2 carried 12 stdlib CVEs).
+  GO_VERSION: '1.26.x'
 
 jobs:
   # ── Stage 1: Test ──────────────────────────────────────────────────
@@ -28,6 +32,7 @@ jobs:
         with:
           # workflow_dispatch must test the TAGGED tree, not main HEAD
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref }}
+          persist-credentials: false
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -59,6 +64,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref }}
+          persist-credentials: false
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -99,6 +105,7 @@ jobs:
           # workflow_dispatch must build the TAGGED tree — building main HEAD
           # here published binaries whose source differed from the tag.
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref }}
+          persist-credentials: false
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -119,8 +126,17 @@ jobs:
           else
             TAG="${GITHUB_REF_NAME}"
           fi
+          # Validate before any use: the version is interpolated into later
+          # run: blocks, so a crafted tag (git allows $(), &, ;) must stop here.
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::Tag '$TAG' is not of the form vMAJOR.MINOR.PATCH[-prerelease]"
+            exit 1
+          fi
+          PRERELEASE=false
+          if [[ "$TAG" == *-* ]]; then PRERELEASE=true; fi
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "prerelease=${PRERELEASE}" >> "$GITHUB_OUTPUT"
 
       - name: Generate Windows Version Resources
         # Embeds VERSIONINFO (Explorer Properties dialog), the app icon,
@@ -192,11 +208,14 @@ jobs:
     name: Package & Publish Release
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref }}
+          persist-credentials: false
 
       - name: Extract Version from Tag
         id: version
@@ -208,8 +227,17 @@ jobs:
           else
             TAG="${GITHUB_REF_NAME}"
           fi
+          # Validate before any use: the version is interpolated into later
+          # run: blocks, so a crafted tag (git allows $(), &, ;) must stop here.
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::Tag '$TAG' is not of the form vMAJOR.MINOR.PATCH[-prerelease]"
+            exit 1
+          fi
+          PRERELEASE=false
+          if [[ "$TAG" == *-* ]]; then PRERELEASE=true; fi
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "prerelease=${PRERELEASE}" >> "$GITHUB_OUTPUT"
 
       - name: Download AMD64 Binary
         uses: actions/download-artifact@v4
@@ -263,13 +291,20 @@ jobs:
             scripts/install.cmd
             scripts/uninstall.ps1
           draft: false
-          make_latest: true
-          prerelease: false
+          # install.ps1 and the self-updater fetch releases/latest, so a
+          # pre-release tag (v1.2.0-rc1) must never become "latest", and a
+          # workflow_dispatch re-run of an old tag must not demote the newest.
+          # 'legacy' = GitHub decides by creation date and semver: a re-run of
+          # the newest tag (recovering a failed push run) still becomes latest.
+          make_latest: ${{ steps.version.outputs.prerelease == 'true' && 'false' || 'legacy' }}
+          prerelease: ${{ steps.version.outputs.prerelease == 'true' }}
           name: "Duster v${{ steps.version.outputs.version }}"
           body: |
             ## Duster v${{ steps.version.outputs.version }} — Windows Deep Cleaner & System Optimizer
 
-            Production release for Windows 10/11 (x64 and ARM64).
+            Production release for Windows 10/11 (x64 and ARM64). What changed: [CHANGELOG.md](https://github.com/Nur-Adnan/Duster/blob/v${{ steps.version.outputs.version }}/CHANGELOG.md)
+
+            > **Upgrading from v1.0.2 or earlier:** `du update` in those versions cannot install new releases. Reinstall once with the Quick Install command below; after that, `du update` works.
 
             ---
 
@@ -325,6 +360,8 @@ jobs:
     name: Build Inno Setup Installer
     needs: [build, release]
     runs-on: windows-latest
+    permissions:
+      contents: write
     env:
       # Same optional-signing gate as the build job (see comment there).
       CODESIGN_PFX_BASE64: ${{ secrets.WINDOWS_CODESIGN_PFX_BASE64 }}
@@ -333,6 +370,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref }}
+          persist-credentials: false
 
       - name: Extract Version from Tag
         id: version
@@ -345,8 +383,17 @@ jobs:
           else
             TAG="${GITHUB_REF_NAME}"
           fi
+          # Validate before any use: the version is interpolated into later
+          # run: blocks, so a crafted tag (git allows $(), &, ;) must stop here.
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::Tag '$TAG' is not of the form vMAJOR.MINOR.PATCH[-prerelease]"
+            exit 1
+          fi
+          PRERELEASE=false
+          if [[ "$TAG" == *-* ]]; then PRERELEASE=true; fi
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "prerelease=${PRERELEASE}" >> "$GITHUB_OUTPUT"
 
       - name: Download AMD64 Binary
         uses: actions/download-artifact@v4

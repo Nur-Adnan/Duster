@@ -18,22 +18,31 @@ func init() {
 	}))
 }
 
+// Dir returns Duster's data directory (%LOCALAPPDATA%\Duster, falling back to
+// %USERPROFILE%\Duster), or "" when neither variable is set. It is the single
+// source of this path: the operations log lives here and `du remove` deletes it.
+func Dir() string {
+	base := os.Getenv("LOCALAPPDATA")
+	if base == "" {
+		base = os.Getenv("USERPROFILE")
+	}
+	if base == "" {
+		return ""
+	}
+	return filepath.Join(base, "Duster")
+}
+
 // LogDestructiveOperation writes dangerous actions to the persistent operations log file.
 func LogDestructiveOperation(command, action, target string, size int64, success bool) {
 	if os.Getenv("DU_NO_OPLOG") == "1" {
 		return
 	}
 
-	logDir := os.Getenv("LOCALAPPDATA")
+	logDir := Dir()
 	if logDir == "" {
-		logDir = os.Getenv("USERPROFILE")
-	}
-	if logDir != "" {
-		logDir = filepath.Join(logDir, "Duster")
-	}
-
-	if logDir == "" {
-		logDir = filepath.Clean("./")
+		// No profile directory (non-Windows test hosts): never litter the
+		// working directory with an audit log.
+		return
 	}
 
 	if err := os.MkdirAll(logDir, 0755); err != nil {

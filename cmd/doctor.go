@@ -36,7 +36,7 @@ var DoctorCmd = &cobra.Command{
 }
 
 func init() {
-	DoctorCmd.Flags().BoolVar(&doctorJSON, "json", false, "Output doctor diagnostics as a single JSON payload and exit immediately")
+	DoctorCmd.Flags().BoolVar(&doctorJSON, "json", false, "Output doctor diagnostics as a single JSON payload (exit code 1 if any check fails)")
 }
 
 // DoctorResult represents a single diagnostic check outcome.
@@ -69,6 +69,9 @@ func executeDoctor(cmd *cobra.Command, args []string) {
 			os.Exit(1)
 		}
 		fmt.Println(string(data))
+		if !snapshot.Healthy {
+			os.Exit(1)
+		}
 		return
 	}
 

@@ -16,6 +16,9 @@ const (
 	fofNoConfirmation = 0x0010
 	fofSilent         = 0x0004
 	fofNoErrorUI      = 0x0400
+	// Without this the shell silently deletes permanently whatever it can't
+	// recycle (volume without a Recycle Bin, item over the bin quota).
+	fofWantNukeWarning = 0x4000
 )
 
 type shFileOpStructW struct {
@@ -99,7 +102,7 @@ func recyclePathNative(path string) error {
 	var op shFileOpStructW
 	op.wFunc = foDelete
 	op.pFrom = &utf16Path[0]
-	op.fFlags = fofAllowUndo | fofNoConfirmation | fofSilent | fofNoErrorUI
+	op.fFlags = fofAllowUndo | fofNoConfirmation | fofSilent | fofNoErrorUI | fofWantNukeWarning
 
 	ret, _, _ := procSHFileOperation.Call(uintptr(unsafe.Pointer(&op)))
 	if ret != 0 {
