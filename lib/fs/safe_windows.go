@@ -3,7 +3,9 @@
 package fs
 
 import (
+	"os"
 	"strings"
+	"sync"
 	"syscall"
 	"unicode/utf16"
 	"unsafe"
@@ -55,11 +57,27 @@ const (
 	FILE_ATTRIBUTE_OFFLINE               = 0x1000
 	FILE_ATTRIBUTE_RECALL_ON_OPEN        = 0x40000
 	FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS = 0x400000
+
+	// Modern cloud sync engines mark placeholders with the RECALL_* attributes,
+	// not the deprecated OFFLINE bit — all three must be checked or the guard is dead.
+	placeholderMask = FILE_ATTRIBUTE_OFFLINE | FILE_ATTRIBUTE_RECALL_ON_OPEN | FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS
 )
 
-// GetSecureSystemDirectory queries the kernel32 DLL directly to get the true, immutable system32 path.
-// This completely circumvents %WINDIR% or %SYSTEMROOT% environment manipulation attempts.
-func GetSecureSystemDirectory() (string, error) {
+// The system directories can't change while Duster runs, and IsValidPath asks
+// for them on every folder purge and clean visit, so the kernel is asked once.
+var (
+	secureSystemDir  = sync.OnceValues(querySystemDirectory)
+	secureWindowsDir = sync.OnceValues(queryWindowsDirectory)
+)
+
+// GetSecureSystemDirectory returns the true, immutable system32 path from the
+// kernel, circumventing %WINDIR% / %SYSTEMROOT% manipulation.
+func GetSecureSystemDirectory() (string, error) { return secureSystemDir() }
+
+// GetSecureWindowsDirectory returns the true, immutable Windows path from the kernel.
+func GetSecureWindowsDirectory() (string, error) { return secureWindowsDir() }
+
+func querySystemDirectory() (string, error) {
 	buf := make([]uint16, 260)
 	ret, _, err := procGetSystemDirectory.Call(
 		uintptr(unsafe.Pointer(&buf[0])),
@@ -71,9 +89,7 @@ func GetSecureSystemDirectory() (string, error) {
 	return string(utf16.Decode(buf[:ret])), nil
 }
 
-// GetSecureWindowsDirectory queries the kernel32 DLL directly to get the true, immutable Windows path.
-// This prevents spoofing of system directories.
-func GetSecureWindowsDirectory() (string, error) {
+func queryWindowsDirectory() (string, error) {
 	buf := make([]uint16, 260)
 	ret, _, err := procGetWindowsDirectory.Call(
 		uintptr(unsafe.Pointer(&buf[0])),
@@ -85,19 +101,13 @@ func GetSecureWindowsDirectory() (string, error) {
 	return string(utf16.Decode(buf[:ret])), nil
 }
 
-// IsOfflineFile checks if a file is stored offline (OneDrive cloud storage placeholder)
-// to prevent WalkDir from triggering automatic high-latency hydration/download.
-// Modern cloud sync engines mark placeholders with the RECALL_* attributes, not
-// the deprecated OFFLINE bit — all three must be checked or the guard is dead.
-func IsOfflineFile(path string) bool {
-	pointer, err := syscall.UTF16PtrFromString(path)
-	if err != nil {
-		return false
-	}
-	attrs, err := syscall.GetFileAttributes(pointer)
-	if err != nil {
-		return false
-	}
-	const placeholderMask = FILE_ATTRIBUTE_OFFLINE | FILE_ATTRIBUTE_RECALL_ON_OPEN | FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS
-	return attrs&placeholderMask != 0
+// IsOfflineInfo reports whether a file from a directory listing is a cloud
+// placeholder (OneDrive etc.), which reading would force to download. It uses
+// the attributes the listing already carries, so it costs no system call and
+// never opens the file. It is also the complete check: Windows reports
+// FILE_ATTRIBUTE_RECALL_ON_OPEN only in directory enumeration, never from
+// GetFileAttributes.
+func IsOfflineInfo(info os.FileInfo) bool {
+	d, ok := info.Sys().(*syscall.Win32FileAttributeData)
+	return ok && d.FileAttributes&placeholderMask != 0
 }

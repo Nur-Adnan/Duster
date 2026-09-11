@@ -276,6 +276,17 @@ func IsSystemProtectedPath(path string) bool {
 }
 
 // IsValidPath checks if the target path is absolute, not empty, and not system protected.
+// LongPath expands 8.3 short components (C:\Users\RUNNER~1) to their long
+// form, or returns p unchanged. Expand a walk's root once: paths built from a
+// long root carry no "~", so every per-entry IsValidPath takes its fast path
+// instead of a GetLongPathNameW disk lookup per file.
+func LongPath(p string) string {
+	if long := getLongPathName(p); long != "" {
+		return long
+	}
+	return p
+}
+
 func IsValidPath(path string) bool {
 	if strings.TrimSpace(path) == "" {
 		return false
