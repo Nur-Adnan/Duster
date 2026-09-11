@@ -712,6 +712,9 @@ func runHeadlessPurge(target string) {
 // eligible for deletion.
 func scanArtifacts(root string, onFound func(DiscoveredArtifact, int)) ([]DiscoveredArtifact, error) {
 	list := []DiscoveredArtifact{} // non-nil so JSON renders [] instead of null
+	// A long-form root keeps "~" out of every child path, so the per-folder
+	// IsValidPath below skips its GetLongPathNameW disk lookup.
+	root = fs.LongPath(root)
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
