@@ -88,6 +88,29 @@ func TestSubTuiStateTransitions(t *testing.T) {
 	}
 }
 
+func TestStartupRemoveDisabledNeedsConfirmation(t *testing.T) {
+	m := initialLandingModel()
+	m.subTui = tuiStartup
+	ss := &startupState{items: []startupEntry{{Name: "on", Enabled: true}, {Name: "off"}}}
+	m.subTuiState = ss
+	press := func(k string) tea.Cmd {
+		updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)})
+		m = updated.(landingModel)
+		return cmd
+	}
+
+	if cmd := press("d"); cmd != nil || !ss.confirmRemove {
+		t.Fatal("first d must only ask for confirmation")
+	}
+	if cmd := press("j"); cmd != nil || ss.confirmRemove {
+		t.Fatal("any other key must cancel the pending removal")
+	}
+	press("d")
+	if cmd := press("d"); cmd == nil || ss.confirmRemove {
+		t.Fatal("second d must start the removal")
+	}
+}
+
 func TestViewSmokeRenders(t *testing.T) {
 	m := initialLandingModel()
 

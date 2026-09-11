@@ -265,6 +265,11 @@ func (m landingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			case tuiStartup:
 				ss := m.subTuiState.(*startupState)
+				// Any key but a second "d" cancels a pending removal.
+				if ss.confirmRemove && keyStr != "d" {
+					ss.confirmRemove = false
+					ss.msg = "Removal cancelled."
+				}
 				if ss.err == "" && len(ss.items) > 0 {
 					switch keyStr {
 					case "up", "k":
@@ -286,10 +291,16 @@ func (m landingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 								toRemove = append(toRemove, item)
 							}
 						}
-						if len(toRemove) > 0 {
-							return m, removeStartupAsyncCmd(toRemove)
-						} else {
+						switch {
+						case len(toRemove) == 0:
 							ss.msg = "No disabled startup items to remove."
+						case !ss.confirmRemove:
+							ss.confirmRemove = true
+							ss.msg = fmt.Sprintf("Permanently remove %d disabled startup entries? Press d again to confirm, any other key cancels.", len(toRemove))
+						default:
+							ss.confirmRemove = false
+							ss.msg = ""
+							return m, removeStartupAsyncCmd(toRemove)
 						}
 					}
 				}
@@ -550,10 +561,11 @@ func (m landingModel) renderDriversView() string {
 // ─────────────────────────────────────────────
 
 type startupState struct {
-	items  []startupEntry
-	cursor int
-	msg    string
-	err    string
+	items         []startupEntry
+	cursor        int
+	msg           string
+	err           string
+	confirmRemove bool // "d" pressed once; a second "d" deletes
 }
 
 type startupLoadDoneMsg struct {
@@ -594,17 +606,24 @@ func toggleStartupAsyncCmd(entry startupEntry) tea.Cmd {
 
 func removeStartupAsyncCmd(toRemove []startupEntry) tea.Cmd {
 	return func() tea.Msg {
-		removed := 0
+		removed, failed := 0, 0
+		var firstErr error
 		for _, entry := range toRemove {
-			if err := removeStartupEntry(entry); err == nil {
+			if err := removeStartupEntry(entry); err != nil {
+				failed++
+				if firstErr == nil {
+					firstErr = err
+				}
+			} else {
 				removed++
 			}
 		}
-		entries, _ := getStartupEntries()
-		return startupMutationDoneMsg{
-			entries: entries,
-			msg:     fmt.Sprintf("Removed %d disabled startup entries", removed),
+		msg := fmt.Sprintf("Removed %d disabled startup entries", removed)
+		if failed > 0 {
+			msg += fmt.Sprintf("; %d could not be removed: %v", failed, firstErr)
 		}
+		entries, _ := getStartupEntries()
+		return startupMutationDoneMsg{entries: entries, msg: msg}
 	}
 }
 
@@ -659,7 +678,11 @@ func (m landingModel) renderStartupView() string {
 
 	sb.WriteString("\n")
 	if ss.msg != "" {
-		sb.WriteString("  " + styleSuccess.Render(ss.msg) + "\n\n")
+		msgStyle := styleSuccess
+		if ss.confirmRemove {
+			msgStyle = styleWarning
+		}
+		sb.WriteString("  " + msgStyle.Render(ss.msg) + "\n\n")
 	}
 
 	sb.WriteString("  " + kbHints("Space Toggle", "D Remove Disabled", "ESC Back"))
