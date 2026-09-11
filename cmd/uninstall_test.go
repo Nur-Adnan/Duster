@@ -3,45 +3,58 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/Nur-Adnan/duster/lib/elevation"
+	"github.com/Nur-Adnan/duster/lib/uninstall"
 )
 
-func TestParseUninstallString(t *testing.T) {
+func TestUninstallRefusesPerUserAppWhenElevated(t *testing.T) {
+	if !elevation.IsAdmin() {
+		t.Skip("needs an elevated test process (the Windows CI runner is)")
+	}
+	app := uninstall.InstalledApp{Name: "x", RegistryHive: "HKCU", UninstallString: `C:\duster-test-missing\uninstall.exe`}
+	msg, ok := runNativeUninstallCmd(app)().(nativeUninstallDoneMsg)
+	if !ok || msg.err == nil || !strings.Contains(msg.err.Error(), "per-user") {
+		t.Fatalf("HKCU uninstall while elevated = %+v, want the per-user refusal", msg)
+	}
+}
+
+func TestSplitUninstallString(t *testing.T) {
 	tests := []struct {
 		name         string
 		input        string
 		expectedCmd  string
-		expectedArgs []string
+		expectedTail string
 	}{
 		{
-			name:         "Empty command",
-			input:        "",
-			expectedCmd:  "",
-			expectedArgs: nil,
+			name: "Empty command",
 		},
 		{
-			name:         "Simple command without quotes or args",
-			input:        `C:\Windows\System32\uninstall.exe`,
-			expectedCmd:  `C:\Windows\System32\uninstall.exe`,
-			expectedArgs: nil,
+			name:        "Simple command without quotes or args",
+			input:       `C:\Windows\System32\uninstall.exe`,
+			expectedCmd: `C:\Windows\System32\uninstall.exe`,
 		},
 		{
 			name:         "Command with unquoted args",
 			input:        `C:\Windows\System32\uninstall.exe /S /clean`,
 			expectedCmd:  `C:\Windows\System32\uninstall.exe`,
-			expectedArgs: []string{"/S", "/clean"},
+			expectedTail: "/S /clean",
 		},
 		{
 			name:         "Quoted command executable with unquoted args",
 			input:        `"C:\Program Files\App\uninstall.exe" --silent --force`,
 			expectedCmd:  `C:\Program Files\App\uninstall.exe`,
-			expectedArgs: []string{"--silent", "--force"},
+			expectedTail: "--silent --force",
 		},
 		{
+			// The tail is passed on verbatim: re-quoting it breaks uninstallers
+			// that parse their own command line.
 			name:         "Quoted command executable and quoted args",
 			input:        `"C:\Program Files\App\uninstall.exe" "/dir=C:\My Projects" --quiet`,
 			expectedCmd:  `C:\Program Files\App\uninstall.exe`,
-			expectedArgs: []string{`/dir=C:\My Projects`, "--quiet"},
+			expectedTail: `"/dir=C:\My Projects" --quiet`,
 		},
 		{
 			// Security: an UNQUOTED path with spaces must not be misparsed into
@@ -49,31 +62,27 @@ func TestParseUninstallString(t *testing.T) {
 			name:         "Unquoted executable path with spaces",
 			input:        `C:\Program Files\App\uninstall.exe /S`,
 			expectedCmd:  `C:\Program Files\App\uninstall.exe`,
-			expectedArgs: []string{"/S"},
+			expectedTail: "/S",
 		},
 		{
 			name:         "Unquoted MSI-style command",
 			input:        `MsiExec.exe /X{12345678-1234-1234-1234-123456789012}`,
 			expectedCmd:  `MsiExec.exe`,
-			expectedArgs: []string{"/X{12345678-1234-1234-1234-123456789012}"},
+			expectedTail: "/X{12345678-1234-1234-1234-123456789012}",
+		},
+		{
+			name:         "InstallShield rundll32 entry point",
+			input:        `RunDll32 C:\PROGRA~2\COMMON~1\INSTAL~1\PROFES~1\RunTime\11\50\Intel32\Ctor.dll,LaunchSetup "C:\Program Files (x86)\InstallShield Installation Information\{8E0A1A2B-1111-2222-3333-444455556666}\setup.exe" -l0x9  -removeonly`,
+			expectedCmd:  `RunDll32`,
+			expectedTail: `C:\PROGRA~2\COMMON~1\INSTAL~1\PROFES~1\RunTime\11\50\Intel32\Ctor.dll,LaunchSetup "C:\Program Files (x86)\InstallShield Installation Information\{8E0A1A2B-1111-2222-3333-444455556666}\setup.exe" -l0x9  -removeonly`,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cmdVal, args := parseUninstallString(tt.input)
-			if cmdVal != tt.expectedCmd {
-				t.Errorf("parseUninstallString(%q) got cmd=%q, want %q", tt.input, cmdVal, tt.expectedCmd)
-			}
-			if len(args) != len(tt.expectedArgs) {
-				t.Errorf("parseUninstallString(%q) got args len=%d, want %d (got: %v, want: %v)",
-					tt.input, len(args), len(tt.expectedArgs), args, tt.expectedArgs)
-			} else {
-				for i := range args {
-					if args[i] != tt.expectedArgs[i] {
-						t.Errorf("parseUninstallString(%q) arg[%d] got %q, want %q", tt.input, i, args[i], tt.expectedArgs[i])
-					}
-				}
+			exe, tail := splitUninstallString(tt.input)
+			if exe != tt.expectedCmd || tail != tt.expectedTail {
+				t.Errorf("splitUninstallString(%q) = (%q, %q), want (%q, %q)", tt.input, exe, tail, tt.expectedCmd, tt.expectedTail)
 			}
 		})
 	}
