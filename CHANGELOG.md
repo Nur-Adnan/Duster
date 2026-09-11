@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- `du status --json` now lists the busiest processes. It always returned an empty list, because it measured CPU use against an earlier call that a one-shot run never makes.
+
+### Performance
+- `du status` and the landing screen no longer walk every running process on each refresh (every second, and every half second on the landing screen) to build a list neither of them shows.
+
 ## [1.0.3] - 2026-09-11
 
 ### Upgrading from 1.0.2
