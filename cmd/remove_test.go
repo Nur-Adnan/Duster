@@ -10,6 +10,21 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+func TestSuccessfulRemoveWritesNoLog(t *testing.T) {
+	local := t.TempDir()
+	t.Setenv("LOCALAPPDATA", local)
+	t.Setenv("DU_NO_OPLOG", "")
+
+	logRmOperation("headless-uninstall", `C:\x\du.exe`, 0, true)
+	if _, err := os.Stat(filepath.Join(local, "Duster")); !os.IsNotExist(err) {
+		t.Fatalf("a successful remove recreated the data folder (stat: %v)", err)
+	}
+	logRmOperation("headless-uninstall", `C:\x\du.exe`, 0, false)
+	if _, err := os.Stat(filepath.Join(local, "Duster", "operations.log")); err != nil {
+		t.Fatalf("a failed remove must still be logged: %v", err)
+	}
+}
+
 func TestRemoveModelInitialization(t *testing.T) {
 	local := t.TempDir()
 	t.Setenv("LOCALAPPDATA", local)

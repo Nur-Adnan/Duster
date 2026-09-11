@@ -17,6 +17,22 @@ Everything below touches real user data, UAC or the Recycle Bin, so it is manual
 
 ## 2. Smoke test
 
+First run **Windows Smoke Test** (Actions tab > Run workflow, or push a `smoke/**` branch). On a real Windows runner it checks:
+- `--version`, the `verify` and `doctor` exit codes, and `analyze`
+- `clean` against a junction root and a locked file
+- `purge` project markers, and `--safe` sending to the Recycle Bin
+- the Downloads `installer` scan
+- an end-to-end `update`
+- `du remove`
+
+Once it passes, only the steps that need a desktop or UAC are left:
+- the Recycle Bin size prompt
+- the TUI keys (`c` in a dry-run clean, `d` in the landing startup view)
+- real uninstalls
+- the admin install path
+
+The full list below stays, so a failure can be reproduced by hand.
+
 Run everything from a normal (non-admin) terminal unless a step says elevated. Each step lists its expected result.
 
 **Read-only**
