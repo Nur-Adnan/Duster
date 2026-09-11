@@ -288,6 +288,18 @@ func systemExecutable(relPath string) string {
 	return filepath.Join(systemRoot, "System32", relPath)
 }
 
+// secureWindowsDir returns the Windows directory from the kernel API (defeating
+// %WINDIR% spoofing), falling back to %WINDIR% and then C:\Windows.
+func secureWindowsDir() string {
+	if d, err := fs.GetSecureWindowsDirectory(); err == nil && d != "" {
+		return d
+	}
+	if d := os.Getenv("WINDIR"); d != "" {
+		return d
+	}
+	return `C:\Windows`
+}
+
 // ─────────────────────────────────────────────
 // RenderHeader — high-fidelity header layout
 // Renders the command prompt and ASCII logo block matching the screenshot.

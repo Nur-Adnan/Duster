@@ -133,20 +133,54 @@ func TestScanAppLeftovers(t *testing.T) {
 		}
 	}
 
-	// 2. Search for Google Chrome
-	chromeLeftovers := scanAppLeftovers("Google Chrome", "Google LLC")
-	if len(chromeLeftovers) != 1 {
-		t.Errorf("Expected 1 leftover folder for Google Chrome, got %d: %v", len(chromeLeftovers), chromeLeftovers)
-	} else {
-		baseName := filepath.Base(chromeLeftovers[0])
-		if baseName != "Google" {
-			t.Errorf("Expected leftover folder name to be 'Google', got %q", baseName)
-		}
+	// 2. Google Chrome must NOT sweep the shared "Google" vendor folder, which
+	// also holds other Google apps' data (Drive, Earth, ...).
+	if chromeLeftovers := scanAppLeftovers("Google Chrome", "Google LLC"); len(chromeLeftovers) != 0 {
+		t.Errorf("Google Chrome must not match the shared Google folder, got %v", chromeLeftovers)
 	}
 
 	// 3. Search for a non-existent app
 	none := scanAppLeftovers("NonExistentApp", "SomePublisher")
 	if len(none) != 0 {
 		t.Errorf("Expected 0 leftovers for non-existent app, got %d: %v", len(none), none)
+	}
+}
+
+// Regression: substring/publisher matching swept other apps' data (Firefox
+// profiles for Thunderbird, Chrome data for Google Drive, global npm for pnpm).
+func TestScanAppLeftoversExactMatchOnly(t *testing.T) {
+	dir := t.TempDir()
+	for _, n := range []string{"Mozilla", "Thunderbird", "Google", "npm", "Ethereum", "7-Zip", "Adobe", "GitHubDesktop"} {
+		if err := os.MkdirAll(filepath.Join(dir, n), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("APPDATA", dir)
+	t.Setenv("LOCALAPPDATA", dir)
+	t.Setenv("ProgramFiles", "")
+	t.Setenv("ProgramFiles(x86)", "")
+
+	cases := []struct {
+		name, publisher string
+		want            []string
+	}{
+		{"Mozilla Thunderbird (x64 en-US)", "Mozilla", []string{"Thunderbird"}},
+		{"Google Drive", "Google LLC", nil},
+		{"pnpm", "pnpm", nil},
+		{"Git", "The Git Development Community", nil},
+		{"7-Zip 23.01 (x64)", "Igor Pavlov", []string{"7-Zip"}},
+		{"Adobe Acrobat (64-bit)", "Adobe", nil},
+	}
+	for _, c := range cases {
+		got := scanAppLeftovers(c.name, c.publisher)
+		if len(got) != len(c.want) {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+			continue
+		}
+		for i := range got {
+			if filepath.Base(got[i]) != c.want[i] {
+				t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+			}
+		}
 	}
 }

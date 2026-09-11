@@ -11,6 +11,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/Nur-Adnan/duster/internal/logging"
 	"github.com/Nur-Adnan/duster/lib/elevation"
 	"github.com/Nur-Adnan/duster/lib/sysinfo"
 	tea "github.com/charmbracelet/bubbletea"
@@ -82,6 +83,7 @@ type cleanModel struct {
 	width         int
 	height        int
 	dryRun        bool
+	launchDryRun  bool // started with --dry-run: real cleanup ("c") is disabled
 	totalScanned  int64
 	totalFiles    int
 	totalReclaim  int64
@@ -353,10 +355,11 @@ func initialCleanModel(startDryRun bool) cleanModel {
 	}
 
 	m := cleanModel{
-		state:     startState,
-		dryRun:    startDryRun,
-		startTime: time.Now(),
-		cursor:    0,
+		state:        startState,
+		dryRun:       startDryRun,
+		launchDryRun: startDryRun,
+		startTime:    time.Now(),
+		cursor:       0,
 		items: []*cleanTuiItem{
 			{ID: "temp", Name: "Windows Temp Files", Checked: true, Status: "scanning", Scanning: true, Progress: 0.0},
 			{ID: "prefetch", Name: "Prefetch Files", Checked: true, Status: "scanning", Scanning: true, Progress: 0.0},
@@ -557,9 +560,10 @@ func (m cleanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		item.Status = "done"
 		item.Progress = 100.0
 
+		// Partial frees count even when the category reports failures.
+		m.cleanedSize += msg.SizeFreed
+		m.cleanedFiles += msg.FilesFreed
 		if msg.Err == nil {
-			m.cleanedSize += msg.SizeFreed
-			m.cleanedFiles += msg.FilesFreed
 			verb := "freed"
 			if m.dryRun {
 				verb = "would be freed"
@@ -567,7 +571,7 @@ func (m cleanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.logLines = append(m.logLines, fmt.Sprintf("✓ %s: %s %s (%d files)", item.Name, formatBytes(msg.SizeFreed), verb, msg.FilesFreed))
 		} else {
 			item.Status = "failed"
-			m.logLines = append(m.logLines, fmt.Sprintf("✗ %s: failed to clean: %v", item.Name, msg.Err))
+			m.logLines = append(m.logLines, fmt.Sprintf("✗ %s: %s freed, incomplete: %v", item.Name, formatBytes(msg.SizeFreed), msg.Err))
 		}
 
 		// Find and clean next checked item
@@ -705,6 +709,10 @@ func (m cleanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Batch(cmds...)
 
 			case "c", "C":
+				// A --dry-run launch is a promise that nothing is deleted.
+				if m.launchDryRun {
+					break
+				}
 				// Real execution
 				m.dryRun = false
 				m.startCleanup()
@@ -1197,17 +1205,11 @@ func stripAnsi(str string) string {
 }
 
 func getOperationsLogPath() string {
-	logDir := os.Getenv("LOCALAPPDATA")
-	if logDir == "" {
-		logDir = os.Getenv("USERPROFILE")
+	dir := logging.Dir()
+	if dir == "" {
+		return ""
 	}
-	if logDir != "" {
-		logDir = filepath.Join(logDir, "Duster")
-	}
-	if logDir == "" {
-		logDir = filepath.Clean("./")
-	}
-	return filepath.Join(logDir, "operations.log")
+	return filepath.Join(dir, "operations.log")
 }
 
 func readOperationsLog() []*operationsLogEntry {

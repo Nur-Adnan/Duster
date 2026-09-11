@@ -688,10 +688,16 @@ func executeCleanCLI(cmd *cobra.Command, args []string) {
 
 	var freedSize int64
 	var freedFiles int
+	failedCats := 0
 	cleanStart := time.Now()
 
 	for _, cat := range categories {
 		if whitelistMap[cat.ID] {
+			continue
+		}
+
+		// Mirror the scan phase: prefetch needs admin, so don't attempt it.
+		if cat.ID == "prefetch" && !elevation.IsAdmin() {
 			continue
 		}
 
@@ -718,15 +724,17 @@ func executeCleanCLI(cmd *cobra.Command, args []string) {
 			onCleanProgress = nil
 		}
 
-		if err != nil {
-			if debug {
-				fmt.Printf("  [debug] clean %s: %v\n", cat.Name, err)
-			}
-			continue
-		}
-
+		// Partial frees count even when a category reports failures.
 		freedSize += sizeFreed
 		freedFiles += filesFreed
+		if err != nil {
+			failedCats++
+			fmt.Printf("  %s  %s  %s\n",
+				styleDanger.Render("✗"),
+				styleLabel.Render(padRight(cat.Name, 32)),
+				styleMuted.Render(err.Error()),
+			)
+		}
 		if sizeFreed > 0 {
 			fmt.Printf("  %s  %s  %s freed  %s\n",
 				styleSuccess.Render("✓"),
@@ -735,6 +743,11 @@ func executeCleanCLI(cmd *cobra.Command, args []string) {
 				styleMuted.Render(fmt.Sprintf("(%s files)", formatInt(filesFreed))),
 			)
 		}
+	}
+
+	if failedCats > 0 {
+		fmt.Printf("\n  %s %d category(ies) could not be fully cleaned; see the ✗ lines above.\n",
+			styleWarning.Render("⚠"), failedCats)
 	}
 
 	cleanDuration := time.Since(cleanStart)
@@ -799,8 +812,7 @@ func scanDirCategory(cat CleanCategory) (int64, int, error) {
 			continue
 		}
 
-		// Perform physical validation of directory existence
-		if _, err := os.Stat(root); os.IsNotExist(err) {
+		if skipCategoryRoot(root) {
 			continue
 		}
 
@@ -853,15 +865,17 @@ func scanDirCategory(cat CleanCategory) (int64, int, error) {
 func cleanDirCategory(cat CleanCategory) (int64, int, error) {
 	var sizeFreed int64
 	var filesFreed int
-	anyFailed := false
+	failures := 0
+	var firstErr error
+	fail := func(err error) {
+		failures++
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
 
 	for _, root := range cat.Paths {
-		if !fs.IsValidPath(root) {
-			continue
-		}
-
-		// Check directory existence
-		if _, err := os.Stat(root); os.IsNotExist(err) {
+		if !fs.IsValidPath(root) || skipCategoryRoot(root) {
 			continue
 		}
 
@@ -895,11 +909,11 @@ func cleanDirCategory(cat CleanCategory) (int64, int, error) {
 						if onCleanProgress != nil {
 							onCleanProgress(path, info)
 						}
-						if removeFileSafe(path) == nil {
+						if err := removeFileSafe(path); err == nil {
 							sizeFreed += fileSize
 							filesFreed++
 						} else {
-							anyFailed = true
+							fail(err)
 						}
 					}
 				}
@@ -911,48 +925,57 @@ func cleanDirCategory(cat CleanCategory) (int64, int, error) {
 		} else {
 			// Walk and delete items inside but keep top level folders when possible
 			dirEntries, err := os.ReadDir(root)
-			if err == nil {
-				for _, entry := range dirEntries {
-					fullPath := filepath.Join(root, entry.Name())
-					if !fs.IsValidPath(fullPath) {
-						continue
-					}
+			// An unlistable root (C:\Windows\Temp for a standard user) was never
+			// attempted: skip it as the scan does rather than report a failure.
+			if err != nil && !os.IsPermission(err) {
+				fail(err)
+			}
+			for _, entry := range dirEntries {
+				fullPath := filepath.Join(root, entry.Name())
+				if !fs.IsValidPath(fullPath) {
+					continue
+				}
 
-					// Calculate recursive size BEFORE deletion for accurate reporting
-					var entrySize int64
-					var entryFiles int
-					if entry.IsDir() {
-						_ = filepath.WalkDir(fullPath, func(p string, d os.DirEntry, walkErr error) error {
-							if walkErr != nil {
-								return nil
-							}
-							if !d.IsDir() {
-								if info, infoErr := d.Info(); infoErr == nil {
-									entrySize += info.Size()
-									entryFiles++
-									if onCleanProgress != nil {
-										onCleanProgress(p, info)
-									}
+				// Calculate recursive size BEFORE deletion for accurate reporting
+				var entrySize int64
+				var entryFiles int
+				if entry.IsDir() {
+					_ = filepath.WalkDir(fullPath, func(p string, d os.DirEntry, walkErr error) error {
+						if walkErr != nil {
+							return nil
+						}
+						if !d.IsDir() {
+							if info, infoErr := d.Info(); infoErr == nil {
+								entrySize += info.Size()
+								entryFiles++
+								if onCleanProgress != nil {
+									onCleanProgress(p, info)
 								}
 							}
-							return nil
-						})
-					} else {
-						if info, infoErr := entry.Info(); infoErr == nil {
-							entrySize = info.Size()
-							entryFiles = 1
-							if onCleanProgress != nil {
-								onCleanProgress(fullPath, info)
-							}
+						}
+						return nil
+					})
+				} else {
+					if info, infoErr := entry.Info(); infoErr == nil {
+						entrySize = info.Size()
+						entryFiles = 1
+						if onCleanProgress != nil {
+							onCleanProgress(fullPath, info)
 						}
 					}
+				}
 
-					removeErr := removeAllSafe(fullPath)
-					if removeErr == nil {
-						sizeFreed += entrySize
-						filesFreed += entryFiles
-					} else {
-						anyFailed = true
+				if err := removeAllSafe(fullPath); err == nil {
+					sizeFreed += entrySize
+					filesFreed += entryFiles
+				} else {
+					fail(err)
+					// Credit what was removed before the failure (e.g. one
+					// locked file inside a large cache directory).
+					if entry.IsDir() {
+						if left := calculateDirSize(fullPath); left < entrySize {
+							sizeFreed += entrySize - left
+						}
 					}
 				}
 			}
@@ -960,9 +983,20 @@ func cleanDirCategory(cat CleanCategory) (int64, int, error) {
 	}
 
 	// Log the destructive operation with the real outcome
-	logging.LogDestructiveOperation("clean", "purge", cat.Name, sizeFreed, !anyFailed)
+	logging.LogDestructiveOperation("clean", "purge", cat.Name, sizeFreed, failures == 0)
 
+	if failures > 0 {
+		return sizeFreed, filesFreed, fmt.Errorf("%d item(s) could not be deleted: %w", failures, firstErr)
+	}
 	return sizeFreed, filesFreed, nil
+}
+
+// skipCategoryRoot reports whether a category root must not be walked: it is
+// missing, unreadable, or a symlink/junction. os.Stat and os.ReadDir follow
+// links, so a junction planted at a cache path would get its target emptied.
+func skipCategoryRoot(root string) bool {
+	info, err := os.Lstat(root)
+	return err != nil || info.Mode()&(os.ModeSymlink|os.ModeIrregular) != 0
 }
 
 func scanAndEmptyRecycleBin(dryRunOnly bool, debug bool) (int64, int, error) {
@@ -1010,7 +1044,7 @@ func flushDNSCache(dryRunOnly bool, debug bool) (int64, int, error) {
 	}
 
 	// Runs flushdns using Windows native executable
-	cmd := exec.Command("ipconfig", "/flushdns")
+	cmd := exec.Command(systemExecutable("ipconfig.exe"), "/flushdns")
 	err := cmd.Run()
 	if err != nil {
 		return 0, 0, err

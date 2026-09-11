@@ -129,7 +129,7 @@ func initialRemoveModel(currentExe string) removeModel {
 	return removeModel{
 		state:      stateRmIdle,
 		currentExe: currentExe,
-		logDir:     getDusterDir(),
+		logDir:     logging.Dir(),
 	}
 }
 
@@ -143,7 +143,7 @@ func runUninstallCmd(currentExe, logDir string, dryRun bool) tea.Cmd {
 		logRmOperation("self-uninstall", currentExe, 0, true)
 
 		// 1. Safe purge configuration directory
-		if err := cleanDusterDir(logDir, dryRun); err != nil {
+		if err := cleanDusterDir(logDir, currentExe, dryRun); err != nil {
 			return rmUninstallCompleteMsg{err: err}
 		}
 
@@ -265,32 +265,53 @@ func (m removeModel) View() string {
 	return doc.String()
 }
 
-func getDusterDir() string {
-	logDir := os.Getenv("LOCALAPPDATA")
-	if logDir == "" {
-		logDir = os.Getenv("USERPROFILE")
-	}
-	if logDir != "" {
-		logDir = filepath.Join(logDir, "Duster")
-	}
-	if logDir == "" {
-		logDir = filepath.Clean("./")
-	}
-	return logDir
-}
-
-func cleanDusterDir(logDir string, simulate bool) error {
+// cleanDusterDir deletes Duster's data directory. keep (the running executable)
+// is skipped when it sits directly inside that directory: the default per-user
+// install puts du.exe there, Windows can't delete a running image, and the old
+// RemoveAll failed before the delayed self-delete was scheduled.
+func cleanDusterDir(logDir, keep string, simulate bool) error {
 	if logDir == "" || logDir == "." || logDir == "/" {
 		return fmt.Errorf("unsafe configuration path blocked: %s", logDir)
 	}
 	cleaned := filepath.Clean(logDir)
-	if fs.IsSystemProtectedPath(cleaned) {
+	if !fs.IsValidPath(cleaned) {
 		return fmt.Errorf("system-protected path blocked: %s", cleaned)
 	}
 	if simulate {
 		return nil
 	}
-	return removeAllSafe(cleaned)
+	// Identify the running exe by file identity, not spelling: os.Executable
+	// and %LOCALAPPDATA% can differ (8.3 names, redirected profiles).
+	var keepInfo os.FileInfo
+	if keep != "" {
+		keepInfo, _ = os.Stat(keep)
+	}
+	if keepInfo == nil {
+		return removeAllSafe(cleaned)
+	}
+	entries, err := os.ReadDir(cleaned)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	var firstErr error
+	kept := false
+	for _, e := range entries {
+		p := filepath.Join(cleaned, e.Name())
+		if info, err := os.Lstat(p); err == nil && os.SameFile(info, keepInfo) {
+			kept = true
+			continue // removed afterwards by scheduleDelayedDelete
+		}
+		if err := removeAllSafe(p); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	if !kept && firstErr == nil {
+		firstErr = os.Remove(cleaned) // exe lives elsewhere: drop the emptied dir too
+	}
+	return firstErr
 }
 
 // logRmOperation delegates to the shared structured logging system.
@@ -299,10 +320,14 @@ func logRmOperation(action, target string, size int64, success bool) {
 }
 
 func runSilentRemove(currentExe string) {
-	logDir := getDusterDir()
+	logDir := logging.Dir()
 
-	err := cleanDusterDir(logDir, rmDryRun)
+	err := cleanDusterDir(logDir, currentExe, rmDryRun)
 	logRmOperation("silent-uninstall", currentExe, 0, err == nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Uninstall incomplete; nothing scheduled for removal: %v\n", err)
+		os.Exit(1)
+	}
 
 	if !rmDryRun {
 		// SECURITY: Uses safe delayed delete instead of cmd.exe /C shell injection
@@ -314,7 +339,7 @@ func runSilentRemove(currentExe string) {
 }
 
 func runHeadlessRemove(currentExe string) {
-	logDir := getDusterDir()
+	logDir := logging.Dir()
 
 	// The --json / piped path emits a plan by default and must NOT delete unless
 	// the caller explicitly opts in with --force. This matches the flag's
@@ -324,7 +349,7 @@ func runHeadlessRemove(currentExe string) {
 
 	var err error
 	if performDelete {
-		err = cleanDusterDir(logDir, false)
+		err = cleanDusterDir(logDir, currentExe, false)
 		if err == nil {
 			// SECURITY: Uses safe delayed delete instead of cmd.exe /C shell injection
 			scheduleDelayedDelete(currentExe)

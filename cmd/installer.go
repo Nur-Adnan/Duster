@@ -138,6 +138,13 @@ func (m installerModel) Init() tea.Cmd {
 // installer files. Shared by the TUI scan command and the headless JSON path.
 func scanInstallerItems(minSizeMB int64) []installerItem {
 	list := []installerItem{} // non-nil so headless JSON renders [] instead of null
+	// Clamp so 0/negative can't select every tiny .exe and a huge value can't
+	// overflow into a negative threshold that selects everything.
+	if minSizeMB < 1 {
+		minSizeMB = 1
+	} else if minSizeMB > 1<<42 { // 2^42 MB = 2^62 bytes; 2^43 would overflow int64
+		minSizeMB = 1 << 42
+	}
 	minSizeBytes := minSizeMB * 1024 * 1024
 	now := time.Now()
 
@@ -153,10 +160,16 @@ func scanInstallerItems(minSizeMB int64) []installerItem {
 		}
 
 		if d.IsDir() {
-			// Don't recurse into hidden or config subfolders to speed up walk
-			if strings.HasPrefix(d.Name(), ".") {
+			// Top level only: subfolders hold extracted or portable apps
+			// (GameFolder\Game.exe) that are not disposable installers.
+			if path != downloadsDir {
 				return filepath.SkipDir
 			}
+			return nil
+		}
+
+		// Skip OneDrive placeholders: reading them forces a download.
+		if fs.IsOfflineFile(path) {
 			return nil
 		}
 
