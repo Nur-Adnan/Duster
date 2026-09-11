@@ -139,11 +139,9 @@ func (m removeModel) Init() tea.Cmd {
 
 func runUninstallCmd(currentExe, logDir string, dryRun bool) tea.Cmd {
 	return func() tea.Msg {
-		// Log the uninstallation transaction first before removing the folder
-		logRmOperation("self-uninstall", currentExe, 0, true)
-
 		// 1. Safe purge configuration directory
 		if err := cleanDusterDir(logDir, currentExe, dryRun); err != nil {
+			logRmOperation("self-uninstall", currentExe, 0, false)
 			return rmUninstallCompleteMsg{err: err}
 		}
 
@@ -314,9 +312,14 @@ func cleanDusterDir(logDir, keep string, simulate bool) error {
 	return firstErr
 }
 
-// logRmOperation delegates to the shared structured logging system.
+// logRmOperation records a FAILED self-uninstall only. A successful one writes
+// nothing: the log lives in the folder being removed, and writing it would
+// recreate that folder right after the cleanup.
 func logRmOperation(action, target string, size int64, success bool) {
-	logging.LogDestructiveOperation("remove", action, target, size, success)
+	if success {
+		return
+	}
+	logging.LogDestructiveOperation("remove", action, target, size, false)
 }
 
 func runSilentRemove(currentExe string) {
