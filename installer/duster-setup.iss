@@ -130,8 +130,11 @@ Root: HKA; Subkey: "Software\{#MyAppPublisher}\{#MyAppName}"; ValueType: string;
 Filename: "{cmd}"; Parameters: "/K echo. & echo   Duster v{#MyAppVersion} installed successfully! & echo. & echo   Type 'du --help' to get started. & echo. & ""{app}\{#MyAppExeName}"" --version & echo. & pause"; Description: "Launch Duster CLI"; Flags: nowait postinstall skipifsilent shellexec
 
 [UninstallDelete]
-; Clean up application data on uninstall
-Type: filesandordirs; Name: "{localappdata}\Duster"
+; Only Duster's own operation logs (operations.log and its rotated .old).
+; %LOCALAPPDATA%\Duster is also install.ps1's default install folder, so the
+; folder itself goes only once nothing else is left in it.
+Type: files; Name: "{localappdata}\Duster\operations.log*"
+Type: dirifempty; Name: "{localappdata}\Duster"
 
 [Code]
 // ─────────────────────────────────────────────
