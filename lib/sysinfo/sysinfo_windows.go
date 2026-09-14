@@ -113,6 +113,7 @@ func GetSystemStats() (SystemStats, error) {
 	if corePercents, err := cpu.Percent(0, true); err == nil {
 		stats.CPUCores = corePercents
 	}
+	stats.CPUTempC = cpuTemperature()
 
 	// 4. Power & Battery via native GetSystemPowerStatus
 	var powerInfo SYSTEM_POWER_STATUS

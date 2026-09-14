@@ -68,6 +68,9 @@ jobs:
 
           $s = .\du.exe status --json | Out-String | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0 -or $s.RAMTotal -le 0) { throw "status --json failed" }
+          # CPUTempC is left out when the machine exposes no thermal zone, as VMs usually don't.
+          if ($null -ne $s.CPUTempC -and ($s.CPUTempC -le 0 -or $s.CPUTempC -ge 150)) { throw "status --json: implausible CPUTempC $($s.CPUTempC)" }
+          Write-Host "  cpu temp: $(if ($null -ne $s.CPUTempC) { "$([math]::Round($s.CPUTempC, 1)) C" } else { 'no thermal zone exposed' })"
           $s.TopProcesses | ForEach-Object { Write-Host "  top $($_.Name) cpu=$([math]::Round($_.CPU, 1))%" }
           exit 0
 

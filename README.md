@@ -38,7 +38,7 @@ du analyze .   # Interactive disk explorer
 |:---|:---|
 | `du` | Interactive landing screen with system overview |
 | `du clean` | Scans & cleans 34 cache categories (temp, browsers, dev tools, GPU shaders) |
-| `du status` | Real-time CPU, RAM, disk, network, battery dashboard (1s refresh) |
+| `du status` | Real-time CPU (usage, temperature), RAM, disk, network, battery dashboard (1s refresh) |
 | `du analyze [path]` | Drill-down disk usage explorer with delete & open actions |
 | `du purge` | Finds `node_modules`, `target`, `dist`, `.gradle`, `vendor` and purges them |
 | `du uninstall` | App uninstaller + leftover AppData sweeper |

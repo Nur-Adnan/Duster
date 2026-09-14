@@ -21,6 +21,8 @@ func TestStatusQuitsOnQ(t *testing.T) {
 			t.Fatal("the status dashboard did not render")
 		}
 	}
+	// The CPU panel shows a temperature or N/A, never an empty cell.
+	tm.waitFor("Temp", 10*time.Second)
 	tm.send("q")
 	if code := tm.waitExit(10 * time.Second); code != 0 {
 		t.Fatalf("status exited with %d", code)
