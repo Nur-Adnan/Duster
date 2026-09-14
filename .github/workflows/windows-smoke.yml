@@ -304,12 +304,18 @@ jobs:
             New-Item -ItemType Directory -Force "$c\app\node_modules\x" | Out-Null
             Set-Content "$c\app\package.json" '{}'
             Set-Content "$c\app\node_modules\x\f.js" 'x'
-            $p = Start-Process -FilePath $du -ArgumentList 'purge', '--path', "`"$c`"", '--yes' -PassThru -NoNewWindow -RedirectStandardOutput "$c.out"
-            $null = $p.Handle
-            $p
+            # Process.Start owns the handle from creation. Start-Process -PassThru only
+            # keeps the exit code if .Handle is read before the process exits, and a
+            # fast purge can win that race (ExitCode then reads as empty).
+            $psi = New-Object Diagnostics.ProcessStartInfo $du
+            $psi.Arguments = "purge --path `"$c`" --yes"
+            $psi.UseShellExecute = $false
+            [Diagnostics.Process]::Start($psi)
           }
-          $procs | Wait-Process -Timeout 120
-          foreach ($p in $procs) { if ($p.ExitCode -ne 0) { $script:failures += "a concurrent purge exited $($p.ExitCode)" } }
+          foreach ($p in $procs) {
+            if (-not $p.WaitForExit(120000)) { $script:failures += "a concurrent purge (pid $($p.Id)) did not exit within 120 s" }
+            elseif ($p.ExitCode -ne 0) { $script:failures += "a concurrent purge exited $($p.ExitCode)" }
+          }
           foreach ($n in 1..3) { if (Test-Path "$env:RUNNER_TEMP\ws-c$n\app\node_modules") { $script:failures += "concurrent purge $n left node_modules" } }
           $lines = @(Get-Content $log | Select-Object -Skip $before)
           $bad = @($lines | Where-Object { $_ -notmatch '^\S.* \| Command: \w+ \| Action: \w+ \| Target: .+ \| Size: \d+ bytes \| Status: \w+$' })
