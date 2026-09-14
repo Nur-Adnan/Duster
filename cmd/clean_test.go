@@ -137,7 +137,7 @@ func TestFormatInt(t *testing.T) {
 func TestGetCategories(t *testing.T) {
 	cats := getCategories()
 
-	// We now have 35 categories — verify minimum expected count
+	// Catches categories dropped wholesale; TestCleanGroupsCoverEveryCategory checks each one.
 	if len(cats) < 30 {
 		t.Errorf("Expected at least 30 cleanup categories, got %d", len(cats))
 	}

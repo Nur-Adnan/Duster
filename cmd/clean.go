@@ -405,6 +405,73 @@ func getCategories() []CleanCategory {
 	}
 }
 
+// cleanGroup is one stage of the clean scan.
+type cleanGroup struct {
+	name  string
+	icon  string
+	catID map[string]bool
+}
+
+// cleanGroups orders the categories for both the CLI scan and the clean TUI.
+// Every getCategories ID must be in exactly one group (TestCleanGroupsCoverEveryCategory).
+var cleanGroups = []cleanGroup{
+	{name: "System Core", icon: "⚙", catID: map[string]bool{
+		"temp": true, "update": true, "prefetch": true, "wer": true,
+		"recycle": true, "dns": true, "delivery_opt": true, "memdumps": true,
+		"logfiles": true, "recent": true, "fontcache": true,
+	}},
+	{name: "Web Browsers", icon: "🌐", catID: map[string]bool{
+		"browsers": true, "opera": true,
+	}},
+	{name: "Developer Tools", icon: "🛠", catID: map[string]bool{
+		"npm": true, "pnpm": true, "yarn": true, "bun": true, "pip": true,
+		"cargo": true, "gradle": true, "nuget": true, "docker": true,
+		"vscode": true, "jetbrains": true,
+	}},
+	{name: "Applications", icon: "📦", catID: map[string]bool{
+		"discord": true, "spotify": true, "slack": true, "teams": true,
+		"steam": true, "epic": true, "adobe": true,
+	}},
+	{name: "GPU & Graphics", icon: "🎮", catID: map[string]bool{
+		"gpu_shader": true, "thumbs": true,
+	}},
+	{name: "Crash & Diagnostic Data", icon: "🔍", catID: map[string]bool{
+		"crash_dumps": true,
+	}},
+}
+
+// groupedCategories orders cats as the CLI scan shows them: by group, then in
+// getCategories order.
+func groupedCategories(cats []CleanCategory) []CleanCategory {
+	var out []CleanCategory
+	for _, g := range cleanGroups {
+		for _, c := range cats {
+			if g.catID[c.ID] {
+				out = append(out, c)
+			}
+		}
+	}
+	return out
+}
+
+// runCategory scans (scanOnly) or cleans one category, through its custom
+// handler or the shared directory engine. Callers handle the whitelist,
+// adminOnlyBlocked and progress reporting.
+func runCategory(cat CleanCategory, scanOnly bool) (int64, int, error) {
+	if cat.CustomScan != nil {
+		return cat.CustomScan(scanOnly, debug)
+	}
+	if scanOnly {
+		return scanDirCategory(cat)
+	}
+	return cleanDirCategory(cat)
+}
+
+// adminOnlyBlocked reports a category this process cannot touch without admin.
+func adminOnlyBlocked(cat CleanCategory) bool {
+	return cat.ID == "prefetch" && !elevation.IsAdmin()
+}
+
 func executeClean(cmd *cobra.Command, args []string) {
 	// --yes must bypass the interactive TUI: its whole point is unattended
 	// cleaning, and the TUI never consults it.
@@ -430,37 +497,7 @@ func executeCleanCLI(cmd *cobra.Command, args []string) {
 	// frames would corrupt piped or redirected output.
 	useSpinner := !debug && !isPiped()
 
-	// ── Category group definitions ───────────────────────────────────────
-	type categoryGroup struct {
-		name  string
-		icon  string
-		catID map[string]bool
-	}
-	groups := []categoryGroup{
-		{name: "System Core", icon: "⚙", catID: map[string]bool{
-			"temp": true, "update": true, "prefetch": true, "wer": true,
-			"recycle": true, "dns": true, "delivery_opt": true, "memdumps": true,
-			"logfiles": true, "recent": true, "fontcache": true,
-		}},
-		{name: "Web Browsers", icon: "🌐", catID: map[string]bool{
-			"browsers": true, "opera": true,
-		}},
-		{name: "Developer Tools", icon: "🛠", catID: map[string]bool{
-			"npm": true, "pnpm": true, "yarn": true, "bun": true, "pip": true,
-			"cargo": true, "gradle": true, "nuget": true, "docker": true,
-			"vscode": true, "jetbrains": true,
-		}},
-		{name: "Applications", icon: "📦", catID: map[string]bool{
-			"discord": true, "spotify": true, "slack": true, "teams": true,
-			"steam": true, "epic": true, "adobe": true,
-		}},
-		{name: "GPU & Graphics", icon: "🎮", catID: map[string]bool{
-			"gpu_shader": true, "thumbs": true,
-		}},
-		{name: "Crash & Diagnostic Data", icon: "🔍", catID: map[string]bool{
-			"crash_dumps": true,
-		}},
-	}
+	groups := cleanGroups
 
 	// ── Full System Scan Header ──────────────────────────────────────────
 	modeLabel := "DEEP CLEAN"
@@ -549,7 +586,7 @@ func executeCleanCLI(cmd *cobra.Command, args []string) {
 				)
 				continue
 			}
-			if cat.ID == "prefetch" && !elevation.IsAdmin() {
+			if adminOnlyBlocked(cat) {
 				rows = append(rows, resultRow{name: cat.Name, sizeText: "admin required", status: "adminonly"})
 				fmt.Printf("  %s  %s  %s\n",
 					styleMuted.Render("○"),
@@ -568,14 +605,7 @@ func executeCleanCLI(cmd *cobra.Command, args []string) {
 				spinner.start()
 			}
 
-			var size int64
-			var files int
-			var err error
-			if cat.CustomScan != nil {
-				size, files, err = cat.CustomScan(true, debug)
-			} else {
-				size, files, err = scanDirCategory(cat)
-			}
+			size, files, err := runCategory(cat, true)
 
 			if useSpinner {
 				spinner.stop()
@@ -659,7 +689,7 @@ func executeCleanCLI(cmd *cobra.Command, args []string) {
 	// Non-interactive runs (piped stdout or --debug) never show the TUI's
 	// Enter-to-confirm gate, so require an explicit --yes before deleting.
 	// Without it, fall back to a preview so `du clean | tee log` cannot wipe
-	// 35 categories silently.
+	// 34 categories silently.
 	if dryRun || !assumeYes {
 		if !dryRun {
 			fmt.Printf("  %s  Preview only — pass %s to actually delete.\n\n",
@@ -689,7 +719,7 @@ func executeCleanCLI(cmd *cobra.Command, args []string) {
 		}
 
 		// Mirror the scan phase: prefetch needs admin, so don't attempt it.
-		if cat.ID == "prefetch" && !elevation.IsAdmin() {
+		if adminOnlyBlocked(cat) {
 			continue
 		}
 
@@ -702,14 +732,7 @@ func executeCleanCLI(cmd *cobra.Command, args []string) {
 			spinner.start()
 		}
 
-		var sizeFreed int64
-		var filesFreed int
-		var err error
-		if cat.CustomScan != nil {
-			sizeFreed, filesFreed, err = cat.CustomScan(false, debug)
-		} else {
-			sizeFreed, filesFreed, err = cleanDirCategory(cat)
-		}
+		sizeFreed, filesFreed, err := runCategory(cat, false)
 
 		if useSpinner {
 			spinner.stop()

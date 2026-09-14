@@ -82,7 +82,7 @@ func TestRecycleBinTooSmallAsksFirst(t *testing.T) {
 // do nothing, while d still runs the dry run and says nothing was deleted.
 func TestCleanDryRunIgnoresC(t *testing.T) {
 	duBin(t)
-	bait := filepath.Join(os.TempDir(), "duster-e2e-bait.txt") // Windows Temp Files would take it
+	bait := filepath.Join(os.TempDir(), "duster-e2e-bait.txt") // Temporary Files would take it
 	mustWrite(t, bait, 1<<10)
 	t.Cleanup(func() { os.Remove(bait) })
 
