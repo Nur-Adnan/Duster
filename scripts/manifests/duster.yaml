@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=https://github.com/microsoft/winget-cli/releases/download/v1.4.10173/manifest.singleton.1.4.0.schema.json
 PackageIdentifier: NurAdnan.Duster
-PackageVersion: 1.1.0
+PackageVersion: 1.2.0
 PackageName: Duster
 Publisher: Nur Adnan
 PublisherUrl: https://github.com/Nur-Adnan/Duster
@@ -30,18 +30,18 @@ Tags:
 License: MIT
 LicenseUrl: https://github.com/Nur-Adnan/Duster/blob/main/LICENSE
 Copyright: Copyright (c) 2026 Nur Adnan
-ReleaseNotesUrl: https://github.com/Nur-Adnan/Duster/releases/tag/v1.1.0
+ReleaseNotesUrl: https://github.com/Nur-Adnan/Duster/releases/tag/v1.2.0
 Installers:
   - Architecture: x64
     InstallerType: portable
-    InstallerUrl: https://github.com/Nur-Adnan/Duster/releases/download/v1.1.0/duster-windows-amd64.exe
-    InstallerSha256: B202523AC0D201A45EBE12DFA03AB2E22D437D59575A201F61B4DE66639F8BCC
+    InstallerUrl: https://github.com/Nur-Adnan/Duster/releases/download/v1.2.0/duster-windows-amd64.exe
+    InstallerSha256: 95B358CD0323FC6B1218CAF7C122381CECE4D7F5EE947D1BDE3B88F84893971C
     Commands:
       - du
   - Architecture: arm64
     InstallerType: portable
-    InstallerUrl: https://github.com/Nur-Adnan/Duster/releases/download/v1.1.0/duster-windows-arm64.exe
-    InstallerSha256: C82504CF2258201C67C3FD1B001EAB2715579B5FDD0BACB992357F9E6E27E0EA
+    InstallerUrl: https://github.com/Nur-Adnan/Duster/releases/download/v1.2.0/duster-windows-arm64.exe
+    InstallerSha256: 223C24632D566CD9AAE1CD636876FDFBBFE279BE342E56457945E41274CB32EB
     Commands:
       - du
 ManifestType: singleton
