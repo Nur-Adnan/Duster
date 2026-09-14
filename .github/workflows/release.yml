@@ -84,11 +84,6 @@ jobs:
     name: Build Windows Binaries
     needs: [test, test-windows]
     runs-on: ubuntu-latest
-    env:
-      # Optional Authenticode signing: set both WINDOWS_CODESIGN_* repo
-      # secrets to enable. secrets.* is not available in step-level `if`,
-      # so the gate is bridged through job env.
-      CODESIGN_PFX_BASE64: ${{ secrets.WINDOWS_CODESIGN_PFX_BASE64 }}
     strategy:
       matrix:
         include:
@@ -175,38 +170,102 @@ jobs:
               -X main.Commit=${COMMIT}" \
             -o duster-windows-${{ matrix.suffix }}.exe .
 
-      - name: Sign Binary (Authenticode)
-        # No-op until the WINDOWS_CODESIGN_* secrets are configured.
-        # Signing runs BEFORE artifact upload so the ZIPs, checksums,
-        # and installer all package the signed exe.
-        if: env.CODESIGN_PFX_BASE64 != ''
-        env:
-          CODESIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PFX_PASSWORD }}
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq osslsigncode
-          umask 077
-          printf '%s' "$CODESIGN_PFX_BASE64" | base64 -d > "$RUNNER_TEMP/codesign.pfx"
-          osslsigncode sign \
-            -pkcs12 "$RUNNER_TEMP/codesign.pfx" -pass "$CODESIGN_PFX_PASSWORD" \
-            -n "Duster" -i "https://github.com/Nur-Adnan/Duster" \
-            -t http://timestamp.digicert.com \
-            -in "duster-windows-${{ matrix.suffix }}.exe" \
-            -out "duster-windows-${{ matrix.suffix }}-signed.exe"
-          mv "duster-windows-${{ matrix.suffix }}-signed.exe" "duster-windows-${{ matrix.suffix }}.exe"
-          rm -f "$RUNNER_TEMP/codesign.pfx"
-
-      - name: Upload Binary Artifact
+      - name: Upload Unsigned Binary
         uses: actions/upload-artifact@v4
         with:
-          name: duster-windows-${{ matrix.suffix }}
+          name: unsigned-windows-${{ matrix.suffix }}
           path: duster-windows-${{ matrix.suffix }}.exe
+          if-no-files-found: error
+          retention-days: 1
+
+  # ── Stage 2b: Sign ─────────────────────────────────────────────────
+  # Authenticode signing through SignPath Foundation (docs/code-signing.md).
+  # The key never reaches this repo: SignPath signs on its HSM after checking
+  # that every job before the request ran on GitHub-hosted runners, and a
+  # person approves each request. Until the SIGNPATH_* repository variables
+  # are set, the binaries pass through unsigned with a warning. Signing runs
+  # before anything is packaged, so the zips, checksums, installer and
+  # attestations all cover the signed exes.
+  sign:
+    name: Sign Windows Binaries
+    needs: build
+    runs-on: windows-latest
+    permissions:
+      contents: read
+      actions: read # SignPath reads the job details and downloads the artifact
+    steps:
+      - name: Download Unsigned Binaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: unsigned-windows-*
+          merge-multiple: true
+          path: unsigned/
+
+      - name: Upload Binaries for Signing
+        id: unsigned
+        if: vars.SIGNPATH_PROJECT_SLUG != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-windows
+          path: unsigned/*.exe
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Sign Binaries (SignPath)
+        if: vars.SIGNPATH_PROJECT_SLUG != ''
+        uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3.0
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: binaries
+          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600 # waits for a person to approve
+          output-artifact-directory: signed/
+
+      - name: Verify Signatures
+        # Fail the release rather than publish an exe with a missing, invalid
+        # or untimestamped signature (an untimestamped one dies with the cert).
+        if: vars.SIGNPATH_PROJECT_SLUG != ''
+        shell: pwsh
+        run: |
+          foreach ($name in 'duster-windows-amd64.exe', 'duster-windows-arm64.exe') {
+            $sig = Get-AuthenticodeSignature (Join-Path signed $name)
+            Write-Output "${name}: $($sig.Status), $($sig.SignerCertificate.Subject)"
+            if ($sig.Status -ne 'Valid') { throw "${name} is not validly signed: $($sig.StatusMessage)" }
+            if (-not $sig.TimeStamperCertificate) { throw "${name} has no timestamp" }
+          }
+
+      - name: Pass Binaries Through Unsigned
+        if: vars.SIGNPATH_PROJECT_SLUG == ''
+        shell: pwsh
+        run: |
+          Write-Output "::warning::SIGNPATH_PROJECT_SLUG is not set, so this release ships unsigned binaries (docs/code-signing.md)."
+          New-Item -ItemType Directory -Force signed | Out-Null
+          Copy-Item unsigned/*.exe signed/
+
+      - name: Upload AMD64 Binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: duster-windows-amd64
+          path: signed/duster-windows-amd64.exe
+          if-no-files-found: error
+          retention-days: 5
+
+      - name: Upload ARM64 Binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: duster-windows-arm64
+          path: signed/duster-windows-arm64.exe
+          if-no-files-found: error
           retention-days: 5
 
   # ── Stage 3: Package & Release ─────────────────────────────────────
   release:
     name: Package & Publish Release
-    needs: build
+    needs: sign
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -340,7 +399,7 @@ jobs:
             ```powershell
             du status          # Live system dashboard
             du clean --dry-run # Preview cleanable data
-            du clean           # Deep clean (35 categories)
+            du clean           # Deep clean (34 categories)
             du doctor          # System diagnostics
             du --help          # All commands
             ```
@@ -351,20 +410,18 @@ jobs:
             - Stripped with `-s -w` for minimal binary size
             - SHA-256 checksums provided — verify before running
 
-            > ⚠️ **Windows SmartScreen**: Click "More info" → "Run anyway" if blocked. This is normal for unsigned binaries.
+            ${{ vars.SIGNPATH_PROJECT_SLUG != '' && '> **Code signing:** the exes and the setup are Authenticode-signed. Free code signing provided by SignPath.io, certificate by SignPath Foundation ([code signing policy](https://github.com/Nur-Adnan/Duster/blob/main/docs/code-signing.md)). SmartScreen can still warn about a new release until it builds reputation: click "More info", then "Run anyway".' || '> ⚠️ **Windows SmartScreen**: Click "More info" → "Run anyway" if blocked. This is normal for unsigned binaries.' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # ── Stage 4: Build Inno Setup Installer (Windows runner) ───────────
   installer:
     name: Build Inno Setup Installer
-    needs: [build, release]
+    needs: [sign, release]
     runs-on: windows-latest
     permissions:
       contents: write
-    env:
-      # Same optional-signing gate as the build job (see comment there).
-      CODESIGN_PFX_BASE64: ${{ secrets.WINDOWS_CODESIGN_PFX_BASE64 }}
+      actions: read # SignPath reads the job details and downloads the artifact
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -415,29 +472,42 @@ jobs:
           "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion=${{ steps.version.outputs.version }} installer\duster-setup.iss
 
       - name: Upload Installer Artifact
+        id: setup
         uses: actions/upload-artifact@v4
         with:
           name: duster-installer
           path: dist/installer/Duster-Setup-*.exe
+          if-no-files-found: error
           retention-days: 5
 
-      - name: Sign Installer (Authenticode)
-        # No-op until the WINDOWS_CODESIGN_* secrets are configured.
-        # Must run before upload and before the checksum append below.
-        if: env.CODESIGN_PFX_BASE64 != ''
-        shell: powershell
-        env:
-          CODESIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PFX_PASSWORD }}
+      - name: Sign Installer (SignPath)
+        # Same gate as the sign job. Must run before the release upload and
+        # the checksum append below. Inno Setup's uninstaller inside the
+        # setup stays unsigned (docs/code-signing.md, "Limits").
+        if: vars.SIGNPATH_PROJECT_SLUG != ''
+        uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3.0
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: installer
+          github-artifact-id: ${{ steps.setup.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600 # waits for a person to approve
+          output-artifact-directory: dist/signed-installer/
+
+      - name: Verify Installer Signature
+        if: vars.SIGNPATH_PROJECT_SLUG != ''
+        shell: pwsh
         run: |
-          $ErrorActionPreference = "Stop"
-          $pfx = Join-Path $env:RUNNER_TEMP "codesign.pfx"
-          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CODESIGN_PFX_BASE64))
-          try {
-            $setup = Get-ChildItem dist/installer/Duster-Setup-*.exe | Select-Object -First 1
-            ./scripts/sign.ps1 -CertPath $pfx -CertPassword $env:CODESIGN_PFX_PASSWORD -BinaryPath $setup.FullName
-          } finally {
-            Remove-Item $pfx -Force
-          }
+          $signed = @(Get-ChildItem dist/signed-installer/Duster-Setup-*.exe)
+          if ($signed.Count -ne 1) { throw "expected one signed setup exe, found $($signed.Count)" }
+          $sig = Get-AuthenticodeSignature $signed[0].FullName
+          Write-Output "$($signed[0].Name): $($sig.Status), $($sig.SignerCertificate.Subject)"
+          if ($sig.Status -ne 'Valid') { throw "the setup exe is not validly signed: $($sig.StatusMessage)" }
+          if (-not $sig.TimeStamperCertificate) { throw "the setup exe has no timestamp" }
+          Copy-Item $signed[0].FullName dist/installer/ -Force
 
       - name: Upload Installer to Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
