@@ -20,6 +20,7 @@ var StatusCmd = &cobra.Command{
 	Short: "Real-time system health dashboard and live resource monitor",
 	Long: `Display a real-time dashboard of system health, showing:
   - CPU usage (per-core and total)
+  - CPU temperature (hottest ACPI thermal zone; N/A when the machine exposes none)
   - RAM usage (used, total, available)
   - Disk utilization and read/write I/O speeds
   - Network upload/download activity
@@ -140,6 +141,27 @@ func (m statusModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// Thermal zone thresholds: passive cooling trip points usually sit near 90°C.
+const (
+	tempWarmC = 70.0
+	tempHotC  = 85.0
+)
+
+// thermalIndicator renders a temperature with its heat level; 0 means the
+// machine exposes no thermal zone and shows N/A, never a guess.
+func thermalIndicator(celsius float64) string {
+	switch {
+	case celsius <= 0:
+		return styleLabel.Render("N/A")
+	case celsius < tempWarmC:
+		return styleSuccess.Render(fmt.Sprintf("%d°C Normal", int(celsius)))
+	case celsius < tempHotC:
+		return styleWarning.Render(fmt.Sprintf("%d°C Warm", int(celsius)))
+	default:
+		return styleDanger.Render(fmt.Sprintf("%d°C Hot", int(celsius)))
+	}
+}
+
 // ─────────────────────────────────────────────
 // View — Duster two-column system dashboard layout
 // ─────────────────────────────────────────────
@@ -162,8 +184,8 @@ func (m statusModel) View() string {
 		cpuModel = "Unknown CPU"
 	}
 	// Only values actually measured by sysinfo are shown — the dashboard must
-	// never fabricate telemetry (temps, load averages, cache sizes) that the
-	// collector does not report.
+	// never fabricate telemetry (load averages, cache sizes) that the collector
+	// does not report. Temperature shows N/A when no thermal zone is exposed.
 	cpuPercent := s.CPUPercent
 	coresCount := len(s.CPUCores)
 	if coresCount == 0 {
@@ -276,7 +298,7 @@ func (m statusModel) View() string {
 	doc.WriteString(renderPanelLine(styleAccent.Render("CPU"), "Cores", coresStr) + "\n")
 	doc.WriteString(renderPanelLine(styleValue.Render(cpuModel), "Base Freq", baseFreqStr) + "\n")
 	doc.WriteString(renderPanelLine(leftCpuProgress, "Peak Core", peakCoreStr) + "\n")
-	doc.WriteString(renderPanelLine("", "Avg Core", avgCoreStr) + "\n")
+	doc.WriteString(renderPanelLine(styleLabel.Render("Temp ")+thermalIndicator(s.CPUTempC), "Avg Core", avgCoreStr) + "\n")
 
 	doc.WriteString(sepLine + "\n")
 

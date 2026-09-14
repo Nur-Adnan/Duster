@@ -25,7 +25,7 @@ Run **Windows Smoke Test** (Actions tab > Run workflow, or push a `smoke/**` bra
 - the Downloads `installer` scan
 - an end-to-end `update`
 - in a real terminal (`e2e/`, a Windows pseudo console):
-  - `status` renders and `q` quits
+  - `status` renders with a Temp line (a value or N/A) and `q` quits; `status --json` has a plausible `CPUTempC` or none
   - `analyze`: Enter and Backspace, then `d` sends a file to the Recycle Bin
   - the Recycle Bin size prompt: with the bin set to 1 MB, Windows asks before deleting a larger file, and No keeps it
   - `c` does nothing in a `clean --dry-run` screen, while `d` still runs the dry run
@@ -42,6 +42,7 @@ What the runner can't do, so check these by hand:
 - click a real UAC prompt (the runner is already elevated, so none appears)
 - uninstall a per-user app from a non-admin terminal
 - MSI (7-Zip) and InstallShield or rundll32 uninstallers
+- a real CPU temperature: runners are VMs that usually expose no thermal zone, and they run English Windows
 
 The full list below stays, so a failure can be reproduced by hand.
 
@@ -52,6 +53,7 @@ Run everything from a normal (non-admin) terminal unless a step says elevated. E
 - [ ] `du doctor --json; $LASTEXITCODE`: prints JSON. Exit code is 0 when `healthy` is true and 1 when any check has `FAIL`.
 - [ ] `du verify --json; $LASTEXITCODE`: all 8 cases pass, exit code 0.
 - [ ] `du status`: the dashboard renders, and `q` quits.
+- [ ] `du status` on a laptop: Temp in the CPU panel shows a value, and it rises while `du benchmark` runs in a second terminal. Do it once on a non-English Windows too. A desktop or VM with no thermal zone shows N/A.
 - [ ] `du analyze $env:USERPROFILE`:
   - Enter a folder and go back (Enter, then Backspace). The view is instant with no rescan.
   - `d` on a scratch file sends it to the Recycle Bin.
