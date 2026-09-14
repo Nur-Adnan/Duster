@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+- The clean screen (`du clean` in a terminal, or Clean in the `du` menu) now lists all 34 categories that `du clean --yes` cleans, in the same order and all ticked, instead of 9. **Check the list before pressing Enter:** besides the old 9, it now also clears developer caches (npm, NuGet, Gradle and others), app caches (Teams, Spotify, Discord and others), Recent shortcuts and memory dumps. Untick anything you want to keep. The list scrolls when it is taller than the window, and a new line shows how many categories are selected.
+- The clean screen uses the command's category names. "Logs (System & Apps)" is now two rows, "Windows Error Reports" and "System Log Files", so `--whitelist wer` there protects only error reports, as it does in the command. `--whitelist logs` still protects both.
+- Releases are signed through SignPath Foundation once the project's application is approved ([docs/code-signing.md](docs/code-signing.md)). The release fails if an exe or the setup exe comes out without a valid, timestamped signature. The old signing step that expected a certificate file is gone: certificate authorities no longer issue code signing keys as files, so it could never have been used.
+
 ## [1.1.0] - 2026-09-14
 
 ### Added
