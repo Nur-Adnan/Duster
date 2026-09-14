@@ -2,17 +2,15 @@ package cmd
 
 import "strings"
 
-// whitelistAliases maps the extra names --whitelist accepts onto IDs in both
-// vocabularies: the CLI's getCategories IDs and the clean TUI's items, whose
-// "logs" spans wer + logfiles. Protection errs toward skipping more.
+// whitelistAliases maps the extra names --whitelist accepts onto getCategories
+// IDs. "logs" is the name of the clean TUI's old combined wer + logfiles item,
+// kept so existing --whitelist logs invocations still protect both.
 var whitelistAliases = map[string][]string{
-	"chrome":   {"browsers"},
-	"edge":     {"browsers"},
-	"brave":    {"browsers"},
-	"firefox":  {"browsers"},
-	"wer":      {"logs"},
-	"logfiles": {"logs"},
-	"logs":     {"wer", "logfiles"},
+	"chrome":  {"browsers"},
+	"edge":    {"browsers"},
+	"brave":   {"browsers"},
+	"firefox": {"browsers"},
+	"logs":    {"wer", "logfiles"},
 }
 
 // whitelistSet expands --whitelist values into the set of protected IDs, and
