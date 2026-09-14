@@ -102,8 +102,10 @@ Run everything from a normal (non-admin) terminal unless a step says elevated. E
 
 1. Merge to main and wait for CI to pass.
 2. `git tag vX.Y.Z && git push origin vX.Y.Z`. This runs `release.yml`.
+   - Once signing is set up ([code-signing.md](code-signing.md)), approve its two SignPath signing requests, the exes and then the setup exe, each within an hour, or the job times out.
 3. Check the release:
    - both portable zips, both exes and the setup exe are attached
+   - once signing is set up: the release notes say the files are signed, and on Windows `Get-AuthenticodeSignature` reports `Valid` for a downloaded exe and setup exe
    - `checksums-sha256.txt` lists all of them
    - it is marked Latest (unless it is a pre-release)
    - the **Attest Release Files** job passed (it runs `gh attestation verify` on every file)

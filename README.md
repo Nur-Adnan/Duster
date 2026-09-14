@@ -188,6 +188,12 @@ irm https://raw.githubusercontent.com/Nur-Adnan/Duster/main/scripts/uninstall.ps
 
 ---
 
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io/), certificate by [SignPath Foundation](https://signpath.org/). Signing starts once the project's SignPath Foundation application is approved; releases before that are unsigned. Who approves releases, what gets signed, and the privacy statement: [docs/code-signing.md](docs/code-signing.md).
+
+---
+
 ## Build from Source
 
 ```powershell
