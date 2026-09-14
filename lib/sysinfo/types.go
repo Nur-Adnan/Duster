@@ -24,6 +24,9 @@ type SystemStats struct {
 	// CPU metrics
 	CPUPercent float64
 	CPUCores   []float64
+	// CPUTempC is the hottest ACPI thermal zone in °C; 0 (omitted from JSON)
+	// when the machine exposes no thermal zone, as most desktops and VMs don't.
+	CPUTempC float64 `json:",omitempty"`
 
 	// Memory metrics
 	RAMTotal   uint64
