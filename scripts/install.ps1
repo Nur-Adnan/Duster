@@ -59,7 +59,7 @@ $ProgressPreference    = "SilentlyContinue"   # Speeds up Invoke-WebRequest dram
 $RepoOwner       = "Nur-Adnan"
 $RepoName        = "Duster"
 $ApiBase          = "https://api.github.com/repos/$RepoOwner/$RepoName"
-$FallbackVersion  = "1.1.0"
+$FallbackVersion  = "1.2.0"
 $MaxRetries       = 3
 
 # == Helpers ==========================================================
