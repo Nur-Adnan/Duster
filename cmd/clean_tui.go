@@ -65,6 +65,8 @@ type cleanTuiItem struct {
 	Status    string // "scanning", "ok", "deleting", "done", "skipped", "adminonly", "noaccess", "failed"
 	Scanning  bool
 	Progress  float64
+
+	cat CleanCategory // re-resolved by scanCmds, so a rescan sees new profile folders
 }
 
 type operationsLogEntry struct {
@@ -80,6 +82,7 @@ type cleanModel struct {
 	state         cleanTuiState
 	items         []*cleanTuiItem
 	cursor        int
+	offset        int // first category row on screen when the list scrolls
 	width         int
 	height        int
 	dryRun        bool
@@ -151,83 +154,25 @@ func animateTickCmd() tea.Cmd {
 	})
 }
 
-func scanItemCmd(itemIdx int, item *cleanTuiItem) tea.Cmd {
+// scanItemCmd scans one category. protected comes from whitelistSet, shared
+// with the CLI so both accept the same names.
+func scanItemCmd(itemIdx int, cat CleanCategory, protected bool) tea.Cmd {
 	return func() tea.Msg {
-		var size int64
-		var files int
-		var err error
-
-		// Whitelist guard, shared with the CLI so both accept the same names.
-		whitelistMap, _ := whitelistSet(whitelist)
-
-		if whitelistMap[item.ID] {
+		if protected {
 			return cleanScanProgressMsg{
 				ItemIdx: itemIdx,
 				Status:  "skipped",
 			}
 		}
 
-		if item.ID == "prefetch" && !elevation.IsAdmin() {
+		if adminOnlyBlocked(cat) {
 			return cleanScanProgressMsg{
 				ItemIdx: itemIdx,
 				Status:  "adminonly",
 			}
 		}
 
-		switch item.ID {
-		case "logs":
-			// Scan both "wer" and "logfiles" and sum them up!
-			var size1, size2 int64
-			var files1, files2 int
-			var err1, err2 error
-
-			// wer
-			var werCat *CleanCategory
-			for _, c := range getCategories() {
-				if c.ID == "wer" {
-					werCat = &c
-					break
-				}
-			}
-			if werCat != nil {
-				size1, files1, err1 = scanDirCategory(*werCat)
-			}
-
-			// logfiles
-			var logfilesCat *CleanCategory
-			for _, c := range getCategories() {
-				if c.ID == "logfiles" {
-					logfilesCat = &c
-					break
-				}
-			}
-			if logfilesCat != nil {
-				size2, files2, err2 = scanDirCategory(*logfilesCat)
-			}
-
-			size = size1 + size2
-			files = files1 + files2
-			if err1 != nil {
-				err = err1
-			} else if err2 != nil {
-				err = err2
-			}
-		default:
-			var matchedCat *CleanCategory
-			for _, c := range getCategories() {
-				if c.ID == item.ID {
-					matchedCat = &c
-					break
-				}
-			}
-			if matchedCat != nil {
-				if matchedCat.CustomScan != nil {
-					size, files, err = matchedCat.CustomScan(true, false)
-				} else {
-					size, files, err = scanDirCategory(*matchedCat)
-				}
-			}
-		}
+		size, files, err := runCategory(cat, true)
 
 		status := "ok"
 		if err != nil {
@@ -254,63 +199,7 @@ func cleanItemCmd(itemIdx int, item *cleanTuiItem, isSimulation bool) tea.Cmd {
 			}
 		}
 
-		var sizeFreed int64
-		var filesFreed int
-		var err error
-
-		switch item.ID {
-		case "logs":
-			var size1, size2 int64
-			var files1, files2 int
-			var err1, err2 error
-
-			// wer
-			var werCat *CleanCategory
-			for _, c := range getCategories() {
-				if c.ID == "wer" {
-					werCat = &c
-					break
-				}
-			}
-			if werCat != nil {
-				size1, files1, err1 = cleanDirCategory(*werCat)
-			}
-
-			// logfiles
-			var logfilesCat *CleanCategory
-			for _, c := range getCategories() {
-				if c.ID == "logfiles" {
-					logfilesCat = &c
-					break
-				}
-			}
-			if logfilesCat != nil {
-				size2, files2, err2 = cleanDirCategory(*logfilesCat)
-			}
-
-			sizeFreed = size1 + size2
-			filesFreed = files1 + files2
-			if err1 != nil {
-				err = err1
-			} else if err2 != nil {
-				err = err2
-			}
-		default:
-			var matchedCat *CleanCategory
-			for _, c := range getCategories() {
-				if c.ID == item.ID {
-					matchedCat = &c
-					break
-				}
-			}
-			if matchedCat != nil {
-				if matchedCat.CustomScan != nil {
-					sizeFreed, filesFreed, err = matchedCat.CustomScan(false, false)
-				} else {
-					sizeFreed, filesFreed, err = cleanDirCategory(*matchedCat)
-				}
-			}
-		}
+		sizeFreed, filesFreed, err := runCategory(item.cat, false)
 
 		return cleanDeletionProgressMsg{
 			ItemIdx:    itemIdx,
@@ -339,20 +228,7 @@ func initialCleanModel(startDryRun bool) cleanModel {
 		launchDryRun: startDryRun,
 		startTime:    time.Now(),
 		cursor:       0,
-		items: []*cleanTuiItem{
-			{ID: "temp", Name: "Windows Temp Files", Checked: true, Status: "scanning", Scanning: true, Progress: 0.0},
-			{ID: "prefetch", Name: "Prefetch Files", Checked: true, Status: "scanning", Scanning: true, Progress: 0.0},
-			{ID: "update", Name: "Windows Update Cache", Checked: true, Status: "scanning", Scanning: true, Progress: 0.0},
-			// One item backed by the canonical "browsers" category so the TUI
-			// cleans the same set as CLI mode (Chrome, Edge, Brave, Firefox);
-			// the old hardcoded chrome/edge items silently skipped the rest.
-			{ID: "browsers", Name: "Browser Caches", Checked: true, Status: "scanning", Scanning: true, Progress: 0.0},
-			{ID: "thumbs", Name: "Thumbnail Cache", Checked: true, Status: "scanning", Scanning: true, Progress: 0.0},
-			{ID: "delivery_opt", Name: "Delivery Optimization Cache", Checked: true, Status: "scanning", Scanning: true, Progress: 0.0},
-			{ID: "dns", Name: "DNS Cache", Checked: true, Status: "scanning", Scanning: true, Progress: 0.0},
-			{ID: "recycle", Name: "Recycle Bin", Checked: true, Status: "scanning", Scanning: true, Progress: 0.0},
-			{ID: "logs", Name: "Logs (System & Apps)", Checked: true, Status: "scanning", Scanning: true, Progress: 0.0},
-		},
+		items:        cleanTuiItems(getCategories()),
 	}
 
 	// Set dynamic stats
@@ -365,7 +241,7 @@ func initialCleanModel(startDryRun bool) cleanModel {
 	freeBytes := getDiskFreeBytes(os.TempDir())
 	freeSpaceStr := formatBytes(freeBytes)
 
-	wlText := fmt.Sprintf("%d categories, %d whitelisted", len(getCategories()), len(whitelist))
+	wlText := fmt.Sprintf("%d categories, %d whitelisted", len(m.items), len(whitelist))
 
 	m.osVersion = osVer
 	m.freeSpace = freeSpaceStr
@@ -416,13 +292,82 @@ func (m cleanModel) Init() tea.Cmd {
 	cmds = append(cmds, timerTickCmd(), animateTickCmd())
 
 	if m.state != cleanStateElevation {
-		// Queue scans for all items
-		for iIdx, item := range m.items {
-			cmds = append(cmds, scanItemCmd(iIdx, item))
-		}
+		cmds = append(cmds, m.scanCmds()...)
 	}
 
 	return tea.Batch(cmds...)
+}
+
+// cleanTuiItems lists every clean category, ticked, in the CLI's scan order,
+// so the TUI offers exactly what `du clean --yes` cleans.
+func cleanTuiItems(cats []CleanCategory) []*cleanTuiItem {
+	var items []*cleanTuiItem
+	for _, c := range groupedCategories(cats) {
+		items = append(items, &cleanTuiItem{ID: c.ID, Name: c.Name, Checked: true, Status: "scanning", Scanning: true, cat: c})
+	}
+	return items
+}
+
+// scanCmds starts a scan of every item from the top of the list. Categories
+// and the whitelist are resolved once per scan, not once per item.
+func (m *cleanModel) scanCmds() []tea.Cmd {
+	byID := map[string]CleanCategory{}
+	for _, c := range getCategories() {
+		byID[c.ID] = c
+	}
+	protected, _ := whitelistSet(whitelist)
+	m.offset = 0
+
+	var cmds []tea.Cmd
+	for i, item := range m.items {
+		if c, ok := byID[item.ID]; ok {
+			item.cat = c
+		}
+		item.Status = "scanning"
+		item.Scanning = true
+		item.Progress = 0.0
+		cmds = append(cmds, scanItemCmd(i, item.cat, protected[item.ID]))
+	}
+	return cmds
+}
+
+// listWindow returns the first category row to draw and how many rows fit.
+// Bubble Tea drops lines above the top of the terminal, which would hide the
+// header, so a list taller than the screen scrolls and keeps two lines for
+// the "N more" hints.
+func (m cleanModel) listWindow() (start, rows int) {
+	n := len(m.items)
+	if m.height <= 0 {
+		return 0, n
+	}
+	probe := m
+	probe.height, probe.items = 0, nil
+	free := m.height - strings.Count(probe.View(), "\n") - 1 // View ends in "\n": one more line
+	if n <= free {
+		return 0, n
+	}
+	rows = max(1, free-2)
+	return min(max(m.offset, 0), n-rows), rows
+}
+
+// scrollTo moves the list window just enough to show row idx.
+func (m *cleanModel) scrollTo(idx int) {
+	start, rows := m.listWindow()
+	switch {
+	case idx < start:
+		m.offset = idx
+	case idx >= start+rows:
+		m.offset = idx - rows + 1
+	default:
+		m.offset = start
+	}
+}
+
+func scrollHint(arrow string, n int) string {
+	if n <= 0 {
+		return "\n"
+	}
+	return "  " + styleMuted.Render(fmt.Sprintf("%s %d more", arrow, n)) + "\n"
 }
 
 type elevationVerificationMsg struct {
@@ -449,6 +394,9 @@ func (m cleanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		if m.state == cleanStateReady {
+			m.scrollTo(m.cursor)
+		}
 		return m, nil
 
 	case timerTickMsg:
@@ -604,10 +552,12 @@ func (m cleanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.cursor > 0 {
 					m.cursor--
 				}
+				m.scrollTo(m.cursor)
 			case "down", "j":
 				if m.cursor < len(m.items)-1 {
 					m.cursor++
 				}
+				m.scrollTo(m.cursor)
 
 			case " ", "space":
 				// Bubble Tea reports the space key as " ", never "space"; the
@@ -655,12 +605,7 @@ func (m cleanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// re-arms), so only restart the animation here; re-adding
 				// timerTickCmd would spawn a parallel forever-ticking chain.
 				cmds = append(cmds, animateTickCmd())
-				for iIdx, item := range m.items {
-					item.Status = "scanning"
-					item.Scanning = true
-					item.Progress = 0.0
-					cmds = append(cmds, scanItemCmd(iIdx, item))
-				}
+				cmds = append(cmds, m.scanCmds()...)
 				return m, tea.Batch(cmds...)
 
 			case "c", "C":
@@ -676,6 +621,16 @@ func (m cleanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		} else if m.state == cleanStateDone {
+			// The window stays where cleaning left it; scrolling reaches the
+			// other rows, such as a failed category above it.
+			switch keyStr {
+			case "up", "k":
+				start, _ := m.listWindow()
+				m.offset = max(start-1, 0)
+			case "down", "j":
+				start, rows := m.listWindow()
+				m.offset = min(start+1, len(m.items)-rows)
+			}
 			if keyStr == "r" || keyStr == "R" {
 				m.state = cleanStateScanning
 				m.totalScanned = 0
@@ -692,12 +647,7 @@ func (m cleanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// See the Ready-state rescan: reuse the immortal timer chain,
 				// restart only the animation to avoid a duplicate ticker.
 				cmds = append(cmds, animateTickCmd())
-				for iIdx, item := range m.items {
-					item.Status = "scanning"
-					item.Scanning = true
-					item.Progress = 0.0
-					cmds = append(cmds, scanItemCmd(iIdx, item))
-				}
+				cmds = append(cmds, m.scanCmds()...)
 				return m, tea.Batch(cmds...)
 			}
 		}
@@ -722,6 +672,7 @@ func (m *cleanModel) beginNextItem() tea.Cmd {
 	item.Status = "deleting"
 	item.Progress = 0
 	m.activeItemIdx = idx
+	m.scrollTo(idx)
 	return cleanItemCmd(idx, item, m.dryRun)
 }
 
@@ -813,7 +764,12 @@ func (m cleanModel) View() string {
 		styleHeader.Render("Size") + "\n")
 
 	// 4. Flat Monospace Clean List Table
-	for index, item := range m.items {
+	start, rows := m.listWindow()
+	if rows < len(m.items) {
+		sb.WriteString(scrollHint("↑", start))
+	}
+	for index := start; index < start+rows; index++ {
+		item := m.items[index]
 		var catPrefix string
 		var selected = m.state == cleanStateReady && index == m.cursor
 
@@ -893,6 +849,9 @@ func (m cleanModel) View() string {
 			styleTuiWhite.Render(sizeRendered),
 		))
 	}
+	if rows < len(m.items) {
+		sb.WriteString(scrollHint("↓", len(m.items)-start-rows))
+	}
 
 	dividerWidth := width - 4
 	if dividerWidth < 80 {
@@ -948,6 +907,13 @@ func (m cleanModel) View() string {
 	}
 	sb.WriteString(fmt.Sprintf("  🗑  %s :  %s\n", padLabel(spaceLabel, 22), valStyle.Render(spaceStr)))
 	sb.WriteString(fmt.Sprintf("  📄  %s :  %s\n", padLabel(filesLabel, 22), valStyle.Render(filesStr)))
+	checked := 0
+	for _, item := range m.items {
+		if item.Checked {
+			checked++
+		}
+	}
+	sb.WriteString(fmt.Sprintf("  ☰  %s :  %s\n", padLabel("Categories", 22), valStyle.Render(fmt.Sprintf("%d of %d selected", checked, len(m.items)))))
 	sb.WriteString(fmt.Sprintf("  🕒  %s :  %s\n", padLabel("Time taken", 22), valStyle.Render(durStr)))
 
 	statusColored := valStyle.Render(statusSummary)
@@ -974,6 +940,7 @@ func (m cleanModel) View() string {
 		}
 	} else if m.state == cleanStateDone {
 		hints = []string{
+			formatShortcut("↑↓", "Scroll"),
 			formatShortcut("R", "Run again"),
 			formatShortcut("B", "Back to menu"),
 			formatShortcut("Q", "Quit"),
