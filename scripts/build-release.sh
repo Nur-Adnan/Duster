@@ -26,7 +26,7 @@ BOLD='\033[1m'
 NC='\033[0m'
 
 # ── Configuration ────────────────────────────────────────────────────
-VERSION="${DUSTER_VERSION:-1.0.6}"
+VERSION="${DUSTER_VERSION:-1.1.0}"
 BUILD_DATE=$(date +%Y-%m-%d)
 COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "dev")
 DIST_DIR="dist"

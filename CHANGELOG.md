@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-09-14
+
 ### Added
 - `du status` shows the CPU temperature in the CPU panel, marked Normal, Warm (70°C and up) or Hot (85°C and up), and `du status --json` adds `CPUTempC`. It reads the hottest ACPI thermal zone through Windows performance counters, so it needs no admin rights and works on non-English Windows. Most desktops and virtual machines expose no thermal zone: they show N/A and the JSON field is left out. The firmware's thermal zone can lag behind or read lower than the CPU's own sensor.
 

@@ -4,7 +4,7 @@
 # ╚══════════════════════════════════════════════════════════════════════╝
 
 BINARY_NAME = du.exe
-VERSION     ?= 1.0.6
+VERSION     ?= 1.1.0
 BUILD_DATE  = $(shell date +%Y-%m-%d)
 COMMIT      = $(shell git rev-parse --short HEAD 2>/dev/null || echo "dev")
 DIST_DIR    = dist
