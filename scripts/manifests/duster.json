@@ -1,5 +1,5 @@
 {
-    "version": "1.0.6",
+    "version": "1.1.0",
     "description": "Duster (du) — Windows-native deep cleaner & system optimizer CLI utility.",
     "homepage": "https://github.com/Nur-Adnan/Duster",
     "license": "MIT",
@@ -11,12 +11,12 @@
     ],
     "architecture": {
         "64bit": {
-            "url": "https://github.com/Nur-Adnan/Duster/releases/download/v1.0.6/duster-windows-amd64.exe#/du.exe",
-            "hash": "d94bbbebbf3f6c807979d03f49b09a932b5bee75d41c91941641e1ce4c00d6f0"
+            "url": "https://github.com/Nur-Adnan/Duster/releases/download/v1.1.0/duster-windows-amd64.exe#/du.exe",
+            "hash": "b202523ac0d201a45ebe12dfa03ab2e22d437d59575a201f61b4de66639f8bcc"
         },
         "arm64": {
-            "url": "https://github.com/Nur-Adnan/Duster/releases/download/v1.0.6/duster-windows-arm64.exe#/du.exe",
-            "hash": "7f94e9ccab5fb1ffa4056e6086ca25c87ebd4a550f5ce8d608fccf05de3bd601"
+            "url": "https://github.com/Nur-Adnan/Duster/releases/download/v1.1.0/duster-windows-arm64.exe#/du.exe",
+            "hash": "c82504cf2258201c67c3fd1b001eab2715579b5fdd0bacb992357f9e6e27e0ea"
         }
     },
     "bin": "du.exe",
