@@ -237,7 +237,7 @@ jobs:
       # promises must hold without a terminal: nothing is deleted without
       # --yes, --dry-run deletes nothing, and repeated or concurrent runs work.
       - name: Invalid input, safety promises, repeated and concurrent runs
-        timeout-minutes: 15
+        timeout-minutes: 25
         run: |
           $ErrorActionPreference = 'Continue'
           $du = (Resolve-Path .\du.exe).Path
@@ -269,7 +269,35 @@ jobs:
           $null = Check 'installer: negative size' @('installer', '--json', '--min-size', '-5') @(0)
           $u = Check 'uninstall --json' @('uninstall', '--json') @(0)
           $null = $u | ConvertFrom-Json
-          $null = Check 'optimize preview' @('optimize', '--json') @(0)
+          $o = Check 'optimize preview' @('optimize', '--json') @(0)
+          $oj = $o | ConvertFrom-Json
+          # The reported-only items must always be listed, present or not.
+          $ids = @($oj.reclaimable | ForEach-Object { $_.id })
+          foreach ($id in @('windows_old', 'hibernation')) {
+            if ($ids -notcontains $id) { $script:failures += "optimize --json did not report $id" }
+          }
+          foreach ($item in $oj.reclaimable) {
+            Write-Host ('     reclaimable {0}: present={1} bytes={2} partial={3}' -f $item.id, $item.present, $item.bytes, $item.partial)
+            if ($item.present -and $item.bytes -lt 0) { $script:failures += "$($item.id) reported a negative size" }
+          }
+          # --deep previews the component store: this runs DISM's read-only
+          # analysis on a real Windows image, which is the only way to check
+          # that Duster can read its report.
+          $d = Check 'optimize --deep preview (DISM analyze)' @('optimize', '--deep', '--json') @(0)
+          $dj = $d | ConvertFrom-Json
+          $cs = $dj.tasks | Where-Object { $_.id -eq 'component_store' }
+          if (-not $cs) { $script:failures += 'optimize --deep did not add the component_store task' }
+          else {
+            Write-Host ('     component_store: status={0} note={1} error={2}' -f $cs.status, $cs.note, $cs.error_message)
+            if ($cs.error_message) { $script:failures += "component_store preview failed: $($cs.error_message)" }
+            # Status 4 is skipped (analysis only); anything else means the
+            # analysis did not run as a preview.
+            if ($cs.status -ne 4) { $script:failures += "component_store preview status was $($cs.status), want skipped" }
+            if (-not $cs.note) { $script:failures += 'component_store preview reported no analysis summary' }
+            if ($dj.admin_elevated -and $cs.note -match 'needs Administrator') {
+              $script:failures += 'component_store was skipped for admin rights on an elevated runner'
+            }
+          }
           $null = Check 'benchmark --json' @('benchmark', '--json') @(0)
           Copy-Item $du "$tmp\rm\du.exe"
           $null = & "$tmp\rm\du.exe" remove --json 2>&1
