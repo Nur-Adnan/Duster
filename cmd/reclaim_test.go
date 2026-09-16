@@ -111,6 +111,8 @@ func TestParseDismSize(t *testing.T) {
 		{"506.90 MB", dismBytes(506.90, 1<<20), true},
 		{"279.52 KB", dismBytes(279.52, 1<<10), true},
 		{"512 B", 512, true},
+		{"0 bytes", 0, true}, // DISM's spelling for a zero-size field
+		{"1 byte", 1, true},
 		{"1,024 MB", 1024 * (1 << 20), true},
 		{"4,88 GB", 0, false}, // comma decimal separator from a localized build
 		{"unknown", 0, false},
@@ -236,6 +238,19 @@ func TestRenderReclaimSection(t *testing.T) {
 // A report where only some labels are understood must not look like a clean
 // store: the decision fields drive "nothing to clean up", so a half-read
 // report counts as unreadable.
+// DISM writes zero-size fields as "0 bytes"; a report using it is complete.
+func TestParseComponentStoreAcceptsByteSpelling(t *testing.T) {
+	out := strings.Replace(dismAnalyzeSample, "    Cache and Temporary Data : 279.52 KB",
+		"    Cache and Temporary Data : 0 bytes", 1)
+	info := parseComponentStore(out)
+	if info.Unparsed {
+		t.Fatalf("a report with \"0 bytes\" was rejected, missing: %v", info.MissingFields)
+	}
+	if info.CacheBytes != 0 || info.OverheadBytes != info.BackupsBytes {
+		t.Errorf("cache = %d, overhead = %d; want 0 and the backups size", info.CacheBytes, info.OverheadBytes)
+	}
+}
+
 func TestParseComponentStorePartialReportIsUnreadable(t *testing.T) {
 	drop := map[string]string{
 		"no recommendation": "Component Store Cleanup Recommended : No",
@@ -253,6 +268,9 @@ func TestParseComponentStorePartialReportIsUnreadable(t *testing.T) {
 			}
 			if info.ActualBytes != 0 || info.OverheadBytes != 0 || info.ReclaimablePkgs != 0 || info.CleanupRecommended {
 				t.Errorf("a half-read report produced values: %+v", info)
+			}
+			if len(info.MissingFields) == 0 {
+				t.Error("the report does not name the label it could not read")
 			}
 		})
 	}

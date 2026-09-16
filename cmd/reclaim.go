@@ -47,17 +47,18 @@ type reclaimItem struct {
 // case every number is unknown, never "nothing to gain": a half-read report
 // must not look like a clean store.
 type componentStoreInfo struct {
-	Analyzed           bool   `json:"analyzed"`
-	Unparsed           bool   `json:"unparsed,omitempty"`
-	ActualBytes        int64  `json:"actual_bytes,omitempty"`
-	SharedBytes        int64  `json:"shared_with_windows_bytes,omitempty"`
-	BackupsBytes       int64  `json:"backups_and_disabled_features_bytes,omitempty"`
-	CacheBytes         int64  `json:"cache_and_temporary_data_bytes,omitempty"`
-	OverheadBytes      int64  `json:"overhead_bytes,omitempty"`
-	ReclaimablePkgs    int    `json:"reclaimable_packages"`
-	CleanupRecommended bool   `json:"cleanup_recommended"`
-	LastCleanup        string `json:"last_cleanup,omitempty"`
-	Error              string `json:"error,omitempty"`
+	Analyzed           bool     `json:"analyzed"`
+	Unparsed           bool     `json:"unparsed,omitempty"`
+	ActualBytes        int64    `json:"actual_bytes,omitempty"`
+	SharedBytes        int64    `json:"shared_with_windows_bytes,omitempty"`
+	BackupsBytes       int64    `json:"backups_and_disabled_features_bytes,omitempty"`
+	CacheBytes         int64    `json:"cache_and_temporary_data_bytes,omitempty"`
+	OverheadBytes      int64    `json:"overhead_bytes,omitempty"`
+	ReclaimablePkgs    int      `json:"reclaimable_packages"`
+	CleanupRecommended bool     `json:"cleanup_recommended"`
+	LastCleanup        string   `json:"last_cleanup,omitempty"`
+	MissingFields      []string `json:"missing_fields,omitempty"`
+	Error              string   `json:"error,omitempty"`
 }
 
 // systemDriveRoot returns the root of the drive Windows is installed on, for
@@ -305,7 +306,7 @@ func parseComponentStore(out string) componentStoreInfo {
 				seen[label] = true
 			}
 		case "Number of Reclaimable Packages":
-			if n, err := strconv.Atoi(value); err == nil && n >= 0 {
+			if n, err := strconv.Atoi(strings.ReplaceAll(value, ",", "")); err == nil && n >= 0 {
 				info.ReclaimablePkgs = n
 				seen[label] = true
 			}
@@ -319,6 +320,7 @@ func parseComponentStore(out string) componentStoreInfo {
 		}
 	}
 
+	var missing []string
 	for _, required := range []string{
 		"Actual Size of Component Store",
 		"Backups and Disabled Features",
@@ -327,9 +329,13 @@ func parseComponentStore(out string) componentStoreInfo {
 		"Component Store Cleanup Recommended",
 	} {
 		if !seen[required] {
-			// Report nothing rather than a number built from half a report.
-			return componentStoreInfo{Unparsed: true}
+			missing = append(missing, required)
 		}
+	}
+	if len(missing) > 0 {
+		// Report nothing rather than a number built from half a report, and
+		// name what could not be read so the cause is visible.
+		return componentStoreInfo{Unparsed: true, MissingFields: missing}
 	}
 
 	// Microsoft documents the overhead as backups plus cache; the rest of the
@@ -354,12 +360,16 @@ func parseDismSize(value string) (int64, bool) {
 	if err != nil || amount < 0 {
 		return 0, false
 	}
+	// DISM writes zero values as "0 bytes" and larger ones with the short
+	// unit names.
 	units := map[string]float64{
-		"B":  1,
-		"KB": 1 << 10,
-		"MB": 1 << 20,
-		"GB": 1 << 30,
-		"TB": 1 << 40,
+		"B":     1,
+		"BYTE":  1,
+		"BYTES": 1,
+		"KB":    1 << 10,
+		"MB":    1 << 20,
+		"GB":    1 << 30,
+		"TB":    1 << 40,
 	}
 	mult, ok := units[strings.ToUpper(fields[1])]
 	if !ok {
