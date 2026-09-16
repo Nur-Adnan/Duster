@@ -223,8 +223,11 @@ func runComponentStoreTask(isAdmin, dryRun bool) optTaskResult {
 		return optTaskResult{status: statusFailed, err: errors.New(info.Error)}
 	case info.Unparsed:
 		// Sizes stay unknown rather than zero, so this must not be reported
-		// as "nothing to reclaim".
-		return optTaskResult{status: statusFailed, err: errors.New("DISM ran but its component store report could not be read")}
+		// as "nothing to reclaim". Name the labels that could not be read:
+		// on a localized build, that is the whole diagnosis.
+		return optTaskResult{status: statusFailed, err: fmt.Errorf(
+			"DISM ran but its component store report could not be read (missing: %s)",
+			strings.Join(info.MissingFields, ", "))}
 	}
 
 	summary := fmt.Sprintf("%s of overhead, %d superseded package(s)",

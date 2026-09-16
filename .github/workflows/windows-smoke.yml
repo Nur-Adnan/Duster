@@ -280,6 +280,14 @@ jobs:
             Write-Host ('     reclaimable {0}: present={1} bytes={2} partial={3}' -f $item.id, $item.present, $item.bytes, $item.partial)
             if ($item.present -and $item.bytes -lt 0) { $script:failures += "$($item.id) reported a negative size" }
           }
+          # TEMPORARY diagnostic: print what DISM actually reports on this
+          # image, so a parse failure can be read without guessing. Remove
+          # once the parser is confirmed against a real runner.
+          Write-Host '--- dism /Online /English /Cleanup-Image /AnalyzeComponentStore ---'
+          & "$env:windir\System32\dism.exe" /Online /English /NoRestart /Cleanup-Image /AnalyzeComponentStore 2>&1 |
+            ForEach-Object { Write-Host "DISM| $_" }
+          Write-Host "--- dism exit=$LASTEXITCODE ---"
+
           # --deep previews the component store: this runs DISM's read-only
           # analysis on a real Windows image, which is the only way to check
           # that Duster can read its report.
