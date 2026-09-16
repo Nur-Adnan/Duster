@@ -74,6 +74,11 @@ Run everything from a normal (non-admin) terminal unless a step says elevated. E
 - [ ] `du purge --path <dir> --dry-run`: a `node_modules` with no `package.json` beside it is not listed; add a `package.json` and it is. `--safe` sends items to the Recycle Bin.
 - [ ] `du installer --dry-run`: lists only top-level Downloads files that are at least 7 days old and at least 50 MB. Files in subfolders are ignored.
 - [ ] Elevated `du optimize`: flushes DNS, reports the Delivery Optimization space it freed, then runs `defrag /O`.
+- [ ] `du optimize --json`: the `reclaimable` section lists `windows_old` and `hibernation`. On a PC with a recent feature update, `Windows.old` shows a size in the tens of GB; on a PC with hibernation on, the hibernation file shows a size. Duster must not delete either.
+- [ ] Elevated `du optimize --deep --dry-run`: the component store task prints the analysis (overhead size and superseded package count) and removes nothing.
+- [ ] Elevated `du optimize --deep` on a VM with pending cleanup: the task runs DISM, shows its elapsed time, and finishes. Afterwards `dism /Online /Cleanup-Image /AnalyzeComponentStore` reports a smaller overhead, and an installed update can still be uninstalled from Settings (Duster never passes `/ResetBase`).
+- [ ] While `du optimize --deep` runs DISM, press `q`: it asks to confirm, any other key keeps going, and a second `q` stops it and prints that the cleanup was stopped part-way.
+- [ ] Non-English Windows: `du optimize --deep --dry-run` either reports the analysis or fails with "its component store report could not be read". It must never report 0 bytes of overhead.
 - [ ] Landing screen: run `du`, open Startup, press `d`. It asks first; any other key cancels; `d` twice removes the entries.
 
 **Uninstall**

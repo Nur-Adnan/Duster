@@ -43,11 +43,13 @@ du analyze .   # Interactive disk explorer
 | `du purge` | Finds `node_modules`, `target`, `dist`, `.gradle`, `vendor` and purges them |
 | `du uninstall` | App uninstaller + leftover AppData sweeper |
 | `du installer` | Detects bulky old `.exe`/`.msi` installers in Downloads |
-| `du optimize` | Flushes DNS, clears the Delivery Optimization cache, optimizes drives (SSD TRIM, admin) |
+| `du optimize` | Flushes DNS, clears the Delivery Optimization cache, optimizes drives (SSD TRIM, admin); reports big reclaimable space; `--deep` cleans the component store (WinSxS) |
 | `du doctor` | System diagnostics (UAC, Defender, filesystem policies) |
 | `du benchmark` | Disk I/O throughput & memory profiling |
 | `du update` | Self-update with SHA-256 verification |
 | `du remove` | Uninstall Duster and delete all its config/logs |
+
+> `du optimize` also reports the space that only you can reclaim: a previous Windows installation (`Windows.old`) and the hibernation file. Duster measures them and tells you how to remove them, but never touches either.
 
 > Most commands support `--json` for scripting. `clean`, `purge`, `installer`, `optimize`, `uninstall` and `remove` support `--dry-run` for safe previews.
 
