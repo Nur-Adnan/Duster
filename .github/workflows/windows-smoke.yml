@@ -18,7 +18,7 @@ jobs:
   smoke:
     name: Windows Smoke Test
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 55
     defaults:
       run:
         shell: powershell
@@ -231,6 +231,87 @@ jobs:
           if ("$v" -notmatch [regex]::Escape($latest)) { throw "expected $latest after reinstalling" }
           $j = & "$dir\du.exe" update --json | Out-String | ConvertFrom-Json
           if ($j.status -ne 'UP_TO_DATE') { throw "update after reinstalling: $($j.status)" }
+          exit 0
+
+      # Neither WSL nor Docker Desktop is installed on the runner, so the only
+      # way to exercise compaction is against a real VHDX put where Docker
+      # Desktop keeps one. This is the only place diskpart's real output is
+      # parsed, and the only place the detach actually has to happen.
+      - name: Virtual disk compaction (real VHDX)
+        timeout-minutes: 15
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $du = (Resolve-Path .\du.exe).Path
+          $failures = @()
+
+          # A machine with no virtual disks reports an empty list and exits 0,
+          # and never compacts without --yes.
+          $out = & $du vdisk --json 2>&1 | Out-String
+          Write-Host "     exit=$LASTEXITCODE vdisk --json (nothing installed)"
+          if ($LASTEXITCODE -ne 0) { $failures += "vdisk --json exited $LASTEXITCODE" }
+          $preview = $out | ConvertFrom-Json
+          if (-not $preview.preview_only) { $failures += 'vdisk --json was not a preview' }
+
+          # Build a real expandable VHDX where Docker Desktop keeps its disk,
+          # fill it with incompressible data, then delete the contents so
+          # there is something for Windows to hand back.
+          $dir = Join-Path $env:LOCALAPPDATA 'Docker\wsl\disk'
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          $vhd = Join-Path $dir 'docker_data.vhdx'
+          $script = Join-Path $env:RUNNER_TEMP 'mkvhd.txt'
+          @(
+            "create vdisk file=`"$vhd`" maximum=2048 type=expandable"
+            "select vdisk file=`"$vhd`""
+            'attach vdisk'
+            'create partition primary'
+            'format fs=ntfs quick label=duster'
+            'assign letter=Q'
+            'exit'
+          ) | Set-Content -Encoding Ascii $script
+          diskpart /s $script | Out-Host
+
+          $blob = New-Object byte[] (64MB)
+          [Random]::new(42).NextBytes($blob)
+          for ($i = 0; $i -lt 8; $i++) { [IO.File]::WriteAllBytes("Q:\blob$i.bin", $blob) }
+          Remove-Item 'Q:\blob*.bin' -Force
+          @("select vdisk file=`"$vhd`"", 'detach vdisk', 'exit') | Set-Content -Encoding Ascii $script
+          diskpart /s $script | Out-Host
+
+          $before = (Get-Item $vhd).Length
+          Write-Host ('     vhdx before: {0:N0} bytes' -f $before)
+
+          # The real run. WSL is absent here, so this also proves a failed
+          # `wsl --shutdown` is a warning rather than a dead end.
+          $out = & $du vdisk --json --yes 2>&1 | Out-String
+          $code = $LASTEXITCODE
+          Write-Host $out
+          if ($code -ne 0) { $failures += "vdisk --json --yes exited $code" }
+          $j = $out | ConvertFrom-Json
+          if ($j.warning) { Write-Host "     warning: $($j.warning)" }
+          $r = $j.results | Where-Object { $_.path -eq $vhd }
+          if (-not $r) {
+            $failures += 'vdisk did not find the Docker disk'
+          } elseif ($r.status -ne 'compacted') {
+            $failures += "vdisk reported status=$($r.status) note=$($r.note)"
+          } else {
+            $after = (Get-Item $vhd).Length
+            Write-Host ('     vhdx after: {0:N0} bytes (diskpart freed {1:N0} by our count)' -f $after, $r.freed_bytes)
+            # Shrinking is Windows' job; growing would mean Duster compacted
+            # the wrong thing, or left the disk attached and written to.
+            if ($after -gt $before) { $failures += 'the disk grew during compaction' }
+            if ($after -eq $before) { Write-Host '     note: diskpart reclaimed nothing from this disk' }
+          }
+
+          # The disk must not be left attached: a disk still attached is a
+          # disk WSL can no longer start.
+          $detail = Join-Path $env:RUNNER_TEMP 'detail.txt'
+          @("select vdisk file=`"$vhd`"", 'detail vdisk', 'exit') | Set-Content -Encoding Ascii $detail
+          $state = diskpart /s $detail | Out-String
+          Write-Host $state
+          if ($state -match 'State\s*:\s*Attached') { $failures += 'the disk was left attached to Windows' }
+
+          Remove-Item -Force -Recurse (Join-Path $env:LOCALAPPDATA 'Docker') -ErrorAction SilentlyContinue
+          if ($failures) { $failures | ForEach-Object { Write-Host "FAILED: $_" }; exit 1 }
           exit 0
 
       # Wrong input must fail cleanly (non-zero exit, no crash), and the safety
