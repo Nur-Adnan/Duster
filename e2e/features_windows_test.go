@@ -43,6 +43,9 @@ func TestOptimizeDryRunSimulatesOnly(t *testing.T) {
 	tm := start(t, "optimize", "--dry-run")
 	tm.waitFor("DRY RUN MODE (SIMULATION)", 30*time.Second)
 	tm.waitFor("Press [Enter] to run the optimization workflow", 30*time.Second)
+	// The reported-only section is measured in the background, so the header
+	// is there from the first frame and the sizes arrive shortly after.
+	tm.waitFor("Reclaimable space", 30*time.Second)
 	tm.send(keyEnter)
 	tm.waitFor("Press [q] or [esc] to exit to CLI shell.", 2*time.Minute)
 	if !tm.onScreen("Skipped (Simulation)") {
