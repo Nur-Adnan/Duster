@@ -38,6 +38,51 @@ The operation completed successfully.
 // round the same way DISM's own two-decimal output does.
 func dismBytes(amount float64, unit int64) int64 { return int64(amount * float64(unit)) }
 
+// Captured from dism.exe 10.0.26100.5074 on a Windows runner. It differs from
+// the documented sample in two ways that broke the first parser: zero sizes
+// are written "0 bytes", and the value can carry extra spacing.
+const dismAnalyzeRunnerSample = `Deployment Image Servicing and Management tool
+Version: 10.0.26100.5074
+
+Image Version: 10.0.26100.33296
+
+[==========================100.0%==========================]
+
+Component Store (WinSxS) information:
+
+Windows Explorer Reported Size of Component Store : 6.33 GB
+
+Actual Size of Component Store : 6.23 GB
+
+    Shared with Windows : 3.53 GB
+    Backups and Disabled Features : 2.70 GB
+    Cache and Temporary Data :  0 bytes
+
+Date of Last Cleanup : 2026-09-08 00:07:13
+
+Number of Reclaimable Packages : 2
+Component Store Cleanup Recommended : Yes
+
+The operation completed successfully.
+`
+
+func TestParseComponentStoreRealRunnerReport(t *testing.T) {
+	info := parseComponentStore(dismAnalyzeRunnerSample)
+
+	if info.Unparsed {
+		t.Fatalf("a real DISM report was rejected, missing: %v", info.MissingFields)
+	}
+	if want := dismBytes(2.70, 1<<30); info.OverheadBytes != want {
+		t.Errorf("overhead = %d, want %d (backups 2.70 GB plus 0 bytes of cache)", info.OverheadBytes, want)
+	}
+	if info.CacheBytes != 0 {
+		t.Errorf("cache = %d, want 0", info.CacheBytes)
+	}
+	if info.ReclaimablePkgs != 2 || !info.CleanupRecommended {
+		t.Errorf("packages = %d, recommended = %v; want 2, true", info.ReclaimablePkgs, info.CleanupRecommended)
+	}
+}
+
 func TestParseComponentStore(t *testing.T) {
 	info := parseComponentStore(dismAnalyzeSample)
 
