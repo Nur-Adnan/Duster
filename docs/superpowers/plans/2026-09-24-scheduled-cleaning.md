@@ -2759,3 +2759,11 @@ git commit -m "docs(schedule): smoke steps, README, changelog, security notes"
 1. Whole-branch review (fresh reviewer on the full diff against `origin/main`).
 2. Push `feat/scheduled-clean` (it was rebased: `git push --force-with-lease`), open a PR to main, and push the same SHA to `smoke/scheduled-clean` to run the Windows smoke test. Both must be green.
 3. Update `CLAUDE.md` in the main checkout (gitignored, not committed): 14 commands, a `schedule` row in the command table, the policy as a safety invariant, the known gaps (battery/sleep/Terminal/multi-user are manual-only).
+
+## Spike findings (Task 1, 2026-09-24, runs 36016759906 and 36016962505)
+
+- `schtasks /Query /TN <name> /XML` writes **single-byte** XML (bytes `3C 3F 78 6D`) that still declares `encoding="UTF-16"`, and it **omits schema defaults**: `<Enabled>`, `<Priority>7</Priority>` and `<RunLevel>LeastPrivilege</RunLevel>` do not appear; element order differs from what was registered. Parse accordingly (`Settings.Enabled` nil means enabled; never require RunLevel on read).
+- A new standard (non-admin) user registered, queried and deleted its own `InteractiveToken`/`LeastPrivilege` task: exit codes 0/0/0.
+- The runner user's task ran from a quoted command path containing a space (`"C:\Program Files\PowerShell\7\pwsh.exe"`).
+- `schtasks /Query /FO CSV /NH` rows look like `"\Duster Spike (runner)","9/25/2026 3:00:00 AM","Ready"`.
+- `net user <name> <pw> /add` prompts Y/N (and fails non-interactively) for passwords over 14 characters.
