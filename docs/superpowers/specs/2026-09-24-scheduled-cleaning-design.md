@@ -1,8 +1,7 @@
 # Scheduled cleaning (`du schedule`) — design
 
 Status: approved; implemented on feat/scheduled-clean.
-Branch: `feat/scheduled-clean` (stacked on `feat/analyze-changes`, whose
-link-refusing directory helpers it reuses).
+Branch: `feat/scheduled-clean` (based on main).
 
 ## 1. Intent
 
@@ -251,9 +250,9 @@ gives it a console.
 | Portable zips (all three paths) | Ship `duw.exe` beside `du.exe` |
 | `installer/duster-setup.iss` | Install `duw.exe`; on uninstall run `{app}\du.exe schedule off --uninstall` (hidden, errors ignored) |
 | `scripts/install.ps1` | Copy `duw.exe` from the archive |
-| `du update` (`cmd/update.go`) | Also extract `duw.exe` from the already SHA-256-verified zip and replace it with the rename-then-write method of `swapBinary`, with rollback. This is how existing installs, whose zips never had `duw.exe`, receive it |
+| `du update` (`cmd/update.go`) | Also extract `duw.exe` from the already SHA-256-verified zip and replace it with the rename-then-write method of `swapBinary`, with rollback. The first update to this release is still performed by the OLD `du.exe`, which installs only `du.exe`; existing installs get `duw.exe` by running `du update --force` once after that, which runs the new updater |
 | `du remove` | Delete this user's task first; remove `duw.exe` with `du.exe` |
-| `du schedule on` without `duw.exe` | Refuse: "`duw.exe` is missing from `<dir>`: run `du update` or reinstall". Never fall back to `du.exe` |
+| `du schedule on` without `duw.exe` | Refuse: "`duw.exe` is missing from `<dir>`: run `du update --force` (or reinstall Duster)". Never fall back to `du.exe` |
 
 A task left behind after an uninstall points at a missing file; Task
 Scheduler logs a failed start. Untidy, never destructive, so cleanup is
