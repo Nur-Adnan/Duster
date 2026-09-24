@@ -87,7 +87,7 @@ func TestAnalyzeShowsWhatGrew(t *testing.T) {
 // With the Recycle Bin smaller than the file, Windows must ask before deleting
 // it permanently, and No must keep it.
 func TestRecycleBinTooSmallAsksFirst(t *testing.T) {
-	duBin(t)
+	bin := duBin(t)
 	root := t.TempDir()
 	big := filepath.Join(root, "oscar-big.bin")
 	mustWrite(t, big, 8<<20)
@@ -99,12 +99,20 @@ func TestRecycleBinTooSmallAsksFirst(t *testing.T) {
 	tm.waitFor("Send to Recycle Bin?", 5*time.Second)
 	tm.send("y")
 	t.Logf("Windows asked first (dialog %q); answered No", answer(t, tm.pid, "", idNo, 30*time.Second))
-	tm.waitFor("Error recycling", 10*time.Second)
-	if !exists(big) {
-		t.Fatal("answering No still deleted the file")
+	tm.waitFor("Kept in Duster's quarantine", 10*time.Second)
+	if exists(big) {
+		t.Fatal("answering No should have moved the file into Duster's quarantine")
 	}
 	tm.send("q")
 	tm.waitExit(10 * time.Second)
+
+	out, err := exec.Command(bin, "restore", "1").CombinedOutput() // nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
+	if err != nil {
+		t.Fatalf("restore 1: %v\n%s", err, out)
+	}
+	if !exists(big) {
+		t.Fatal("du restore 1 did not put the file back")
+	}
 }
 
 // `du clean --dry-run` promises to delete nothing: c (force a real clean) must
