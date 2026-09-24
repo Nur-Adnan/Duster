@@ -27,6 +27,7 @@ Run **Windows Smoke Test** (Actions tab > Run workflow, or push a `smoke/**` bra
 - in a real terminal (`e2e/`, a Windows pseudo console):
   - `status` renders with a Temp line (a value or N/A) and `q` quits; `status --json` has a plausible `CPUTempC` or none
   - `analyze`: Enter and Backspace, then `d` sends a file to the Recycle Bin
+  - `analyze`: after a first scan and a new file, `c` names the file and Enter then `d` targets it; `--json` reports `changes` (null on a first scan), `--no-history` saves nothing
   - the Recycle Bin size prompt: with the bin set to 1 MB, Windows asks before deleting a larger file, and No keeps it
   - `c` does nothing in a `clean --dry-run` screen, while `d` still runs the dry run
   - the landing Startup view: `d` asks, any other key cancels, `d` twice removes
@@ -57,6 +58,12 @@ Run everything from a normal (non-admin) terminal unless a step says elevated. E
 - [ ] `du analyze $env:USERPROFILE`:
   - Enter a folder and go back (Enter, then Backspace). The view is instant with no rescan.
   - `d` on a scratch file sends it to the Recycle Bin.
+- [ ] What changed since last time, on a real profile:
+  - Run `du analyze $env:USERPROFILE`, quit, download or copy a file of a few hundred MB into Downloads, and run it again. The `Change:` line shows the growth, `c` names the file, and Enter lands on it in Downloads.
+  - The same on a whole drive (`du analyze C:\`): the scan is no slower than with `--no-history`, and `%LOCALAPPDATA%\Duster\history` stays under a few MB.
+  - Run it once from an elevated terminal and once from a normal one: the second run warns that administrator rights differ.
+  - A USB stick: scan `E:\`, swap in a different stick that gets the same letter, scan again. Duster must say it is a different disk and compare nothing.
+  - `du remove` deletes the history folder along with the rest of `%LOCALAPPDATA%\Duster`.
 - [ ] Set the Recycle Bin's maximum size to 1 MB. Then `d` on a larger file: Windows asks before permanently deleting it. Restore the size afterwards.
 
 **Clean, purge, installer, optimize, vdisk**
