@@ -228,6 +228,7 @@ type analyzeModel struct {
 	largeFiles     []FileNode
 	confirmRecycle bool
 	errorMsg       string
+	notice         string
 	width, height  int
 	// Cached once at scan completion: counting walks the whole tree, and
 	// View runs on every keystroke, so recomputing there lagged large scans.
@@ -342,7 +343,7 @@ func (m analyzeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.errorMsg = fmt.Sprintf("Error recycling: %v", err)
 				} else {
 					if kept {
-						m.errorMsg = "Kept in Duster's quarantine (the Recycle Bin did not take it): du restore puts it back"
+						m.notice = "Kept in Duster's quarantine (the Recycle Bin did not take it): du restore puts it back"
 					} else {
 						m.errorMsg = ""
 					}
@@ -487,9 +488,11 @@ func (m analyzeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.showLargeFiles {
 				if len(m.largeFiles) > 0 {
 					m.confirmRecycle = true
+					m.notice = ""
 				}
 			} else if m.tree != nil && len(m.tree.Entries) > 0 {
 				m.confirmRecycle = true
+				m.notice = ""
 			}
 
 		case "L":
@@ -623,6 +626,9 @@ func (m analyzeModel) View() string {
 
 	if m.errorMsg != "" {
 		s.WriteString("  " + styleDanger.Render(" "+m.errorMsg+" ") + "\n\n")
+	}
+	if m.notice != "" {
+		s.WriteString("  " + styleSuccess.Render(" "+m.notice+" ") + "\n\n")
 	}
 
 	// Part 2: Path Analysis Summary (counts cached at scan completion)
