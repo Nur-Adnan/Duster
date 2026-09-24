@@ -160,6 +160,8 @@ jobs:
           $env:CGO_ENABLED = '0'
           go build -o dist\duster-windows-amd64.exe .
           if ($LASTEXITCODE) { throw 'go build failed' }
+          go build -ldflags "-H=windowsgui" -o dist\duw-windows-amd64.exe .\launcher\duw
+          if ($LASTEXITCODE) { throw 'go build (duw) failed' }
           & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' /Q installer\duster-setup.iss
           if ($LASTEXITCODE) { throw 'ISCC failed' }
           $setup = Get-ChildItem dist\installer\Duster-Setup-*.exe | Select-Object -First 1

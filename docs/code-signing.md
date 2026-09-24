@@ -10,6 +10,7 @@ Free code signing provided by [SignPath.io](https://about.signpath.io/), certifi
 
 **What is signed:** only files built by [release.yml](../.github/workflows/release.yml) on GitHub-hosted runners, from a pushed release tag:
 - `duster-windows-amd64.exe` and `duster-windows-arm64.exe`, which are also the `du.exe` inside the portable zips and the setup exe
+- `duw-windows-amd64.exe` and `duw-windows-arm64.exe`, the windowless launcher for scheduled cleans, which are also the `duw.exe` inside the portable zips and the setup exe
 - `Duster-Setup-<version>-x64.exe`
 
 Nothing built on a developer machine is signed.
@@ -58,12 +59,14 @@ Apply at [signpath.org](https://signpath.org/). Its [terms](https://signpath.org
 1. Add the predefined trusted build system **GitHub.com** to the organization, link it to the project, and install the SignPath GitHub App on the repository.
 2. Create two artifact configurations with these slugs; release.yml refers to them by name.
 
-   `binaries` signs both exes in one request:
+   `binaries` signs all four exes in one request. The SignPath project's `binaries` configuration must list `duw-windows-amd64.exe` and `duw-windows-arm64.exe` too, or the sign job's "Verify Signatures" step fails the release:
    ```xml
    <artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
      <zip-file>
        <pe-file path="duster-windows-amd64.exe"><authenticode-sign/></pe-file>
        <pe-file path="duster-windows-arm64.exe"><authenticode-sign/></pe-file>
+       <pe-file path="duw-windows-amd64.exe"><authenticode-sign/></pe-file>
+       <pe-file path="duw-windows-arm64.exe"><authenticode-sign/></pe-file>
      </zip-file>
    </artifact-configuration>
    ```
@@ -94,6 +97,6 @@ Only the token is secret: it can submit signing requests but not approve them.
 
 ### 4. Each release
 
-`release.yml` sends two signing requests: the two exes from the `sign` job, then the setup exe from the `installer` job. Approve each in SignPath within an hour; the job waits that long and then fails. After signing, the job checks with `Get-AuthenticodeSignature` that every file has a valid, timestamped signature, and fails the release if not. The zips, checksums and attestations are built from the signed files.
+`release.yml` sends two signing requests: the four exes from the `sign` job, then the setup exe from the `installer` job. Approve each in SignPath within an hour; the job waits that long and then fails. After signing, the job checks with `Get-AuthenticodeSignature` that every file has a valid, timestamped signature, and fails the release if not. The zips, checksums and attestations are built from the signed files.
 
 To stop signing, delete the `SIGNPATH_PROJECT_SLUG` variable.

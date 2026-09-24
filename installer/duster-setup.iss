@@ -99,6 +99,9 @@ Name: "addtopath"; Description: "Add Duster to system PATH (recommended)"; Group
 ; Main executable
 Source: "..\dist\duster-windows-amd64.exe"; DestDir: "{app}"; DestName: "{#MyAppExeName}"; Flags: ignoreversion
 
+; Windowless launcher for scheduled cleans (du schedule)
+Source: "..\dist\duw-windows-amd64.exe"; DestDir: "{app}"; DestName: "duw.exe"; Flags: ignoreversion
+
 ; Documentation
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
@@ -128,6 +131,11 @@ Root: HKA; Subkey: "Software\{#MyAppPublisher}\{#MyAppName}"; ValueType: string;
 [Run]
 ; Post-install: show help output to verify installation
 Filename: "{cmd}"; Parameters: "/K echo. & echo   Duster v{#MyAppVersion} installed successfully! & echo. & echo   Type 'du --help' to get started. & echo. & ""{app}\{#MyAppExeName}"" --version & echo. & pause"; Description: "Launch Duster CLI"; Flags: nowait postinstall skipifsilent shellexec
+
+[UninstallRun]
+; Delete the scheduled cleans that point at this install. Best-effort: a task
+; left behind only fails to start.
+Filename: "{app}\{#MyAppExeName}"; Parameters: "schedule off --uninstall"; Flags: runhidden waituntilterminated; RunOnceId: "RemoveScheduledClean"
 
 [UninstallDelete]
 ; Only Duster's own operation logs (operations.log and its rotated .old).
