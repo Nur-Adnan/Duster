@@ -638,11 +638,17 @@ func restoreItems(rs restoreSession, item int, dryRun bool) []restoreResult {
 		}
 		k := rs.Parts[p]
 		if allRestored(k.Manifest.Items) {
-			// Nothing kept is left in it. Every item is already back, so a
-			// leftover folder is only reported.
-			if err := removeSessionDir(k.Dir); err != nil {
-				out = append(out, restoreResult{Path: k.Dir, Status: "failed",
-					Reason: "the items are back, but the emptied quarantine folder could not be removed: " + err.Error()})
+			// Nothing kept is left in it. The record is written first, so a
+			// folder that then cannot be removed never lists the restored
+			// items as kept again. Every item is already back, so a leftover
+			// folder is only reported.
+			werr := writeManifest(k.Dir, &rs.Parts[p].Manifest)
+			if err := restoredSessionRemove(k.Dir); err != nil {
+				reason := "the items are back, but the emptied quarantine folder could not be removed: " + err.Error()
+				if werr != nil {
+					reason += "; its session record could not be updated either, so they may be listed again: " + werr.Error()
+				}
+				out = append(out, restoreResult{Path: k.Dir, Status: "failed", Reason: reason})
 			}
 		} else if err := writeManifest(k.Dir, &rs.Parts[p].Manifest); err != nil {
 			out = append(out, restoreResult{Path: k.Dir, Status: "failed",
@@ -651,6 +657,10 @@ func restoreItems(rs restoreSession, item int, dryRun bool) []restoreResult {
 	}
 	return out
 }
+
+// restoredSessionRemove is removeSessionDir for a fully restored session
+// folder, swappable by tests that need the removal to fail.
+var restoredSessionRemove = removeSessionDir
 
 func allRestored(items []quarantineItem) bool {
 	for _, it := range items {
