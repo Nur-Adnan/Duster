@@ -5,6 +5,8 @@ package cmd
 import (
 	"syscall"
 	"unsafe"
+
+	"golang.org/x/sys/windows"
 )
 
 var (
@@ -29,4 +31,23 @@ func getDiskFreeBytesOS(path string) int64 {
 		return int64(freeAvail)
 	}
 	return 0
+}
+
+// volumeSerial returns the serial number of the volume holding path, or 0 when
+// it cannot be read. It tells a USB stick from the one that had the same drive
+// letter last week.
+func volumeSerial(path string) uint32 {
+	p, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return 0
+	}
+	root := make([]uint16, windows.MAX_PATH+1)
+	if err := windows.GetVolumePathName(p, &root[0], uint32(len(root))); err != nil {
+		return 0
+	}
+	var serial uint32
+	if err := windows.GetVolumeInformation(&root[0], nil, 0, &serial, nil, nil, nil, 0); err != nil {
+		return 0
+	}
+	return serial
 }

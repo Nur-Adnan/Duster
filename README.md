@@ -39,7 +39,7 @@ du analyze .   # Interactive disk explorer
 | `du` | Interactive landing screen with system overview |
 | `du clean` | Scans & cleans 34 cache categories (temp, browsers, dev tools, GPU shaders) |
 | `du status` | Real-time CPU (usage, temperature), RAM, disk, network, battery dashboard (1s refresh) |
-| `du analyze [path]` | Drill-down disk usage explorer with delete & open actions |
+| `du analyze [path]` | Drill-down disk usage explorer with delete & open actions; shows what grew since the last scan of the same folder |
 | `du purge` | Finds `node_modules`, `target`, `dist`, `.gradle`, `vendor` and purges them |
 | `du uninstall` | App uninstaller + leftover AppData sweeper |
 | `du installer` | Detects bulky old `.exe`/`.msi` installers in Downloads |
@@ -49,6 +49,8 @@ du analyze .   # Interactive disk explorer
 | `du benchmark` | Disk I/O throughput & memory profiling |
 | `du update` | Self-update with SHA-256 verification |
 | `du remove` | Uninstall Duster and delete all its config/logs |
+
+> `du analyze` answers "where did my space go?". Each scan keeps a small snapshot of the folder's largest items, and the next scan of the same folder says what changed: `Change: +6.9 GB since Sep 7 (17 days ago)`. Press `c` for the explanation, for example `Downloads\ubuntu.iso +5.7 GB new` or `Videos\old -900 MB gone`, and Enter to jump straight to the item. It names the most specific folders or files behind the change rather than every parent folder. `--since 7d` compares with an older scan, `--no-history` turns it off, and `--json` includes it as `changes`. Snapshots stay on this PC in `%LOCALAPPDATA%\Duster\history`: they hold the names and sizes of the biggest folders and files, never their contents, and `du remove` deletes them.
 
 > `du vdisk` is for developer machines: a WSL 2 distribution and Docker Desktop each keep a virtual disk that grows as you work and never shrinks when you delete, which routinely costs 20 to 100 GB. It finds those disks, shows what they hold, and compacts them in place. Nothing inside a disk is read, changed or deleted, but compacting stops every running distribution and container first, so it asks before it starts.
 
