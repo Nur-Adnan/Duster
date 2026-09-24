@@ -2,10 +2,13 @@ package cmd
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/Nur-Adnan/duster/internal/logging"
 )
 
 func TestPurgeOneKeepsByDefault(t *testing.T) {
@@ -92,5 +95,32 @@ func TestPurgeTallyKeptIsNotFreed(t *testing.T) {
 	got = strings.ToLower(strings.Join(keptOnly.lines(), "\n"))
 	if strings.Contains(got, "reclaimed") || strings.HasPrefix(got, "freed") {
 		t.Errorf("kept bytes reported as freed:\n%s", got)
+	}
+}
+
+// A scan of %LOCALAPPDATA% or of a drive's .duster-quarantine must never offer
+// kept items: purge --permanent would delete the undo window for good.
+func TestScanArtifactsSkipsQuarantines(t *testing.T) {
+	work := tempQuarantine(t)
+	proj := filepath.Join(work, "proj")
+	writeTree(t, filepath.Join(proj, "node_modules"))
+	os.WriteFile(filepath.Join(proj, "package.json"), []byte("{}"), 0o644)
+	if err := quarantinePath(newQuarantineSession("purge"), proj, 5); err != nil {
+		t.Fatal(err)
+	}
+	// A kept project (with its marker) under a drive's quarantine folder too.
+	other := filepath.Join(work, "D", quarantineDirName, "S-1-5-21", "1-purge", "1", "app")
+	writeTree(t, filepath.Join(other, "node_modules"))
+	os.WriteFile(filepath.Join(other, "package.json"), []byte("{}"), 0o644)
+
+	for _, root := range []string{os.Getenv("LOCALAPPDATA"), logging.Dir(), filepath.Join(logging.Dir(), "quarantine"),
+		filepath.Join(work, "D"), filepath.Join(work, "D", quarantineDirName)} {
+		list, err := scanArtifacts(root, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(list) != 0 {
+			t.Errorf("scanArtifacts(%s) offered kept items: %+v", root, list)
+		}
 	}
 }
