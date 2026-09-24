@@ -117,6 +117,7 @@ type removeModel struct {
 	err        error
 	width      int
 	height     int
+	heldBytes  int64
 }
 
 type rmUninstallCompleteMsg struct {
@@ -131,6 +132,7 @@ func initialRemoveModel(currentExe string) removeModel {
 		state:      stateRmIdle,
 		currentExe: currentExe,
 		logDir:     logging.Dir(),
+		heldBytes:  quarantineHeld(),
 	}
 }
 
@@ -235,7 +237,11 @@ func (m removeModel) View() string {
 		boxLayout.WriteString("  This action will permanently delete:\n")
 		boxLayout.WriteString(fmt.Sprintf("    • Running binary executable: %s\n", rmWhiteText(m.currentExe)))
 		boxLayout.WriteString(fmt.Sprintf("    • Local configuration files: %s\n", rmWhiteText(m.logDir)))
-		boxLayout.WriteString("    • Operational logs and transaction history\n\n")
+		boxLayout.WriteString("    • Operational logs and transaction history\n")
+		if m.heldBytes > 0 {
+			boxLayout.WriteString(fmt.Sprintf("    • Also deletes %s kept by Duster for undo (du restore).\n", formatBytes(m.heldBytes)))
+		}
+		boxLayout.WriteString("\n")
 		if rmDryRun {
 			boxLayout.WriteString(rmSuccessStyle.Render("  [DRY-RUN SIMULATION ACTIVE] — No bytes will actually be deleted.") + "\n\n")
 		}
@@ -404,12 +410,14 @@ func runHeadlessRemove(currentExe string) {
 		Status              string `json:"status"`
 		DryRun              bool   `json:"dry_run"`
 		Timestamp           string `json:"timestamp"`
+		QuarantineHeld      int64  `json:"quarantine_held,omitempty"`
 	}{
 		ExecutablePath:      currentExe,
 		ConfigurationFolder: logDir,
 		Status:              statusStr,
 		DryRun:              rmDryRun,
 		Timestamp:           time.Now().UTC().Format(time.RFC3339),
+		QuarantineHeld:      held,
 	}
 
 	data, jsonErr := json.MarshalIndent(payload, "", "  ")

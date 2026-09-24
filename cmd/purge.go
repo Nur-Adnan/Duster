@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/Nur-Adnan/duster/internal/logging"
 	"github.com/Nur-Adnan/duster/lib/fs"
@@ -83,11 +84,12 @@ func isLikelyBuildArtifact(name, path string) bool {
 
 // Purge command flags
 var (
-	purgePath   string
-	purgeDryRun bool
-	purgeSafe   bool
-	purgeJSON   bool
-	purgeYes    bool
+	purgePath      string
+	purgeDryRun    bool
+	purgeSafe      bool
+	purgeJSON      bool
+	purgeYes       bool
+	purgePermanent bool
 )
 
 // Premium Lipgloss Styles (Zero-Allocation, prefixed to avoid package conflicts)
@@ -136,10 +138,16 @@ func init() {
 	PurgeCmd.Flags().BoolVarP(&purgeDryRun, "dry-run", "d", false, "Simulate scanning and deletion without modifying filesystem")
 	PurgeCmd.Flags().BoolVarP(&purgeSafe, "safe", "s", false, "Move target folders to Windows Recycle Bin instead of deleting permanently")
 	PurgeCmd.Flags().BoolVar(&purgeJSON, "json", false, "Output discovered developer build artifacts as a structured JSON snapshot and exit immediately")
-	PurgeCmd.Flags().BoolVarP(&purgeYes, "yes", "y", false, "Skip interactive prompts and permanently delete all detected build artifacts")
+	PurgeCmd.Flags().BoolVarP(&purgeYes, "yes", "y", false, "Skip interactive prompts and remove all detected build artifacts (restorable for 7 days unless --permanent)")
+	PurgeCmd.Flags().BoolVar(&purgePermanent, "permanent", false, "Delete permanently instead of keeping items restorable for 7 days")
 }
 
 func executePurge(cmd *cobra.Command, args []string) {
+	if purgePermanent && purgeSafe {
+		fmt.Fprintln(os.Stderr, "Error: --permanent and --safe cannot be combined.")
+		os.Exit(1)
+	}
+
 	// Resolve path safely
 	resolvedPath := fs.ResolveEnvPath(purgePath)
 	absPath, err := filepath.Abs(resolvedPath)
@@ -223,6 +231,7 @@ type purgeModel struct {
 	purgedCount  int
 	purgedBytes  int64
 	purgeFailed  int
+	purgeKept    int
 	width        int
 	height       int
 	scanChan     chan scanProgressMsg
@@ -250,6 +259,7 @@ type purgeProgressMsg struct {
 type purgeCompleteMsg struct {
 	reclaimed int64
 	count     int
+	kept      int
 }
 
 func initialPurgeModel(root string) purgeModel {
@@ -292,10 +302,17 @@ func listenToPurgeProgress(ch chan purgeProgressMsg) tea.Cmd {
 	}
 }
 
-func runPurgeCmd(artifacts []DiscoveredArtifact, ch chan purgeProgressMsg, safe, dry bool) tea.Cmd {
+func runPurgeCmd(artifacts []DiscoveredArtifact, ch chan purgeProgressMsg, safe, permanent, dry bool) tea.Cmd {
 	return func() tea.Msg {
 		var reclaimed int64
+		var kept int
 		count := 0
+
+		var s *quarantineSession
+		if !dry {
+			s = newQuarantineSession("purge")
+			sweepQuarantine(time.Now())
+		}
 
 		for _, a := range artifacts {
 			if !a.Selected {
@@ -305,10 +322,10 @@ func runPurgeCmd(artifacts []DiscoveredArtifact, ch chan purgeProgressMsg, safe,
 			count++
 			var err error
 			if !dry {
-				if safe {
-					err = purgeRecyclePath(a.Path, a.Size)
-				} else {
-					err = purgePermanentPath(a.Path, a.Size)
+				var q bool
+				q, err = purgeOne(s, a.Path, a.Size, safe, permanent)
+				if q {
+					kept++
 				}
 			}
 
@@ -328,6 +345,7 @@ func runPurgeCmd(artifacts []DiscoveredArtifact, ch chan purgeProgressMsg, safe,
 		return purgeCompleteMsg{
 			reclaimed: reclaimed,
 			count:     count,
+			kept:      kept,
 		}
 	}
 }
@@ -410,7 +428,7 @@ func (m purgeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else if m.state == stateConfirming {
 				m.state = statePurging
 				return m, tea.Batch(
-					runPurgeCmd(m.artifacts, m.purgeChan, purgeSafe, purgeDryRun),
+					runPurgeCmd(m.artifacts, m.purgeChan, purgeSafe, purgePermanent, purgeDryRun),
 					listenToPurgeProgress(m.purgeChan),
 				)
 			}
@@ -451,6 +469,7 @@ func (m purgeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state = stateFinished
 		m.purgedCount = msg.count
 		m.purgedBytes = msg.reclaimed
+		m.purgeKept = msg.kept
 		return m, nil
 	}
 
@@ -486,8 +505,10 @@ func (m purgeModel) View() string {
 		doc.WriteString("  |  " + purgeFailStyle.Render("DRY RUN MODE (SIMULATION)"))
 	} else if purgeSafe {
 		doc.WriteString("  |  " + purgeSuccessStyle.Render("SAFE MODE (RECYCLE BIN)"))
-	} else {
+	} else if purgePermanent {
 		doc.WriteString("  |  " + purgeFailStyle.Render("PERMANENT CLEAN MODE"))
+	} else {
+		doc.WriteString("  |  " + purgeSuccessStyle.Render("QUARANTINE MODE (7-DAY UNDO)"))
 	}
 	doc.WriteString("\n")
 	doc.WriteString(purgeDividerStyle.Render("  ═══════════════════════════════════════════════════════════════════════") + "\n\n")
@@ -569,10 +590,12 @@ func (m purgeModel) View() string {
 		} else if purgeSafe {
 			boxContent.WriteString(fmt.Sprintf("  You are about to move %d selected folders to the Recycle Bin.\n", countSelected(m.artifacts)))
 			boxContent.WriteString(fmt.Sprintf("  Reclaimable space: %s\n\n", formatBytes(m.selectedSize)))
-		} else {
+		} else if purgePermanent {
 			boxContent.WriteString(fmt.Sprintf("  "+purgeFailStyle.Render("WARNING:")+" This operation will permanently delete %d selected cache directories!\n", countSelected(m.artifacts)))
 			boxContent.WriteString(fmt.Sprintf("  Total space to destroy: %s\n", formatBytes(m.selectedSize)))
 			boxContent.WriteString("  This action is native, fast, and cannot be undone!\n\n")
+		} else {
+			boxContent.WriteString(fmt.Sprintf("  This moves %d selected folders to Duster's quarantine (restorable for 7 days with du restore).\n\n", countSelected(m.artifacts)))
 		}
 		boxContent.WriteString("  Are you absolutely sure you want to proceed? [y to Purge / n to Cancel]")
 
@@ -599,6 +622,9 @@ func (m purgeModel) View() string {
 		} else {
 			boxContent.WriteString(fmt.Sprintf("  Cleaned %d of %d selected artifact folders.\n", m.purgedCount-m.purgeFailed, m.purgedCount))
 			boxContent.WriteString(fmt.Sprintf("  Total active disk space reclaimed: %s\n\n", purgeSuccessStyle.Render(formatBytes(m.purgedBytes))))
+			if m.purgeKept > 0 {
+				boxContent.WriteString("  Kept for 7 days: du restore lists it, du restore 1 puts it back.\n\n")
+			}
 			if m.purgeFailed > 0 {
 				boxContent.WriteString(purgeFailStyle.Render(fmt.Sprintf("  %d folder(s) could not be removed.", m.purgeFailed)))
 				if m.purgeErr != nil {
@@ -656,17 +682,35 @@ func purgePermanentPath(path string, size int64) error {
 	return err
 }
 
-// Shell-independent Recycle Bin removal using hardened native WinAPI
-func purgeRecyclePath(path string, size int64) error {
+// purgeOne removes one selected artifact per the requested mode:
+//   - permanent: purgePermanentPath deletes it for good (it logs "delete").
+//   - safe: recycleOrQuarantine sends it to the Recycle Bin, falling back to
+//     the quarantine when the bin won't take it.
+//   - default: quarantinePath keeps it restorable for quarantineKeep.
+//
+// It reports whether the item ended up in the quarantine (so the caller can
+// tell the user how many items are restorable) and logs the outcome exactly
+// once.
+func purgeOne(s *quarantineSession, path string, size int64, safe, permanent bool) (quarantined bool, err error) {
 	if !fs.IsValidPath(path) {
-		logPurgeOperation("recycle", path, size, false)
-		return fmt.Errorf("deleting system protected paths is blocked for safety")
+		return false, fmt.Errorf("deleting system protected paths is blocked for safety")
 	}
-
-	err := recyclePathNative(path)
-	success := err == nil
-	logPurgeOperation("recycle", path, size, success)
-	return err
+	switch {
+	case permanent:
+		return false, purgePermanentPath(path, size)
+	case safe:
+		q, err := recycleOrQuarantine(s, path, size)
+		action := "recycle"
+		if q {
+			action = "quarantine"
+		}
+		logPurgeOperation(action, path, size, err == nil)
+		return q, err
+	default:
+		err := quarantinePath(s, path, size)
+		logPurgeOperation("quarantine", path, size, err == nil)
+		return err == nil, err
+	}
 }
 
 // logPurgeOperation delegates to the shared structured logging system,
@@ -676,6 +720,11 @@ func logPurgeOperation(action, target string, size int64, success bool) {
 }
 
 // Headless non-interactive execution supporting pipes/snapshots
+// runHeadlessPurge previews the scan as JSON. When called with --yes it also
+// performs the purge first (one quarantine session, swept before deleting,
+// purgeOne per artifact) and reports how many items were kept restorable;
+// without --yes (a bare --json, or JSON emitted because output is piped) it
+// only ever previews and never deletes.
 func runHeadlessPurge(target string) {
 	list, err := scanArtifacts(target, nil)
 	if err != nil {
@@ -688,6 +737,8 @@ func runHeadlessPurge(target string) {
 		TotalFound     int                  `json:"total_found"`
 		TotalSizeBytes int64                `json:"total_size_bytes"`
 		Artifacts      []DiscoveredArtifact `json:"artifacts"`
+		Kept           int                  `json:"kept,omitempty"`
+		Undo           string               `json:"undo,omitempty"`
 	}
 
 	var totalSize int64
@@ -695,11 +746,26 @@ func runHeadlessPurge(target string) {
 		totalSize += a.Size
 	}
 
+	var kept int
+	if purgeYes && !purgeDryRun && len(list) > 0 {
+		s := newQuarantineSession("purge")
+		sweepQuarantine(time.Now())
+		for _, a := range list {
+			if q, perr := purgeOne(s, a.Path, a.Size, purgeSafe, purgePermanent); perr == nil && q {
+				kept++
+			}
+		}
+	}
+
 	out := JSONPurgeOutput{
 		ScannedPath:    target,
 		TotalFound:     len(list),
 		TotalSizeBytes: totalSize,
 		Artifacts:      list,
+		Kept:           kept,
+	}
+	if kept > 0 {
+		out.Undo = "du restore 1"
 	}
 
 	data, err := json.MarshalIndent(out, "", "  ")
@@ -778,17 +844,24 @@ func runNonInteractivePurge(target string) {
 	}
 
 	var reclaimed int64
+	var kept int
 	cleaned := 0
 	fmt.Printf("Discovered %d developer artifacts under %s. Starting purge...\n\n", len(list), target)
+
+	var s *quarantineSession
+	if !purgeDryRun {
+		s = newQuarantineSession("purge")
+		sweepQuarantine(time.Now())
+	}
 
 	for _, a := range list {
 		fmt.Printf("  Purging %s (%s)... ", a.Path, formatBytes(a.Size))
 		var errDelete error
 		if !purgeDryRun {
-			if purgeSafe {
-				errDelete = purgeRecyclePath(a.Path, a.Size)
-			} else {
-				errDelete = purgePermanentPath(a.Path, a.Size)
+			var q bool
+			q, errDelete = purgeOne(s, a.Path, a.Size, purgeSafe, purgePermanent)
+			if q {
+				kept++
 			}
 		}
 
@@ -811,6 +884,9 @@ func runNonInteractivePurge(target string) {
 	} else {
 		fmt.Printf("\n✓ Purged %d / %d directories.\n", cleaned, len(list))
 		fmt.Printf("Total active disk space reclaimed: %s\n", formatBytes(reclaimed))
+		if kept > 0 {
+			fmt.Println("Kept for 7 days: du restore lists it, du restore 1 puts it back.")
+		}
 	}
 }
 

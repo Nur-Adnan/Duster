@@ -43,6 +43,12 @@ type quarantineManifest struct {
 	Command string           `json:"command"`
 	Created time.Time        `json:"created"`
 	Items   []quarantineItem `json:"items"`
+
+	// nextSlot is the live session's monotonic slot counter (in-memory only:
+	// unexported, so encoding/json never sees it). It only ever grows, so a
+	// slot number is never reused, even after quarantinePath gives up on a
+	// move that later turns out to have landed anyway.
+	nextSlot int
 }
 
 // quarantineSession is one command run. Its folder on a volume is created the
@@ -119,25 +125,50 @@ func quarantinePath(s *quarantineSession, path string, size int64) error {
 		m = &quarantineManifest{ID: s.id, Command: s.command, Created: s.created}
 		s.dirs[dir] = m
 	}
-	slot := len(m.Items) + 1
+	m.nextSlot++
+	slot := m.nextSlot
 	isDir := info.IsDir() && info.Mode()&(os.ModeSymlink|os.ModeIrregular) == 0
 	m.Items = append(m.Items, quarantineItem{Slot: slot, Path: path, Size: size, Dir: isDir, State: "pending", At: time.Now()})
-	undo := func() { m.Items = m.Items[:len(m.Items)-1]; _ = writeManifest(dir, m) }
-	if err := writeManifest(dir, m); err != nil {
+
+	// cleanup drops the item just appended (it never became "kept"; its slot
+	// number is retired, never reused, by design). When that was the only
+	// item this session had kept on this volume, the folder is removed too
+	// and forgotten, so a session that never actually kept anything never
+	// lingers as an empty, unsweepable folder.
+	cleanup := func() {
 		m.Items = m.Items[:len(m.Items)-1]
+		if len(m.Items) == 0 {
+			_ = removeAllSafe(dir)
+			delete(s.dirs, dir)
+			return
+		}
+		_ = writeManifest(dir, m)
+	}
+
+	if err := writeManifest(dir, m); err != nil {
+		cleanup()
 		return err
 	}
 	slotDir := filepath.Join(dir, strconv.Itoa(slot))
 	if err := os.Mkdir(slotDir, 0o700); err != nil {
-		undo()
+		cleanup()
 		return err
 	}
-	if err := moveNoReplace(path, filepath.Join(slotDir, filepath.Base(path))); err != nil {
+	dest := filepath.Join(slotDir, filepath.Base(path))
+	if err := moveNoReplace(path, dest); err != nil {
+		if _, statErr := os.Lstat(dest); statErr == nil {
+			// The move actually landed despite the reported error (seen on
+			// network shares and behind AV filters that lag the metadata
+			// update). Leave the item pending rather than undo it: load
+			// treats a pending item whose slot is filled as kept.
+			s.kept++
+			return nil
+		}
 		os.Remove(slotDir)
-		undo()
+		cleanup()
 		return fmt.Errorf("could not move %s into Duster's quarantine, so it was left in place: %w", path, err)
 	}
-	m.Items[slot-1].State = "kept"
+	m.Items[len(m.Items)-1].State = "kept"
 	_ = writeManifest(dir, m) // on failure the item stays pending with its slot filled: load treats that as kept
 	s.kept++
 	return nil
@@ -152,7 +183,7 @@ func recycleOrQuarantine(s *quarantineSession, path string, size int64) (bool, e
 		return false, nil
 	}
 	if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
-		return false, nil // Windows deleted it (the user answered Yes to its prompt)
+		return false, nil // gone despite the error: the bin took it after all (its own dialog, or a lagging report), not something we did
 	}
 	if qerr := quarantinePath(s, path, size); qerr != nil {
 		return false, fmt.Errorf("%v; keeping it in Duster's quarantine also failed: %v", rerr, qerr)
@@ -170,6 +201,9 @@ func writeManifest(dir string, m *quarantineManifest) error {
 		return err
 	}
 	_, werr := tmp.Write(b)
+	if werr == nil {
+		werr = tmp.Sync()
+	}
 	if err := errors.Join(werr, tmp.Close()); err != nil {
 		os.Remove(tmp.Name())
 		return err

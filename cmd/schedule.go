@@ -220,6 +220,9 @@ var scheduleRunCmd = &cobra.Command{
 	Hidden:             true,
 	DisableFlagParsing: true,
 	Run: func(_ *cobra.Command, args []string) {
+		for _, err := range sweepQuarantine(time.Now()) {
+			fmt.Println("quarantine sweep:", err)
+		}
 		os.Exit(runScheduledClean(args, logging.Dir(), os.Stdout))
 	},
 }
