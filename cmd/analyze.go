@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/Nur-Adnan/duster/internal/logging"
 	"github.com/Nur-Adnan/duster/lib/fs"
@@ -18,6 +19,12 @@ import (
 
 var analyzeJSON bool
 
+var (
+	analyzeNoHistory bool
+	analyzeSinceFlag string
+	analyzeSince     time.Duration
+)
+
 var AnalyzeCmd = &cobra.Command{
 	Use:   "analyze [path]",
 	Short: "Interactive TUI disk space explorer and visual analyzer",
@@ -26,19 +33,34 @@ var AnalyzeCmd = &cobra.Command{
   - Interactive drill-down navigation
   - Quick launch native Windows Explorer
   - Safe Recycle Bin integration
-  - Global top 10 largest files viewer`,
+  - Global top 10 largest files viewer
+  - What changed since the last scan of the same folder ([c] in the explorer,
+    "changes" in --json): each scan keeps a small size snapshot under
+    %LOCALAPPDATA%\Duster\history. Turn it off with --no-history.`,
 	Args: cobra.MaximumNArgs(1),
 	Run:  executeAnalyze,
 }
 
 func init() {
 	AnalyzeCmd.Flags().BoolVar(&analyzeJSON, "json", false, "Output folder analysis metrics as a single JSON snapshot and exit immediately")
+	AnalyzeCmd.Flags().BoolVar(&analyzeNoHistory, "no-history", false, "Neither compare with nor save a size snapshot of this folder")
+	AnalyzeCmd.Flags().StringVar(&analyzeSinceFlag, "since", "", "Compare with the newest scan at least this old (e.g. 24h, 7d, 2w) instead of the previous one")
+	AnalyzeCmd.MarkFlagsMutuallyExclusive("since", "no-history")
 }
 
 func executeAnalyze(cmd *cobra.Command, args []string) {
 	targetPath := "."
 	if len(args) > 0 {
 		targetPath = args[0]
+	}
+
+	if analyzeSinceFlag != "" {
+		d, err := parseSinceDuration(analyzeSinceFlag)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		analyzeSince = d
 	}
 
 	// Resolve environmental paths safely
@@ -90,6 +112,9 @@ type AnalyzeJSONOutput struct {
 	FilesCount    int             `json:"files_count"`
 	Entries       []EntryJSONInfo `json:"entries"`
 	TopLargeFiles []FileNode      `json:"top_large_files"`
+	// Changes is null on the first scan of a folder, and with --no-history.
+	Changes      *changeReport `json:"changes"`
+	HistoryNotes []string      `json:"history_notes,omitempty"`
 }
 
 type EntryJSONInfo struct {
@@ -147,6 +172,14 @@ func runHeadlessAnalyze(target string) {
 		Entries:       jsonEntries,
 		TopLargeFiles: large,
 	}
+	if !analyzeNoHistory {
+		baseline, notes := recordScanHistory(root, analyzeSince, time.Now())
+		if baseline != nil {
+			report := explainChanges(baseline, root)
+			output.Changes = &report
+		}
+		output.HistoryNotes = notes
+	}
 
 	data, err := json.MarshalIndent(output, "", "  ")
 	if err != nil {
@@ -200,6 +233,18 @@ type analyzeModel struct {
 	// View runs on every keystroke, so recomputing there lagged large scans.
 	fileCount   int
 	folderCount int
+
+	// What changed since the last scan. root is the first complete scan of
+	// targetPath: jumps resolve against it. historyDone guards the single
+	// snapshot a session saves; historyReady is set once the comparison has
+	// loaded (or was skipped), so no half-state is ever drawn.
+	root         *FolderNode
+	baseline     *sizeSnapshot
+	historyNotes []string
+	historyDone  bool
+	historyReady bool
+	showChanges  bool
+	changes      changeReport
 }
 
 type scanProgressInfo struct {
@@ -219,6 +264,21 @@ func initialAnalyzeModel(path string) analyzeModel {
 
 // Bubble Tea Message Channels
 type analyzeScanProgressMsg scanProgressInfo
+
+type analyzeHistoryMsg struct {
+	baseline *sizeSnapshot
+	notes    []string
+}
+
+// analyzeHistoryCmd loads the comparison and saves this scan off the UI
+// thread: both touch the disk.
+func analyzeHistoryCmd(root *FolderNode) tea.Cmd {
+	return func() tea.Msg {
+		baseline, notes := recordScanHistory(root, analyzeSince, time.Now())
+		return analyzeHistoryMsg{baseline: baseline, notes: notes}
+	}
+}
+
 type analyzeScanCompleteMsg struct {
 	Root       *FolderNode
 	LargeFiles []FileNode
@@ -318,22 +378,19 @@ func (m analyzeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "down", "j":
-			limit := 0
-			if m.showLargeFiles {
-				// The Largest Files panel renders at most 5 rows; navigating
-				// past them would act on items the user cannot see.
-				limit = len(m.largeFiles)
-				if limit > 5 {
-					limit = 5
-				}
-			} else if m.tree != nil {
-				limit = len(m.tree.Entries)
-			}
-			if m.selectedIdx < limit-1 {
+			if m.selectedIdx < m.listLen()-1 {
 				m.selectedIdx++
 			}
 
+		case "c", "C":
+			m.showChanges = !m.showChanges
+			m.showLargeFiles = false
+			m.selectedIdx = 0
+
 		case "enter", "l", "right":
+			if m.showChanges {
+				return m.jumpToChange()
+			}
 			if m.showLargeFiles || m.tree == nil {
 				return m, nil
 			}
@@ -362,6 +419,11 @@ func (m analyzeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "backspace", "h", "left", "b", "B":
+			if m.showChanges {
+				m.showChanges = false
+				m.selectedIdx = 0
+				return m, nil
+			}
 			if m.showLargeFiles {
 				m.showLargeFiles = false
 				m.selectedIdx = 0
@@ -390,7 +452,11 @@ func (m analyzeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "o", "O":
 			var path string
-			if m.showLargeFiles {
+			if m.showChanges {
+				if m.selectedIdx < len(m.changes.Entries) {
+					path = nearestExisting(m.changes.Entries[m.selectedIdx].Path, m.targetPath)
+				}
+			} else if m.showLargeFiles {
 				if len(m.largeFiles) > 0 {
 					path = m.largeFiles[m.selectedIdx].Path
 				}
@@ -402,6 +468,11 @@ func (m analyzeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "d", "D":
+			// The changes list can name things that no longer exist, so it
+			// never deletes: Enter jumps to the item, and d works there.
+			if m.showChanges {
+				return m, nil
+			}
 			if m.showLargeFiles {
 				if len(m.largeFiles) > 0 {
 					m.confirmRecycle = true
@@ -412,6 +483,7 @@ func (m analyzeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "L":
 			m.showLargeFiles = !m.showLargeFiles
+			m.showChanges = false
 			m.selectedIdx = 0
 		}
 
@@ -432,6 +504,7 @@ func (m analyzeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case analyzeScanCompleteMsg:
 		m.scanning = false
+		var cmd tea.Cmd
 		if msg.Err != nil {
 			m.errorMsg = fmt.Sprintf("Scan failed: %v", msg.Err)
 		} else {
@@ -439,16 +512,33 @@ func (m analyzeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.largeFiles = msg.LargeFiles
 			m.errorMsg = ""
 			m.fileCount, m.folderCount = countFilesAndFolders(m.tree)
+			// One snapshot per session, of the folder that was asked for:
+			// rescans after a recycle or of a subfolder are not "a scan of
+			// this folder" in the history's sense.
+			if !m.historyDone && normalizeRoot(msg.Root.Path) == normalizeRoot(m.targetPath) {
+				m.historyDone = true
+				m.root = msg.Root
+				if analyzeNoHistory {
+					m.historyReady = true
+				} else {
+					cmd = analyzeHistoryCmd(msg.Root)
+				}
+			}
+			m.refreshChanges()
 		}
 		// The new tree may be smaller than the cursor position from the old
 		// one; an unclamped index panics on the next o/d/enter keypress.
-		limit := 0
-		if m.showLargeFiles {
-			limit = len(m.largeFiles)
-		} else if m.tree != nil {
-			limit = len(m.tree.Entries)
+		if m.selectedIdx >= m.listLen() {
+			m.selectedIdx = 0
 		}
-		if m.selectedIdx >= limit {
+		return m, cmd
+
+	case analyzeHistoryMsg:
+		m.baseline = msg.baseline
+		m.historyNotes = msg.notes
+		m.historyReady = true
+		m.refreshChanges()
+		if m.selectedIdx >= m.listLen() {
 			m.selectedIdx = 0
 		}
 		return m, nil
@@ -526,6 +616,7 @@ func (m analyzeModel) View() string {
 
 	// Part 2: Path Analysis Summary (counts cached at scan completion)
 	s.WriteString(renderPathSummary(formatSize(m.tree.Size), m.fileCount, m.folderCount))
+	s.WriteString(m.renderChangeSummary())
 
 	// Solid cyan divider line
 	s.WriteString(lipgloss.NewStyle().Foreground(colorSkyBlue).Render(strings.Repeat("─", width)) + "\n\n")
@@ -559,10 +650,7 @@ func (m analyzeModel) View() string {
 	for i := start; i < end; i++ {
 		entry := entries[i]
 		// Determine selection status
-		isSelected := false
-		if !m.showLargeFiles && i == m.selectedIdx {
-			isSelected = true
-		}
+		isSelected := !m.showLargeFiles && !m.showChanges && i == m.selectedIdx
 		s.WriteString(renderTableRow(i, entry, m.tree.Size, isSelected) + "\n")
 	}
 
@@ -573,23 +661,27 @@ func (m analyzeModel) View() string {
 	// Solid cyan divider line
 	s.WriteString("\n" + lipgloss.NewStyle().Foreground(colorSkyBlue).Render(strings.Repeat("─", width)) + "\n\n")
 
-	// Part 5: Largest Files Panel
-	s.WriteString(lipgloss.NewStyle().Foreground(colorSkyBlue).Bold(true).Render("Largest Files:") + "\n")
+	// Part 5: Largest Files Panel, or what changed since the last scan
+	if m.showChanges {
+		s.WriteString(m.renderChangesPanel())
+	} else {
+		s.WriteString(lipgloss.NewStyle().Foreground(colorSkyBlue).Bold(true).Render("Largest Files:") + "\n")
 
-	limit := len(m.largeFiles)
-	if limit > 5 {
-		limit = 5
-	}
-	for i := 0; i < limit; i++ {
-		file := m.largeFiles[i]
-		isSelected := false
-		if m.showLargeFiles && i == m.selectedIdx {
-			isSelected = true
+		limit := len(m.largeFiles)
+		if limit > 5 {
+			limit = 5
 		}
-		s.WriteString(renderLargestFileRow(i, file, m.tree.Path, isSelected) + "\n")
-	}
-	if limit == 0 {
-		s.WriteString("  " + styleMuted.Render("No files found.") + "\n")
+		for i := 0; i < limit; i++ {
+			file := m.largeFiles[i]
+			isSelected := false
+			if m.showLargeFiles && i == m.selectedIdx {
+				isSelected = true
+			}
+			s.WriteString(renderLargestFileRow(i, file, m.tree.Path, isSelected) + "\n")
+		}
+		if limit == 0 {
+			s.WriteString("  " + styleMuted.Render("No files found.") + "\n")
+		}
 	}
 
 	// Solid cyan divider line
@@ -778,6 +870,7 @@ func (m *analyzeModel) showNode(n *FolderNode) {
 	m.selectedIdx = 0
 	m.largeFiles = topFiles(n, 10)
 	m.fileCount, m.folderCount = countFilesAndFolders(n)
+	m.refreshChanges()
 }
 
 // Premium System Operations & Safety Controls
@@ -1018,10 +1111,11 @@ func renderFooterActions() string {
 
 	a1 := renderAction("D", "elete")
 	a2 := renderAction("O", "pen")
+	a5 := renderAction("C", "hanges")
 	a3 := renderAction("B", "ack")
 	a4 := renderAction("Q", "uit")
 
-	return "  " + actionLabel + a1 + "  " + a2 + "  " + a3 + "  " + a4
+	return "  " + actionLabel + a1 + "  " + a2 + "  " + a5 + "  " + a3 + "  " + a4
 }
 
 func countFilesAndFolders(node *FolderNode) (int, int) {
