@@ -5,7 +5,8 @@
 
 .DESCRIPTION
     Removes Duster from the system:
-    - Deletes the du.exe binary
+    - Turns off the scheduled clean, then deletes the du.exe binary
+    - Removes the duw.exe launcher
     - Removes the install directory (if empty after removal)
     - Removes the install directory from user PATH
     - Cleans up registry keys written during installation
@@ -76,6 +77,9 @@ if (Test-Path $ExePath) {
     } catch {
     } finally {
         $ErrorActionPreference = $PrevErrorActionPreference
+        # Best-effort: an older du.exe without "schedule", or a failed turn-off,
+        # exits non-zero, which must not become this script's exit code.
+        $global:LASTEXITCODE = 0
     }
 
     Remove-Item $ExePath -Force
@@ -87,7 +91,11 @@ if (Test-Path $ExePath) {
 $LauncherPath = Join-Path $InstallDir "duw.exe"
 if (Test-Path -LiteralPath $LauncherPath) {
     Remove-Item -LiteralPath $LauncherPath -Force -ErrorAction SilentlyContinue
-    Write-OK "Removed: $LauncherPath"
+    if (-not (Test-Path -LiteralPath $LauncherPath)) {
+        Write-OK "Removed: $LauncherPath"
+    } else {
+        Write-Info "Could not remove $LauncherPath (in use by a scheduled clean?). Delete it later."
+    }
 }
 
 # Remove install directory if now empty
