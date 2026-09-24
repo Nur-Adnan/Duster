@@ -74,7 +74,9 @@ Windows `$Recycle.Bin\<SID>`, and gomi. None of them overwrites on restore.
 | `du restore <n> --item <k>` | Restores one item |
 | `--dry-run` | Shows what would come back and what would be skipped |
 | `--json` | Works with every form |
-| `du restore --empty [<n>]` | Deletes kept items now. Asks first; needs `--yes` when not interactive |
+| `du restore --empty [<n>]` | Deletes kept items now. Asks first, naming each session it would delete (command, time, item count, size); needs `--yes` when not interactive |
+
+Wherever `<n>` is taken it can also be the session id that `--json` prints. A number can shift when a new session is kept between listing and acting; an id always names the same session.
 
 A session on a drive that isn't currently attached (an unplugged USB drive) is not listed as "not connected": finding it without reading every removable drive's quarantine on every `du restore` would need a central index that has to be kept in sync with drives that come and go, which is more machinery than the case is worth. The listing shows only sessions on drives Duster can currently reach; plugging the drive back in makes them reappear (§7 covers this in the release checklist).
 
