@@ -464,6 +464,12 @@ jobs:
       - name: Scheduled clean (register, run, turn off, standard user)
         timeout-minutes: 10
         run: |
+          # Windows PowerShell 5.1's $ErrorActionPreference defaults to 'Stop'
+          # (this job's shell), under which redirecting a native command's
+          # stderr (2>$null below) turns an expected non-zero exit into a
+          # terminating error. 'Continue' lets these checks read $LASTEXITCODE
+          # themselves; throw still stops the script.
+          $ErrorActionPreference = 'Continue'
           $dir = Join-Path $env:RUNNER_TEMP 'sched dir'
           New-Item -ItemType Directory -Force $dir | Out-Null
           Copy-Item du.exe "$dir\du.exe"
@@ -486,11 +492,12 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or -not $j.enabled -or $j.every -ne 'daily' -or $j.categories -notcontains 'npm') { throw "on: $($j | ConvertTo-Json -Depth 5)" }
 
           schtasks /Run /TN $name | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "schtasks /Run failed: exit=$LASTEXITCODE" }
           for ($i = 0; $i -lt 180 -and -not (Test-Path $rec); $i++) { Start-Sleep 1 }
           Get-Content (Join-Path $data 'schedule.log') -ErrorAction SilentlyContinue | Write-Host
           if (-not (Test-Path $rec)) { throw 'the task did not record a run' }
           $j = & $du schedule --json | Out-String | ConvertFrom-Json
-          if ($j.last_check.result -ne 'cleaned' -or -not $j.last_clean) { throw "after the run: $($j | ConvertTo-Json -Depth 6)" }
+          if ($LASTEXITCODE -ne 0 -or $j.last_check.result -ne 'cleaned' -or -not $j.last_clean) { throw "after the run: $($j | ConvertTo-Json -Depth 6)" }
 
           $j = & $du schedule off --json | Out-String | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0 -or $j.enabled) { throw 'off' }
@@ -499,25 +506,30 @@ jobs:
           & $du schedule off | Out-Null
           if ($LASTEXITCODE -ne 0) { throw 'a second off failed' }
 
-          # A standard user turns it on and off for themselves.
+          # A standard user turns it on and off for themselves. The account
+          # is always deleted afterwards, even if an assertion throws.
           $pw = 'Du!' + [guid]::NewGuid().ToString('N').Substring(0, 8) + 'aA1'   # net user prompts (Y/N) above 14 characters
           net user dsched $pw /add | Out-Null
-          $cred = New-Object PSCredential('dsched', (ConvertTo-SecureString $pw -AsPlainText -Force))
-          $pub = Join-Path $env:PUBLIC 'dsched'
-          New-Item -ItemType Directory -Force $pub | Out-Null
-          Copy-Item "$dir\du.exe", "$dir\duw.exe" $pub
-          function AsUser($argList) {
-            $p = Start-Process "$pub\du.exe" -Credential $cred -LoadUserProfile -ArgumentList $argList -Wait -PassThru `
-              -WorkingDirectory $pub -RedirectStandardOutput "$pub\out.txt" -RedirectStandardError "$pub\err.txt"
-            [pscustomobject]@{ Exit = $p.ExitCode; Out = (Get-Content "$pub\out.txt" -Raw); Err = (Get-Content "$pub\err.txt" -Raw) }
+          if ($LASTEXITCODE -ne 0) { throw 'net user /add failed' }
+          try {
+            $cred = New-Object PSCredential('dsched', (ConvertTo-SecureString $pw -AsPlainText -Force))
+            $pub = Join-Path $env:PUBLIC 'dsched'
+            New-Item -ItemType Directory -Force $pub | Out-Null
+            Copy-Item "$dir\du.exe", "$dir\duw.exe" $pub
+            function AsUser($argList) {
+              $p = Start-Process "$pub\du.exe" -Credential $cred -LoadUserProfile -ArgumentList $argList -Wait -PassThru `
+                -WorkingDirectory $pub -RedirectStandardOutput "$pub\out.txt" -RedirectStandardError "$pub\err.txt"
+              [pscustomobject]@{ Exit = $p.ExitCode; Out = (Get-Content "$pub\out.txt" -Raw); Err = (Get-Content "$pub\err.txt" -Raw) }
+            }
+            $r = AsUser @('schedule', 'on', '--json')
+            if ($r.Exit -ne 0) { throw "standard user on: $($r.Out) $($r.Err)" }
+            $r = AsUser @('schedule', '--json')
+            if (-not ($r.Out | ConvertFrom-Json).enabled) { throw "standard user status: $($r.Out) $($r.Err)" }
+            $r = AsUser @('schedule', 'off', '--json')
+            if ($r.Exit -ne 0) { throw "standard user off: $($r.Out) $($r.Err)" }
+          } finally {
+            net user dsched /delete 2>&1 | Out-Null
           }
-          $r = AsUser @('schedule', 'on', '--json')
-          if ($r.Exit -ne 0) { throw "standard user on: $($r.Out) $($r.Err)" }
-          $r = AsUser @('schedule', '--json')
-          if (-not ($r.Out | ConvertFrom-Json).enabled) { throw "standard user status: $($r.Out) $($r.Err)" }
-          $r = AsUser @('schedule', 'off', '--json')
-          if ($r.Exit -ne 0) { throw "standard user off: $($r.Out) $($r.Err)" }
-          net user dsched /delete | Out-Null
           exit 0
 
       - name: Remove (self-uninstall)
