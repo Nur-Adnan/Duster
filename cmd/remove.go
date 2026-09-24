@@ -140,6 +140,14 @@ func (m removeModel) Init() tea.Cmd {
 
 func runUninstallCmd(currentExe, logDir string, dryRun bool) tea.Cmd {
 	return func() tea.Msg {
+		// 0. Empty the undo quarantine: only when actually deleting.
+		if !dryRun {
+			if err := emptyAllQuarantines(); err != nil {
+				logRmOperation("self-uninstall", currentExe, 0, false)
+				return rmUninstallCompleteMsg{err: err}
+			}
+		}
+
 		// 1. Safe purge configuration directory
 		if err := cleanDusterDir(logDir, currentExe, dryRun); err != nil {
 			logRmOperation("self-uninstall", currentExe, 0, false)
@@ -314,6 +322,13 @@ func cleanDusterDir(logDir, keep string, simulate bool) error {
 	return firstErr
 }
 
+// emptyAllQuarantines permanently deletes every item Duster is holding for
+// undo on this machine. Called before cleanDusterDir on every path that
+// actually deletes, so `du remove` leaves nothing recoverable behind.
+func emptyAllQuarantines() error {
+	return emptySessions(groupSessions(loadKeptSessions(quarantineRoots())))
+}
+
 // logRmOperation records a FAILED self-uninstall only. A successful one writes
 // nothing: the log lives in the folder being removed, and writing it would
 // recreate that folder right after the cleanup.
@@ -327,7 +342,13 @@ func logRmOperation(action, target string, size int64, success bool) {
 func runSilentRemove(currentExe string) {
 	logDir := logging.Dir()
 
-	err := cleanDusterDir(logDir, currentExe, rmDryRun)
+	var err error
+	if !rmDryRun {
+		err = emptyAllQuarantines()
+	}
+	if err == nil {
+		err = cleanDusterDir(logDir, currentExe, rmDryRun)
+	}
 	logRmOperation("silent-uninstall", currentExe, 0, err == nil)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Uninstall incomplete; nothing scheduled for removal: %v\n", err)
@@ -352,10 +373,14 @@ func runHeadlessRemove(currentExe string) {
 	// documented "plan" semantics and prevents `du remove | tee log` — where the
 	// interactive confirmation is bypassed — from silently uninstalling.
 	performDelete := rmForce && !rmDryRun
+	held := quarantineHeld()
 
 	var err error
 	if performDelete {
-		err = cleanDusterDir(logDir, currentExe, false)
+		err = emptyAllQuarantines()
+		if err == nil {
+			err = cleanDusterDir(logDir, currentExe, false)
+		}
 		if err == nil {
 			// SECURITY: Uses safe delayed delete instead of cmd.exe /C shell injection
 			removeScheduleAndLauncher(currentExe)

@@ -21,8 +21,14 @@ import (
 //     to the user, like the rest of the profile);
 //   - any other fixed or removable drive X: X:\.duster-quarantine\<user SID>,
 //     created with a protected DACL (full control for the user and SYSTEM,
-//     nothing inherited) and owned by the user, so other accounts on the
-//     machine cannot list or read what was kept.
+//     nothing inherited) and owned by the user.
+//
+// The guarantee: other users cannot list what you have kept, and nothing
+// becomes readable that was not readable before. A same-volume move keeps the
+// item's own ACL (it does not re-inherit from the SID folder), so someone who
+// knows an item's full path can still open it if its ACL allowed that at its
+// original location. Item ACLs are deliberately left alone: restore must bring
+// back exactly the original permissions.
 //
 // Network drives and volumes mounted in a folder get no quarantine: the item
 // stays where it was and the caller reports errNoQuarantine.
