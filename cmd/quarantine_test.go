@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -293,6 +294,47 @@ func TestQuarantineFirstFailureLeavesNoFolder(t *testing.T) {
 	}
 	if err := quarantinePath(s, target, 1); err != nil {
 		t.Fatalf("a later keep on the same volume: %v", err)
+	}
+}
+
+// A move that fails when the destination cannot even be checked (not "does
+// not exist", some other error) may still have landed: the session folder
+// must not be removed and the record stays pending, never dropped.
+func TestQuarantineMoveErrorWithUncheckableDestKeepsRecord(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows reports a path under a file as not found, which is the cleanup case")
+	}
+	work := tempQuarantine(t)
+	target := filepath.Join(work, "a.txt")
+	os.WriteFile(target, []byte("a"), 0o644)
+	prev := quarantineMove
+	t.Cleanup(func() { quarantineMove = prev })
+	quarantineMove = func(from, to string) error {
+		// Turn the slot into a file, so Lstat(dest) fails with ENOTDIR.
+		slot := filepath.Dir(to)
+		os.Remove(slot)
+		os.WriteFile(slot, nil, 0o600)
+		return errors.New("simulated move failure")
+	}
+	s := newQuarantineSession("purge")
+	err := quarantinePath(s, target, 1)
+	if err == nil || !strings.Contains(err.Error(), "could not check") {
+		t.Fatalf("quarantinePath: %v", err)
+	}
+	if s.Kept() != 0 {
+		t.Errorf("kept = %d", s.Kept())
+	}
+	root, _ := quarantineRoot(work)
+	dir := filepath.Join(root, s.id)
+	if !exists(dir) || len(s.dirs) != 1 {
+		t.Fatal("the session folder was removed although the item may be in it")
+	}
+	b, rerr := os.ReadFile(filepath.Join(dir, quarantineManifestName))
+	if rerr != nil || !strings.Contains(string(b), `"pending"`) {
+		t.Fatalf("the pending record was dropped: %s %v", b, rerr)
+	}
+	if b, _ := os.ReadFile(target); string(b) != "a" {
+		t.Fatal("the item was touched")
 	}
 }
 
