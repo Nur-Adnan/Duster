@@ -2,10 +2,12 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -169,4 +171,121 @@ func TestScheduleRecordFile(t *testing.T) {
 			t.Error("read a record through a link")
 		}
 	})
+}
+
+func docFor(t *testing.T, cfg scheduleConfig, duw string) taskDoc {
+	t.Helper()
+	b, err := buildTaskXML(cfg, duw, "S-1-5-21-1", time.Date(2026, 9, 24, 8, 0, 0, 0, time.Local))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := parseTaskXML(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return doc
+}
+
+func TestStatusFromDoc(t *testing.T) {
+	duw := filepath.Join(t.TempDir(), "duw.exe")
+	if err := os.WriteFile(duw, []byte("MZ"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 24, 12, 0, 0, 0, time.Local)
+	cfg := scheduleConfig{Every: "weekly", At: "19:00", LowSpace: 10, Add: []string{"npm"}}
+
+	st := statusFromDoc(scheduleStatus{Warnings: []string{}}, docFor(t, cfg, duw), now)
+	if !st.Enabled || st.Every != "weekly" || st.At != "19:00" || st.LowSpacePercent == nil || *st.LowSpacePercent != 10 {
+		t.Errorf("status: %+v", st)
+	}
+	if !slices.Contains(st.Categories, "npm") || !slices.Contains(st.Categories, "temp") {
+		t.Errorf("categories: %v", st.Categories)
+	}
+	if st.NextCheck == nil || !st.NextCheck.Equal(time.Date(2026, 9, 24, 19, 0, 0, 0, time.Local)) {
+		t.Errorf("next check: %v", st.NextCheck)
+	}
+	if len(st.Warnings) != 0 || st.TaskCommand != duw {
+		t.Errorf("warnings %v, command %q", st.Warnings, st.TaskCommand)
+	}
+
+	t.Run("missing duw.exe", func(t *testing.T) {
+		st := statusFromDoc(scheduleStatus{}, docFor(t, cfg, filepath.Join(t.TempDir(), "gone.exe")), now)
+		if len(st.Warnings) != 1 || !strings.Contains(st.Warnings[0], "no longer exists") {
+			t.Errorf("warnings: %v", st.Warnings)
+		}
+	})
+	t.Run("disabled in Task Scheduler", func(t *testing.T) {
+		doc := docFor(t, cfg, duw)
+		off := false
+		doc.Settings.Enabled = &off
+		st := statusFromDoc(scheduleStatus{}, doc, now)
+		if st.NextCheck != nil || len(st.Warnings) != 1 || !strings.Contains(st.Warnings[0], "disabled") {
+			t.Errorf("disabled: next %v, warnings %v", st.NextCheck, st.Warnings)
+		}
+	})
+	t.Run("arguments edited by hand", func(t *testing.T) {
+		doc := docFor(t, cfg, duw)
+		doc.Actions.Arguments = "schedule run --every weekly --add recycle"
+		st := statusFromDoc(scheduleStatus{}, doc, now)
+		if len(st.Warnings) == 0 || !strings.Contains(st.Warnings[0], "refuse") {
+			t.Errorf("edited: %v", st.Warnings)
+		}
+	})
+	t.Run("low space off is null in JSON", func(t *testing.T) {
+		st := statusFromDoc(scheduleStatus{}, docFor(t, scheduleConfig{Every: "daily", At: "03:00"}, duw), now)
+		b, _ := json.Marshal(st)
+		if !strings.Contains(string(b), `"low_space_percent":null`) {
+			t.Errorf("json: %s", b)
+		}
+	})
+}
+
+func TestRenderScheduleStatus(t *testing.T) {
+	t.Setenv("LOCALAPPDATA", t.TempDir())
+	low := 10
+	next := time.Date(2026, 9, 25, 19, 0, 0, 0, time.Local)
+	st := scheduleStatus{
+		Enabled: true, Every: "weekly", At: "19:00", LowSpacePercent: &low,
+		Categories: []string{"temp", "npm"}, NextCheck: &next, Warnings: []string{"w1"},
+		LastClean: &scheduleClean{Time: next.Add(-72 * time.Hour), Reason: "weekly", Freed: 1 << 30,
+			Categories: []scheduleCategoryResult{{ID: "temp", Status: "partial"}, {ID: "npm", Status: "cleaned"}}},
+		LastCheck: &scheduleCheck{Time: next.Add(-24 * time.Hour), Result: "not due", FreePercent: 38},
+	}
+	var b bytes.Buffer
+	renderScheduleStatus(&b, st)
+	got := b.String()
+	for _, want := range []string{
+		"Scheduled clean: ON",
+		"Cleans weekly, or early when",
+		"Checks daily at 19:00.",
+		"Temporary Files", "+ ",
+		"Next check:  Fri Sep 25, 19:00",
+		"Last clean:  Tue Sep 22, 19:00 (weekly): freed 1",
+		"1 partly skipped",
+		"Last check:  Thu Sep 24, 19:00: not due",
+		"38% free",
+		"Warning: w1",
+		"Turn off with: du schedule off",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("status text lacks %q:\n%s", want, got)
+		}
+	}
+	b.Reset()
+	renderScheduleStatus(&b, scheduleStatus{})
+	if !strings.Contains(b.String(), "Scheduled clean: OFF") || !strings.Contains(b.String(), "du schedule on") {
+		t.Errorf("off text:\n%s", b.String())
+	}
+}
+
+func TestRemoveScheduleAndLauncher(t *testing.T) {
+	dir := t.TempDir()
+	duw := filepath.Join(dir, "duw.exe")
+	if err := os.WriteFile(duw, []byte("MZ"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	removeScheduleAndLauncher(filepath.Join(dir, "du.exe"))
+	if _, err := os.Stat(duw); !os.IsNotExist(err) {
+		t.Errorf("duw.exe still exists after removeScheduleAndLauncher: %v", err)
+	}
 }

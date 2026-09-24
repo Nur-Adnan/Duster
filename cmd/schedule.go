@@ -6,9 +6,16 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/user"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
+
+	"github.com/Nur-Adnan/duster/internal/logging"
+	"github.com/Nur-Adnan/duster/lib/elevation"
+	"github.com/Nur-Adnan/duster/lib/fs"
+	"github.com/spf13/cobra"
 )
 
 const scheduleRecordName = "schedule.json"
@@ -158,4 +165,397 @@ func runScheduledClean(args []string, dir string, out io.Writer) int {
 		return save(1)
 	}
 	return save(0)
+}
+
+var (
+	schedJSON      bool
+	schedEvery     string
+	schedAt        string
+	schedLowSpace  string
+	schedAdd       []string
+	schedDryRun    bool
+	schedUninstall bool
+)
+
+var ScheduleCmd = &cobra.Command{
+	Use:   "schedule",
+	Short: "Clean caches automatically on a schedule (status, on, off)",
+	Long: `Keep caches tidy without opening Duster. A daily Task Scheduler check, as you,
+never as administrator, cleans a safe set of caches when your chosen interval has
+passed or the system drive runs low on space.
+
+Always cleaned: temp files, browser caches (never cookies, history or sessions),
+thumbnails, error reports, crash dumps and GPU shader caches. Developer and app
+caches only with --add. The Recycle Bin, Recent files, Spotify and anything that
+needs administrator rights are never scheduled.`,
+	Args: cobra.NoArgs,
+	Run:  func(*cobra.Command, []string) { executeScheduleStatus() },
+}
+
+var scheduleStatusCmd = &cobra.Command{
+	Use:   "status",
+	Short: "Show whether scheduled cleaning is on and what the last run did",
+	Args:  cobra.NoArgs,
+	Run:   func(*cobra.Command, []string) { executeScheduleStatus() },
+}
+
+var scheduleOnCmd = &cobra.Command{
+	Use:   "on",
+	Short: "Create or replace your scheduled clean",
+	Args:  cobra.NoArgs,
+	Run:   func(*cobra.Command, []string) { executeScheduleOn() },
+}
+
+var scheduleOffCmd = &cobra.Command{
+	Use:   "off",
+	Short: "Delete your scheduled clean (the record of past runs is kept)",
+	Args:  cobra.NoArgs,
+	Run:   func(*cobra.Command, []string) { executeScheduleOff() },
+}
+
+// scheduleRunCmd is what the task starts through duw.exe. Its arguments go to
+// parseRunArgs, the same parser status uses, so cobra's flag parsing is off.
+var scheduleRunCmd = &cobra.Command{
+	Use:                "run",
+	Hidden:             true,
+	DisableFlagParsing: true,
+	Run: func(_ *cobra.Command, args []string) {
+		os.Exit(runScheduledClean(args, logging.Dir(), os.Stdout))
+	},
+}
+
+func init() {
+	ScheduleCmd.PersistentFlags().BoolVar(&schedJSON, "json", false, "Print machine-readable JSON")
+	scheduleOnCmd.Flags().StringVar(&schedEvery, "every", "weekly", "How often to clean: daily, weekly or monthly")
+	scheduleOnCmd.Flags().StringVar(&schedAt, "at", "19:00", "Daily check time, HH:MM on a 24-hour clock")
+	scheduleOnCmd.Flags().StringVar(&schedLowSpace, "low-space", "10%", "Clean early when the system drive has less free space than this (1%-50%, or off)")
+	scheduleOnCmd.Flags().StringSliceVar(&schedAdd, "add", nil, "Opt-in categories to include (e.g. npm,gradle,docker)")
+	scheduleOnCmd.Flags().BoolVar(&schedDryRun, "dry-run", false, "Show what would be registered and what a run would clean now; change nothing")
+	scheduleOffCmd.Flags().BoolVar(&schedUninstall, "uninstall", false, "Delete every Duster scheduled clean this account can see (used by the uninstaller)")
+	ScheduleCmd.AddCommand(scheduleStatusCmd, scheduleOnCmd, scheduleOffCmd, scheduleRunCmd)
+}
+
+// scheduleStatus is what status, on and off report, as text or --json.
+type scheduleStatus struct {
+	Enabled         bool                     `json:"enabled"`
+	TaskName        string                   `json:"task_name"`
+	Every           string                   `json:"every,omitempty"`
+	At              string                   `json:"at,omitempty"`
+	LowSpacePercent *int                     `json:"low_space_percent"`
+	Categories      []string                 `json:"categories"`
+	NextCheck       *time.Time               `json:"next_check"`
+	LastCheck       *scheduleCheck           `json:"last_check"`
+	LastClean       *scheduleClean           `json:"last_clean"`
+	TaskCommand     string                   `json:"task_command,omitempty"`
+	Warnings        []string                 `json:"warnings"`
+	Notes           []string                 `json:"notes,omitempty"`
+	DryRun          bool                     `json:"dry_run,omitempty"`
+	WouldClean      []scheduleCategoryResult `json:"would_clean,omitempty"`
+}
+
+// currentScheduleTask returns this account's task name.
+func currentScheduleTask() (name string, u *user.User, err error) {
+	u, err = user.Current()
+	if err != nil {
+		return "", nil, fmt.Errorf("cannot tell which account this is: %w", err)
+	}
+	return scheduleTaskName(u.Username), u, nil
+}
+
+// readScheduleStatus combines the task (the settings) with the record (the history).
+func readScheduleStatus(name string, rec scheduleRecord, now time.Time) scheduleStatus {
+	st := scheduleStatus{TaskName: name, LastCheck: rec.LastCheck, LastClean: rec.LastClean,
+		Categories: []string{}, Warnings: []string{}}
+	raw, found := queryScheduleTask(name)
+	if !found {
+		return st
+	}
+	doc, err := parseTaskXML(raw)
+	if err != nil {
+		st.Enabled = true
+		st.Warnings = append(st.Warnings, "the task exists but Duster cannot read it: "+err.Error())
+		return st
+	}
+	return statusFromDoc(st, doc, now)
+}
+
+// statusFromDoc fills st from the task definition. Settings come from the
+// task itself (there is no config file), read with the parser `run` uses.
+func statusFromDoc(st scheduleStatus, doc taskDoc, now time.Time) scheduleStatus {
+	st.Enabled = true
+	if st.Categories == nil {
+		st.Categories = []string{}
+	}
+	if st.Warnings == nil {
+		st.Warnings = []string{}
+	}
+	st.TaskCommand = strings.Trim(doc.Actions.Command, `"`)
+	fields := strings.Fields(doc.Actions.Arguments)
+	if len(fields) < 2 || fields[0] != "schedule" || fields[1] != "run" {
+		st.Warnings = append(st.Warnings, "the task was changed outside Duster and no longer runs a scheduled clean: run du schedule on again")
+		return st
+	}
+	cfg, _, err := parseRunArgs(fields[2:])
+	if err != nil {
+		st.Warnings = append(st.Warnings, "scheduled runs will refuse to clean because the task's settings were changed ("+err.Error()+"): run du schedule on again")
+		return st
+	}
+	st.Every = cfg.Every
+	if len(doc.Start) >= 16 {
+		st.At = doc.Start[11:16]
+	}
+	if cfg.LowSpace > 0 {
+		st.LowSpacePercent = &cfg.LowSpace
+	}
+	for _, c := range scheduledCategories(cfg.Add) {
+		st.Categories = append(st.Categories, c.ID)
+	}
+	if doc.Settings.Enabled != nil && !*doc.Settings.Enabled {
+		st.Warnings = append(st.Warnings, "the task is disabled in Task Scheduler, so it never runs")
+	} else if _, err := parseAt(st.At); err == nil {
+		next := nextScheduleCheck(now, st.At)
+		st.NextCheck = &next
+	}
+	if info, err := os.Lstat(st.TaskCommand); err != nil || !info.Mode().IsRegular() {
+		st.Warnings = append(st.Warnings, fmt.Sprintf("the task runs %s, which no longer exists: run du schedule on again", st.TaskCommand))
+	}
+	return st
+}
+
+const scheduleTimeLayout = "Mon Jan 2, 15:04"
+
+func renderScheduleStatus(w io.Writer, st scheduleStatus) {
+	drive := strings.TrimSuffix(systemDriveRoot(), `\`)
+	if st.Enabled {
+		fmt.Fprintln(w, "Scheduled clean: ON")
+		early := ""
+		if st.LowSpacePercent != nil {
+			early = fmt.Sprintf(", or early when %s has under %d%% free", drive, *st.LowSpacePercent)
+		}
+		fmt.Fprintf(w, "  Cleans %s%s. Checks daily at %s.\n", st.Every, early, st.At)
+		fmt.Fprintf(w, "  Cleans: %s\n", scheduleCategoryList(st.Categories))
+		if st.NextCheck != nil {
+			fmt.Fprintf(w, "  Next check:  %s\n", st.NextCheck.Local().Format(scheduleTimeLayout))
+		}
+	} else {
+		fmt.Fprintln(w, "Scheduled clean: OFF")
+	}
+	if c := st.LastClean; c != nil {
+		fmt.Fprintf(w, "  Last clean:  %s (%s): freed %s, %s\n", c.Time.Local().Format(scheduleTimeLayout),
+			c.Reason, strings.TrimSpace(formatBytes(c.Freed)), scheduleCleanOutcome(c))
+	}
+	if c := st.LastCheck; c != nil {
+		free := ""
+		if c.FreePercent >= 0 {
+			free = fmt.Sprintf(" (%s %.0f%% free)", drive, c.FreePercent)
+		}
+		fmt.Fprintf(w, "  Last check:  %s: %s%s\n", c.Time.Local().Format(scheduleTimeLayout), c.Result, free)
+	}
+	if d := logging.Dir(); d != "" {
+		fmt.Fprintf(w, "  Log:         %s\n", filepath.Join(d, "schedule.log"))
+	}
+	for _, n := range st.Notes {
+		fmt.Fprintf(w, "  Note: %s\n", n)
+	}
+	for _, warn := range st.Warnings {
+		fmt.Fprintf(w, "  Warning: %s\n", warn)
+	}
+	if st.Enabled {
+		fmt.Fprintln(w, "Turn off with: du schedule off")
+	} else {
+		fmt.Fprintln(w, "Turn on with: du schedule on")
+	}
+}
+
+// scheduleCategoryList names the safe set, then " + " and the opt-ins.
+func scheduleCategoryList(ids []string) string {
+	names := scheduleCategoryNames()
+	var safe, extra []string
+	for _, id := range ids {
+		if slices.Contains(scheduleSafe, id) {
+			safe = append(safe, names[id])
+		} else {
+			extra = append(extra, names[id])
+		}
+	}
+	s := strings.Join(safe, ", ")
+	if len(extra) > 0 {
+		s += " + " + strings.Join(extra, ", ")
+	}
+	return s
+}
+
+func scheduleCleanOutcome(c *scheduleClean) string {
+	partial, failed := 0, 0
+	for _, r := range c.Categories {
+		switch r.Status {
+		case "partial":
+			partial++
+		case "failed":
+			failed++
+		}
+	}
+	var parts []string
+	if partial > 0 {
+		parts = append(parts, fmt.Sprintf("%d partly skipped (files in use)", partial))
+	}
+	if failed > 0 {
+		parts = append(parts, fmt.Sprintf("%d failed", failed))
+	}
+	if len(parts) == 0 {
+		return "no errors"
+	}
+	return strings.Join(parts, ", ")
+}
+
+func printScheduleStatus(st scheduleStatus) {
+	if schedJSON {
+		b, _ := json.MarshalIndent(st, "", "  ")
+		fmt.Println(string(b))
+		return
+	}
+	renderScheduleStatus(os.Stdout, st)
+}
+
+func scheduleFail(err error) {
+	if schedJSON {
+		b, _ := json.MarshalIndent(map[string]string{"error": err.Error()}, "", "  ")
+		fmt.Println(string(b))
+	} else {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+	}
+	os.Exit(1)
+}
+
+func executeScheduleStatus() {
+	name, _, err := currentScheduleTask()
+	if err != nil {
+		scheduleFail(err)
+	}
+	printScheduleStatus(readScheduleStatus(name, loadScheduleRecord(logging.Dir()), time.Now()))
+}
+
+func executeScheduleOn() {
+	every, err := parseEvery(schedEvery)
+	if err != nil {
+		scheduleFail(err)
+	}
+	at, err := parseAt(schedAt)
+	if err != nil {
+		scheduleFail(err)
+	}
+	low, err := parseLowSpace(schedLowSpace)
+	if err != nil {
+		scheduleFail(err)
+	}
+	add, notes, err := resolveAdd(schedAdd)
+	if err != nil {
+		scheduleFail(err)
+	}
+	cfg := scheduleConfig{Every: every, At: at, LowSpace: low, Add: add}
+
+	exe, err := os.Executable()
+	if err != nil {
+		scheduleFail(err)
+	}
+	duw := filepath.Join(filepath.Dir(exe), "duw.exe")
+	if info, err := os.Lstat(duw); err != nil || !info.Mode().IsRegular() {
+		scheduleFail(fmt.Errorf("duw.exe is missing from %s: run du update or reinstall Duster", filepath.Dir(exe)))
+	}
+	name, u, err := currentScheduleTask()
+	if err != nil {
+		scheduleFail(err)
+	}
+	now := time.Now()
+	taskXML, err := buildTaskXML(cfg, duw, u.Uid, now)
+	if err != nil {
+		scheduleFail(err)
+	}
+
+	rec := loadScheduleRecord(logging.Dir())
+	if schedDryRun {
+		doc, err := parseTaskXML(taskXML)
+		if err != nil {
+			scheduleFail(err)
+		}
+		st := statusFromDoc(scheduleStatus{TaskName: name, LastCheck: rec.LastCheck, LastClean: rec.LastClean}, doc, now)
+		st.DryRun, st.Notes = true, notes
+		for _, c := range scheduledCategories(cfg.Add) {
+			size, files, _ := runCategory(c, true)
+			st.WouldClean = append(st.WouldClean, scheduleCategoryResult{ID: c.ID, Freed: size, Files: files, Status: "would clean"})
+		}
+		if !schedJSON {
+			fmt.Println("Dry run: nothing was registered. A run now would clean:")
+			names := scheduleCategoryNames()
+			for _, r := range st.WouldClean {
+				fmt.Printf("  %-32s %s\n", names[r.ID], strings.TrimSpace(formatBytes(r.Freed)))
+			}
+			fmt.Println()
+		}
+		printScheduleStatus(st)
+		return
+	}
+
+	if err := registerScheduleTask(name, taskXML); err != nil {
+		scheduleFail(err)
+	}
+	st := readScheduleStatus(name, rec, now)
+	st.Notes = notes
+	if elevation.IsAdmin() {
+		st.Warnings = append(st.Warnings, fmt.Sprintf("registered for %s; runs without administrator rights", u.Username))
+	}
+	printScheduleStatus(st)
+}
+
+func executeScheduleOff() {
+	if schedUninstall {
+		names, err := listScheduleTaskNames()
+		if err != nil {
+			scheduleFail(err)
+		}
+		var errs []error
+		for _, n := range names {
+			errs = append(errs, deleteScheduleTask(n))
+		}
+		if err := errors.Join(errs...); err != nil {
+			scheduleFail(err)
+		}
+		if !schedJSON {
+			fmt.Printf("Deleted %d scheduled clean(s).\n", len(names))
+		} else {
+			b, _ := json.MarshalIndent(map[string][]string{"deleted": append([]string{}, names...)}, "", "  ")
+			fmt.Println(string(b))
+		}
+		return
+	}
+	name, _, err := currentScheduleTask()
+	if err != nil {
+		scheduleFail(err)
+	}
+	if _, found := queryScheduleTask(name); !found {
+		if !schedJSON {
+			fmt.Println("Scheduled clean is already off.")
+			return
+		}
+	} else if err := deleteScheduleTask(name); err != nil {
+		scheduleFail(err)
+	} else if !schedJSON {
+		fmt.Printf("Scheduled clean is off. The record of past runs stays in %s.\n", filepath.Join(logging.Dir(), scheduleRecordName))
+		return
+	}
+	printScheduleStatus(readScheduleStatus(name, loadScheduleRecord(logging.Dir()), time.Now()))
+}
+
+// removeScheduleAndLauncher deletes this account's scheduled clean and the
+// duw.exe beside du.exe, for `du remove`. Best-effort: a task left behind
+// only fails to start.
+func removeScheduleAndLauncher(currentExe string) {
+	if name, _, err := currentScheduleTask(); err == nil {
+		if _, found := queryScheduleTask(name); found {
+			_ = deleteScheduleTask(name)
+		}
+	}
+	if duw := filepath.Join(filepath.Dir(currentExe), "duw.exe"); fs.IsValidPath(duw) {
+		_ = os.Remove(duw)
+	}
 }
