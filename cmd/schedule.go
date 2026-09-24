@@ -326,8 +326,15 @@ const scheduleTimeLayout = "Mon Jan 2, 15:04"
 
 func renderScheduleStatus(w io.Writer, st scheduleStatus) {
 	drive := strings.TrimSuffix(systemDriveRoot(), `\`)
-	if st.Enabled {
+	switch {
+	case st.DryRun:
+		fmt.Fprintln(w, "Scheduled clean: PREVIEW (dry run, nothing registered)")
+	case st.Enabled:
 		fmt.Fprintln(w, "Scheduled clean: ON")
+	default:
+		fmt.Fprintln(w, "Scheduled clean: OFF")
+	}
+	if st.DryRun || st.Enabled {
 		early := ""
 		if st.LowSpacePercent != nil {
 			early = fmt.Sprintf(", or early when %s has under %d%% free", drive, *st.LowSpacePercent)
@@ -337,8 +344,6 @@ func renderScheduleStatus(w io.Writer, st scheduleStatus) {
 		if st.NextCheck != nil {
 			fmt.Fprintf(w, "  Next check:  %s\n", st.NextCheck.Local().Format(scheduleTimeLayout))
 		}
-	} else {
-		fmt.Fprintln(w, "Scheduled clean: OFF")
 	}
 	if c := st.LastClean; c != nil {
 		fmt.Fprintf(w, "  Last clean:  %s (%s): freed %s, %s\n", c.Time.Local().Format(scheduleTimeLayout),
@@ -360,9 +365,12 @@ func renderScheduleStatus(w io.Writer, st scheduleStatus) {
 	for _, warn := range st.Warnings {
 		fmt.Fprintf(w, "  Warning: %s\n", warn)
 	}
-	if st.Enabled {
+	switch {
+	case st.DryRun:
+		fmt.Fprintln(w, "Register it with: du schedule on (same flags, without --dry-run)")
+	case st.Enabled:
 		fmt.Fprintln(w, "Turn off with: du schedule off")
-	} else {
+	default:
 		fmt.Fprintln(w, "Turn on with: du schedule on")
 	}
 }
@@ -480,6 +488,10 @@ func executeScheduleOn() {
 		}
 		st := statusFromDoc(scheduleStatus{TaskName: name, LastCheck: rec.LastCheck, LastClean: rec.LastClean}, doc, now)
 		st.DryRun, st.Notes = true, notes
+		_, st.Enabled = queryScheduleTask(name)
+		if elevation.IsAdmin() {
+			st.Warnings = append(st.Warnings, fmt.Sprintf("would be registered for %s; runs without administrator rights", u.Username))
+		}
 		for _, c := range scheduledCategories(cfg.Add) {
 			size, files, _ := runCategory(c, true)
 			st.WouldClean = append(st.WouldClean, scheduleCategoryResult{ID: c.ID, Freed: size, Files: files, Status: "would clean"})

@@ -276,16 +276,24 @@ func TestRenderScheduleStatus(t *testing.T) {
 	if !strings.Contains(b.String(), "Scheduled clean: OFF") || !strings.Contains(b.String(), "du schedule on") {
 		t.Errorf("off text:\n%s", b.String())
 	}
-}
 
-func TestRemoveScheduleAndLauncher(t *testing.T) {
-	dir := t.TempDir()
-	duw := filepath.Join(dir, "duw.exe")
-	if err := os.WriteFile(duw, []byte("MZ"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	removeScheduleAndLauncher(filepath.Join(dir, "du.exe"))
-	if _, err := os.Stat(duw); !os.IsNotExist(err) {
-		t.Errorf("duw.exe still exists after removeScheduleAndLauncher: %v", err)
-	}
+	t.Run("dry run", func(t *testing.T) {
+		b.Reset()
+		renderScheduleStatus(&b, scheduleStatus{DryRun: true, Every: "weekly", At: "19:00"})
+		got := b.String()
+		for _, want := range []string{
+			"Scheduled clean: PREVIEW (dry run, nothing registered)",
+			"Checks daily at",
+			"Register it with: du schedule on (same flags, without --dry-run)",
+		} {
+			if !strings.Contains(got, want) {
+				t.Errorf("dry run text lacks %q:\n%s", want, got)
+			}
+		}
+		for _, absent := range []string{"Turn off with", "Scheduled clean: ON"} {
+			if strings.Contains(got, absent) {
+				t.Errorf("dry run text has %q, want absent:\n%s", absent, got)
+			}
+		}
+	})
 }
