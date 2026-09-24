@@ -85,7 +85,9 @@ func TestAnalyzeShowsWhatGrew(t *testing.T) {
 }
 
 // With the Recycle Bin smaller than the file, Windows must ask before deleting
-// it permanently, and No must keep it.
+// it permanently. Answering No leaves the bin out of it: the file is moved into
+// Duster's quarantine instead (gone from its folder, kept restorable), and
+// du restore 1 puts it back.
 func TestRecycleBinTooSmallAsksFirst(t *testing.T) {
 	bin := duBin(t)
 	root := t.TempDir()
