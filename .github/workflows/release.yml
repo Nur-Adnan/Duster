@@ -169,12 +169,16 @@ jobs:
               -X main.BuildDate=${BUILD_DATE} \
               -X main.Commit=${COMMIT}" \
             -o duster-windows-${{ matrix.suffix }}.exe .
+          go build -trimpath -ldflags="-s -w -H=windowsgui" \
+            -o duw-windows-${{ matrix.suffix }}.exe ./launcher/duw
 
       - name: Upload Unsigned Binary
         uses: actions/upload-artifact@v4
         with:
           name: unsigned-windows-${{ matrix.suffix }}
-          path: duster-windows-${{ matrix.suffix }}.exe
+          path: |
+            duster-windows-${{ matrix.suffix }}.exe
+            duw-windows-${{ matrix.suffix }}.exe
           if-no-files-found: error
           retention-days: 1
 
@@ -231,7 +235,7 @@ jobs:
         if: vars.SIGNPATH_PROJECT_SLUG != ''
         shell: pwsh
         run: |
-          foreach ($name in 'duster-windows-amd64.exe', 'duster-windows-arm64.exe') {
+          foreach ($name in 'duster-windows-amd64.exe', 'duster-windows-arm64.exe', 'duw-windows-amd64.exe', 'duw-windows-arm64.exe') {
             $sig = Get-AuthenticodeSignature (Join-Path signed $name)
             Write-Output "${name}: $($sig.Status), $($sig.SignerCertificate.Subject)"
             if ($sig.Status -ne 'Valid') { throw "${name} is not validly signed: $($sig.StatusMessage)" }
@@ -250,7 +254,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: duster-windows-amd64
-          path: signed/duster-windows-amd64.exe
+          path: |
+            signed/duster-windows-amd64.exe
+            signed/duw-windows-amd64.exe
           if-no-files-found: error
           retention-days: 5
 
@@ -258,7 +264,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: duster-windows-arm64
-          path: signed/duster-windows-arm64.exe
+          path: |
+            signed/duster-windows-arm64.exe
+            signed/duw-windows-arm64.exe
           if-no-files-found: error
           retention-days: 5
 
@@ -314,6 +322,7 @@ jobs:
         run: |
           mkdir -p dist/portable/Duster-${{ steps.version.outputs.version }}-Portable-x64
           cp dist/duster-windows-amd64.exe dist/portable/Duster-${{ steps.version.outputs.version }}-Portable-x64/du.exe
+          cp dist/duw-windows-amd64.exe dist/portable/Duster-${{ steps.version.outputs.version }}-Portable-x64/duw.exe
           cp README.md LICENSE SECURITY.md dist/portable/Duster-${{ steps.version.outputs.version }}-Portable-x64/ 2>/dev/null || true
           printf '@echo off\ntitle Duster\n"%%~dp0du.exe" --version\ncmd /K\n' > dist/portable/Duster-${{ steps.version.outputs.version }}-Portable-x64/Launch-Duster.bat
           cd dist/portable && zip -r ../Duster-${{ steps.version.outputs.version }}-Portable-x64.zip Duster-${{ steps.version.outputs.version }}-Portable-x64/
@@ -322,6 +331,7 @@ jobs:
         run: |
           mkdir -p dist/portable/Duster-${{ steps.version.outputs.version }}-Portable-arm64
           cp dist/duster-windows-arm64.exe dist/portable/Duster-${{ steps.version.outputs.version }}-Portable-arm64/du.exe
+          cp dist/duw-windows-arm64.exe dist/portable/Duster-${{ steps.version.outputs.version }}-Portable-arm64/duw.exe
           cp README.md LICENSE SECURITY.md dist/portable/Duster-${{ steps.version.outputs.version }}-Portable-arm64/ 2>/dev/null || true
           printf '@echo off\ntitle Duster\n"%%~dp0du.exe" --version\ncmd /K\n' > dist/portable/Duster-${{ steps.version.outputs.version }}-Portable-arm64/Launch-Duster.bat
           cd dist/portable && zip -r ../Duster-${{ steps.version.outputs.version }}-Portable-arm64.zip Duster-${{ steps.version.outputs.version }}-Portable-arm64/
