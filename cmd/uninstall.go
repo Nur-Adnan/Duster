@@ -142,6 +142,8 @@ type uninstallModel struct {
 	selectedSize int64
 	sweepSize    int64
 	kept         int
+	keepFailed   int    // selected leftovers that could not be kept and stayed in place
+	sweepWarn    string // sweepWarning of the quarantine sweep before the run
 	uninstErr    error
 	sweepSkipped bool // uninstaller failed or the app is still installed: nothing is swept
 	width        int
@@ -163,9 +165,14 @@ type scanLeftoversCompleteMsg struct {
 	items []leftoverItem
 }
 
+// sweepCompleteMsg reports a leftover sweep: size is what was kept (or, in a
+// dry run, what would be), which is still on disk until the quarantine
+// sweep, so it is never reported as freed.
 type sweepCompleteMsg struct {
-	reclaimed int64
+	size      int64
 	kept      int
+	failed    int
+	sweepWarn string
 }
 
 func initialUninstallModel() uninstallModel {
@@ -252,11 +259,13 @@ func scanLeftoversCmd(app uninstall.InstalledApp) tea.Cmd {
 func runSweepCmd(items []leftoverItem, dry bool) tea.Cmd {
 	return func() tea.Msg {
 		var s *quarantineSession
+		var warn string
 		if !dry {
-			sweepQuarantine(time.Now())
+			warn = sweepWarning(sweepQuarantine(time.Now()))
 			s = newQuarantineSession("uninstall")
 		}
-		var reclaimed int64
+		var size int64
+		var failed int
 		for _, item := range items {
 			if !item.Selected {
 				continue
@@ -272,14 +281,16 @@ func runSweepCmd(items []leftoverItem, dry bool) tea.Cmd {
 				logUninstOperation("quarantine", item.Path, item.Size, success)
 			}
 			if success {
-				reclaimed += item.Size
+				size += item.Size
+			} else {
+				failed++ // e.g. errNoQuarantine on a network-redirected folder
 			}
 		}
 		var kept int
 		if s != nil {
 			kept = s.Kept()
 		}
-		return sweepCompleteMsg{reclaimed: reclaimed, kept: kept}
+		return sweepCompleteMsg{size: size, kept: kept, failed: failed, sweepWarn: warn}
 	}
 }
 
@@ -456,8 +467,10 @@ func (m uninstallModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case sweepCompleteMsg:
-		m.selectedSize = msg.reclaimed
+		m.selectedSize = msg.size
 		m.kept = msg.kept
+		m.keepFailed = msg.failed
+		m.sweepWarn = msg.sweepWarn
 		m.state = uninstStateFinished
 		return m, nil
 	}
@@ -705,7 +718,7 @@ func (m uninstallModel) View() string {
 		var confSweepBox strings.Builder
 		confSweepBox.WriteString("⚠️  " + uninstFailStyle.Render("CONFIRM SYSTEM SWEEP TRANSACTION") + "\n\n")
 		confSweepBox.WriteString(fmt.Sprintf("  This moves %d selected leftovers to Duster's quarantine (restorable for 7 days with du restore).\n", countSelectedLeftovers(m.leftovers)))
-		confSweepBox.WriteString(fmt.Sprintf("  Total space to reclaim: %s\n\n", uninstSuccessStyle.Render(formatBytes(m.sweepSize))))
+		confSweepBox.WriteString(fmt.Sprintf("  Total size to keep: %s\n\n", uninstSuccessStyle.Render(formatBytes(m.sweepSize))))
 		confSweepBox.WriteString("  This operation will bypass the Recycle Bin. Proceed? [y to Sweep / n to Cancel]")
 		boxLayout = uninstLeftBoxStyle.Width(83).Render(confSweepBox.String())
 
@@ -731,10 +744,16 @@ func (m uninstallModel) View() string {
 			finBox.WriteString(fmt.Sprintf("  Est Reclaim : %s simulated\n\n", formatBytes(m.selectedSize)))
 		} else {
 			finBox.WriteString(fmt.Sprintf("  Status      : %s\n", uninstSuccessStyle.Render("UNINSTALLED & SWEPT")))
-			finBox.WriteString(fmt.Sprintf("  Reclaimed   : %s of leftovers cleared\n\n", uninstSuccessStyle.Render(formatBytes(m.selectedSize))))
 			if m.kept > 0 {
-				finBox.WriteString("  Kept for 7 days: du restore lists it, du restore 1 puts it back.\n\n")
+				finBox.WriteString(fmt.Sprintf("  Leftovers   : Kept %s for 7 days (du restore puts it back)\n", uninstSuccessStyle.Render(strings.TrimSpace(formatBytes(m.selectedSize)))))
 			}
+			if m.keepFailed > 0 {
+				finBox.WriteString(uninstFailStyle.Render("  "+notKeptNote(m.keepFailed)) + "\n")
+			}
+			if m.sweepWarn != "" {
+				finBox.WriteString(uninstGrayText("  "+m.sweepWarn) + "\n")
+			}
+			finBox.WriteString("\n")
 		}
 		finBox.WriteString("  Press [q] or [esc] to return to the CLI shell.")
 		boxLayout = uninstLeftBoxStyle.Width(83).Render(finBox.String())

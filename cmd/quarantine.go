@@ -446,6 +446,26 @@ func sweepQuarantine(now time.Time) []error {
 	return errs
 }
 
+// sweepWarning folds sweepQuarantine's errors into one warning line ("" when
+// there are none), for the commands that sweep before they keep anything. A
+// failed sweep never stops them: the expired items stay kept, and listed.
+func sweepWarning(errs []error) string {
+	if len(errs) == 0 {
+		return ""
+	}
+	return "Warning: some expired kept items could not be removed: " + strings.ReplaceAll(errors.Join(errs...).Error(), "\n", "; ")
+}
+
+// notKeptNote is the finish views' line for selected items that could not be
+// kept (errNoQuarantine on a network-redirected folder, a failed move): they
+// were left where they were, nothing was deleted.
+func notKeptNote(n int) string {
+	if n == 1 {
+		return "1 item could not be kept and was left in place"
+	}
+	return fmt.Sprintf("%d items could not be kept and were left in place", n)
+}
+
 // removeSessionDir deletes one session folder, after the same path check
 // every other delete passes.
 func removeSessionDir(dir string) error {
