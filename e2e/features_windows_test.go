@@ -132,7 +132,7 @@ func TestPurgeAsksThenDeletesMarkedArtifacts(t *testing.T) {
 	marked, unmarked := filepath.Join(ws, "app", "node_modules"), filepath.Join(ws, "bare", "node_modules")
 
 	tm := start(t, "purge", "--path", ws)
-	tm.waitFor("PERMANENT CLEAN MODE", 30*time.Second)
+	tm.waitFor("QUARANTINE MODE", 30*time.Second)
 	confirm := func() {
 		t.Helper()
 		for end := time.Now().Add(time.Minute); time.Now().Before(end); {

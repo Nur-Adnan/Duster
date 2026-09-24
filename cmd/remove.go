@@ -117,6 +117,7 @@ type removeModel struct {
 	err        error
 	width      int
 	height     int
+	heldBytes  int64
 }
 
 type rmUninstallCompleteMsg struct {
@@ -131,6 +132,7 @@ func initialRemoveModel(currentExe string) removeModel {
 		state:      stateRmIdle,
 		currentExe: currentExe,
 		logDir:     logging.Dir(),
+		heldBytes:  quarantineHeld(),
 	}
 }
 
@@ -140,6 +142,14 @@ func (m removeModel) Init() tea.Cmd {
 
 func runUninstallCmd(currentExe, logDir string, dryRun bool) tea.Cmd {
 	return func() tea.Msg {
+		// 0. Empty the undo quarantine: only when actually deleting.
+		if !dryRun {
+			if err := emptyAllQuarantines(); err != nil {
+				logRmOperation("self-uninstall", currentExe, 0, false)
+				return rmUninstallCompleteMsg{err: err}
+			}
+		}
+
 		// 1. Safe purge configuration directory
 		if err := cleanDusterDir(logDir, currentExe, dryRun); err != nil {
 			logRmOperation("self-uninstall", currentExe, 0, false)
@@ -227,7 +237,11 @@ func (m removeModel) View() string {
 		boxLayout.WriteString("  This action will permanently delete:\n")
 		boxLayout.WriteString(fmt.Sprintf("    • Running binary executable: %s\n", rmWhiteText(m.currentExe)))
 		boxLayout.WriteString(fmt.Sprintf("    • Local configuration files: %s\n", rmWhiteText(m.logDir)))
-		boxLayout.WriteString("    • Operational logs and transaction history\n\n")
+		boxLayout.WriteString("    • Operational logs and transaction history\n")
+		if m.heldBytes > 0 {
+			boxLayout.WriteString(fmt.Sprintf("    • Also deletes %s kept by Duster for undo (du restore).\n", formatBytes(m.heldBytes)))
+		}
+		boxLayout.WriteString("\n")
 		if rmDryRun {
 			boxLayout.WriteString(rmSuccessStyle.Render("  [DRY-RUN SIMULATION ACTIVE] — No bytes will actually be deleted.") + "\n\n")
 		}
@@ -314,6 +328,13 @@ func cleanDusterDir(logDir, keep string, simulate bool) error {
 	return firstErr
 }
 
+// emptyAllQuarantines permanently deletes every item Duster is holding for
+// undo on this machine. Called before cleanDusterDir on every path that
+// actually deletes, so `du remove` leaves nothing recoverable behind.
+func emptyAllQuarantines() error {
+	return emptySessions(groupSessions(loadKeptSessions(quarantineRoots())))
+}
+
 // logRmOperation records a FAILED self-uninstall only. A successful one writes
 // nothing: the log lives in the folder being removed, and writing it would
 // recreate that folder right after the cleanup.
@@ -327,7 +348,13 @@ func logRmOperation(action, target string, size int64, success bool) {
 func runSilentRemove(currentExe string) {
 	logDir := logging.Dir()
 
-	err := cleanDusterDir(logDir, currentExe, rmDryRun)
+	var err error
+	if !rmDryRun {
+		err = emptyAllQuarantines()
+	}
+	if err == nil {
+		err = cleanDusterDir(logDir, currentExe, rmDryRun)
+	}
 	logRmOperation("silent-uninstall", currentExe, 0, err == nil)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Uninstall incomplete; nothing scheduled for removal: %v\n", err)
@@ -352,10 +379,14 @@ func runHeadlessRemove(currentExe string) {
 	// documented "plan" semantics and prevents `du remove | tee log` — where the
 	// interactive confirmation is bypassed — from silently uninstalling.
 	performDelete := rmForce && !rmDryRun
+	held := quarantineHeld()
 
 	var err error
 	if performDelete {
-		err = cleanDusterDir(logDir, currentExe, false)
+		err = emptyAllQuarantines()
+		if err == nil {
+			err = cleanDusterDir(logDir, currentExe, false)
+		}
 		if err == nil {
 			// SECURITY: Uses safe delayed delete instead of cmd.exe /C shell injection
 			removeScheduleAndLauncher(currentExe)
@@ -379,12 +410,14 @@ func runHeadlessRemove(currentExe string) {
 		Status              string `json:"status"`
 		DryRun              bool   `json:"dry_run"`
 		Timestamp           string `json:"timestamp"`
+		QuarantineHeld      int64  `json:"quarantine_held,omitempty"`
 	}{
 		ExecutablePath:      currentExe,
 		ConfigurationFolder: logDir,
 		Status:              statusStr,
 		DryRun:              rmDryRun,
 		Timestamp:           time.Now().UTC().Format(time.RFC3339),
+		QuarantineHeld:      held,
 	}
 
 	data, jsonErr := json.MarshalIndent(payload, "", "  ")

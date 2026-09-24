@@ -40,7 +40,8 @@ du analyze .   # Interactive disk explorer
 | `du clean` | Scans & cleans 34 cache categories (temp, browsers, dev tools, GPU shaders) |
 | `du status` | Real-time CPU (usage, temperature), RAM, disk, network, battery dashboard (1s refresh) |
 | `du analyze [path]` | Drill-down disk usage explorer with delete & open actions; shows what grew since the last scan of the same folder |
-| `du purge` | Finds `node_modules`, `target`, `dist`, `.gradle`, `vendor` and purges them |
+| `du purge` | Finds `node_modules`, `target`, `dist`, `.gradle`, `vendor` and keeps them, restorable for 7 days |
+| `du restore` | Lists and brings back what `purge`, `uninstall` and `installer` kept |
 | `du uninstall` | App uninstaller + leftover AppData sweeper |
 | `du installer` | Detects bulky old `.exe`/`.msi` installers in Downloads |
 | `du vdisk` | Shrinks the WSL and Docker virtual disks (`.vhdx`) that grow but never shrink (admin) |
@@ -59,7 +60,9 @@ du analyze .   # Interactive disk explorer
 
 > `du optimize` also reports the space that only you can reclaim: a previous Windows installation (`Windows.old`) and the hibernation file. Duster measures them and tells you how to remove them, but never touches either.
 
-> Most commands support `--json` for scripting. `clean`, `purge`, `installer`, `optimize`, `vdisk`, `uninstall`, `remove` and `schedule on` support `--dry-run` for safe previews.
+> `du purge`, the uninstall leftover sweep and the `installer` sweep no longer delete for good: they keep what they remove in a quarantine on the same drive, so no copy is made. Kept items still use their space until they expire after 7 days, or sooner, oldest first, when their drive drops below 10% free (the next purge, uninstall, installer sweep or scheduled clean does that and says so; `du restore` itself only removes what is past 7 days); the summary says how much was kept, not freed. `du restore` lists what's kept, `du restore <n>` brings a session back, and it never overwrites a file or folder that already exists at the original path, skipping it instead. `--permanent` on `purge` deletes for good and frees the space now, when you're sure.
+
+> Most commands support `--json` for scripting. `clean`, `purge`, `installer`, `optimize`, `vdisk`, `uninstall`, `remove`, `restore` and `schedule on` support `--dry-run` for safe previews.
 
 ---
 
