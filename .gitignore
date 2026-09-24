@@ -64,6 +64,8 @@ session.json
 # Node.js / Next.js Setup (if any scripts/collateral are run)
 # --------------------------------------------------------------------
 node_modules/
+.next/
+.vercel/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

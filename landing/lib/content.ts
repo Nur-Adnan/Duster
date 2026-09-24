@@ -1,6 +1,19 @@
-// Set NEXT_PUBLIC_SITE_URL in production (e.g. https://duster.example.com); it is inlined
-// at build time. Without it, canonical, Open Graph, JSON-LD, robots and sitemap URLs point at localhost.
-export const siteUrl = new URL(process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000");
+// Automatically resolves site URL:
+// 1. NEXT_PUBLIC_SITE_URL if configured (e.g. custom domain or production URL)
+// 2. VERCEL_PROJECT_PRODUCTION_URL (automatically provided by Vercel for production)
+// 3. VERCEL_URL (automatically provided by Vercel for preview deployments)
+// 4. http://localhost:3000 for local development
+function getSiteUrl(): URL {
+  const envUrl =
+    process.env.NEXT_PUBLIC_SITE_URL ||
+    (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : undefined) ||
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : undefined) ||
+    "http://localhost:3000";
+
+  return new URL(envUrl.startsWith("http") ? envUrl : `https://${envUrl}`);
+}
+
+export const siteUrl = getSiteUrl();
 
 const REPO = "https://github.com/Nur-Adnan/Duster";
 
