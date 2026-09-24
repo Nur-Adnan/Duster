@@ -890,6 +890,12 @@ func scanArtifacts(root string, onFound func(DiscoveredArtifact, int)) ([]Discov
 		if !fs.IsValidPath(path) {
 			return filepath.SkipDir
 		}
+		// Kept items are the user's undo window: a scan of %LOCALAPPDATA% or
+		// of X:\.duster-quarantine must never offer them (--permanent would
+		// delete them for good).
+		if insideQuarantine(path) {
+			return filepath.SkipDir
+		}
 
 		if framework, exists := developerArtifacts[strings.ToLower(name)]; exists {
 			if !isLikelyBuildArtifact(strings.ToLower(name), path) {
