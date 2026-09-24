@@ -151,7 +151,7 @@ export function DiskBar({ tiles }: { tiles: Tile[] }) {
                   under itself while swatch, size and percent stay on line one. */}
               <span className="mt-1 size-3 shrink-0 rounded-sm" style={{ background: item.color }} aria-hidden="true" />
               <span className="min-w-0 flex-1">{item.label}</span>
-              <span className="w-16 shrink-0 text-right tabular-nums text-ink">{item.value}</span>
+              <span className="shrink-0 tabular-nums text-ink">{item.value}</span>
               <span
                 className={`w-9 shrink-0 text-right text-xs leading-5 tabular-nums ${active === i ? "text-ink-muted" : "text-ink-faint"}`}
               >{pct(item.bytes)}%</span>
