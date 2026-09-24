@@ -343,6 +343,28 @@ jobs:
           $null = Check 'analyze: a file' @('analyze', '--json', "$tmp\file.txt") @(0, 1)
           $e = Check 'analyze: empty folder' @('analyze', '--json', "$tmp\empty") @(0)
           if (($e | ConvertFrom-Json).total_size -ne 0) { $script:failures += 'analyze: an empty folder reported a size' }
+          # What changed since last time: the first scan of a folder has
+          # nothing to compare with (changes is null), the second explains
+          # the growth, and --no-history leaves no trace.
+          $grow = Join-Path $tmp 'grow'
+          New-Item -ItemType Directory -Force "$grow\sub" | Out-Null
+          [IO.File]::WriteAllBytes("$grow\sub\seed.bin", (New-Object byte[] (1MB)))
+          $h1 = Check 'analyze: first scan of a folder' @('analyze', '--json', $grow) @(0)
+          if ($null -ne ($h1 | ConvertFrom-Json).changes) { $script:failures += 'analyze: a first scan reported changes' }
+          $blob = New-Object byte[] (20MB)
+          [IO.File]::WriteAllBytes("$grow\sub\new.bin", $blob)
+          $h2 = (Check 'analyze: second scan explains growth' @('analyze', '--json', $grow) @(0)) | ConvertFrom-Json
+          if ($h2.changes.delta -ne 20MB) { $script:failures += "analyze: change was $($h2.changes.delta), want $(20MB)" }
+          if (-not ($h2.changes.entries | Where-Object { $_.path -like '*new.bin' -and $_.status -eq 'new' })) {
+            $script:failures += 'analyze: the new file was not named'
+          }
+          $quiet = Join-Path $tmp 'quiet'
+          New-Item -ItemType Directory -Force $quiet | Out-Null
+          $before = @(Get-ChildItem "$env:LOCALAPPDATA\Duster\history" -Directory -ErrorAction SilentlyContinue).Count
+          $null = Check 'analyze --no-history' @('analyze', '--json', '--no-history', $quiet) @(0)
+          $after = @(Get-ChildItem "$env:LOCALAPPDATA\Duster\history" -Directory -ErrorAction SilentlyContinue).Count
+          if ($after -ne $before) { $script:failures += 'analyze --no-history saved a snapshot' }
+          $null = Check 'analyze: bad --since' @('analyze', '--json', '--since', 'soon', $grow) @(1)
           $null = Check 'purge: missing path' @('purge', '--json', '--path', "$tmp\missing") @(1)
           $null = Check 'purge: drive root' @('purge', '--json', '--path', 'C:\') @(1)
           $null = Check 'purge: Windows folder' @('purge', '--json', '--path', $env:windir) @(1)

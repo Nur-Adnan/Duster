@@ -55,6 +55,34 @@ func TestAnalyzeNavigatesAndRecycles(t *testing.T) {
 	tm.waitExit(10 * time.Second)
 }
 
+// A second scan explains what grew since the first: c lists it, and Enter
+// jumps to the folder with the cursor on the new file, ready for d.
+func TestAnalyzeShowsWhatGrew(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "KILO-DIR", "lima-keep.bin"), 2<<20)
+	if out, err := exec.Command(duBin(t), "analyze", "--json", root).CombinedOutput(); err != nil {
+		t.Fatalf("seeding scan: %v\n%s", err, out)
+	}
+	mustWrite(t, filepath.Join(root, "KILO-DIR", "november-new.bin"), 24<<20)
+
+	tm := start(t, "analyze", root)
+	tm.waitFor("Change:", time.Minute)
+	tm.send("c")
+	tm.waitFor("What changed since", 5*time.Second)
+	if s := squash(tm.screen()); !strings.Contains(s, "november-new.bin") || !strings.Contains(s, "+24 MB") {
+		t.Fatalf("the changes panel does not name the new file:\n%s", tm.screen())
+	}
+	tm.send(keyEnter)
+	tm.waitFor("lima-keep.bin", 5*time.Second) // inside KILO-DIR now
+	tm.send("d")
+	tm.waitFor("Send to Recycle Bin?", 5*time.Second)
+	if s := squash(tm.screen()); !strings.Contains(s, "november-new.bin") {
+		t.Fatal("after the jump, d did not target the file that grew")
+	}
+	tm.send("n", "q")
+	tm.waitExit(10 * time.Second)
+}
+
 // With the Recycle Bin smaller than the file, Windows must ask before deleting
 // it permanently, and No must keep it.
 func TestRecycleBinTooSmallAsksFirst(t *testing.T) {
