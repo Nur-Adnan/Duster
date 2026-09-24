@@ -114,7 +114,7 @@ jobs:
           schtasks /Delete /TN 'Duster Spike (runner)' /F
 
           # B. A new standard (non-admin) user registers, queries and deletes its own task.
-          $pw = 'Sp!' + [guid]::NewGuid().ToString('N').Substring(0, 16) + 'aA1'
+          $pw = 'Sp!' + [guid]::NewGuid().ToString('N').Substring(0, 8) + 'aA1'   # net user prompts (Y/N) above 14 characters
           net user dspike $pw /add | Out-Null
           $sid = (New-Object Security.Principal.NTAccount('dspike')).Translate([Security.Principal.SecurityIdentifier]).Value
           $f2 = Join-Path $env:PUBLIC 'spike2.xml'
@@ -2712,7 +2712,7 @@ git commit -m "build: ship duw.exe in zips, installer, install.ps1 and releases"
           if ($LASTEXITCODE -ne 0) { throw 'a second off failed' }
 
           # A standard user turns it on and off for themselves.
-          $pw = 'Du!' + [guid]::NewGuid().ToString('N').Substring(0, 16) + 'aA1'
+          $pw = 'Du!' + [guid]::NewGuid().ToString('N').Substring(0, 8) + 'aA1'   # net user prompts (Y/N) above 14 characters
           net user dsched $pw /add | Out-Null
           $cred = New-Object PSCredential('dsched', (ConvertTo-SecureString $pw -AsPlainText -Force))
           $pub = Join-Path $env:PUBLIC 'dsched'
