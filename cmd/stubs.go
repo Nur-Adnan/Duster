@@ -29,6 +29,8 @@ func getDiskFreeBytesOS(string) int64 { return 0 }
 
 func diskFreePercent(string) float64 { return -1 }
 
+func diskSpace(string) (free, total int64, ok bool) { return 0, 0, false }
+
 // Unknown volume: the history comparison then skips its same-disk check.
 func volumeSerial(string) uint32 { return 0 }
 
