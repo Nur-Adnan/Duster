@@ -121,6 +121,12 @@ GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
 AMD64_SIZE=$(ls -lh "${DIST_DIR}/duster-windows-amd64.exe" | awk '{print $5}')
 echo -e "  ${GREEN}✓${NC} duster-windows-amd64.exe  (${AMD64_SIZE})"
 
+# duw.exe (scheduled cleans launcher, no console window)
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
+    go build -trimpath -ldflags="-s -w -H=windowsgui" \
+    -o "${DIST_DIR}/duw-windows-amd64.exe" ./launcher/duw
+echo -e "  ${GREEN}✓${NC} duw-windows-amd64.exe"
+
 # Windows ARM64
 echo -e "  Building ${BOLD}Windows ARM64${NC}..."
 GOOS=windows GOARCH=arm64 CGO_ENABLED=0 \
@@ -128,6 +134,12 @@ GOOS=windows GOARCH=arm64 CGO_ENABLED=0 \
     -o "${DIST_DIR}/duster-windows-arm64.exe" .
 ARM64_SIZE=$(ls -lh "${DIST_DIR}/duster-windows-arm64.exe" | awk '{print $5}')
 echo -e "  ${GREEN}✓${NC} duster-windows-arm64.exe  (${ARM64_SIZE})"
+
+# duw.exe (scheduled cleans launcher, no console window)
+GOOS=windows GOARCH=arm64 CGO_ENABLED=0 \
+    go build -trimpath -ldflags="-s -w -H=windowsgui" \
+    -o "${DIST_DIR}/duw-windows-arm64.exe" ./launcher/duw
+echo -e "  ${GREEN}✓${NC} duw-windows-arm64.exe"
 
 echo -e "${GREEN}✓ All binaries compiled successfully.${NC}"
 
@@ -142,6 +154,7 @@ if [ "$BUILD_PORTABLE" = true ]; then
     PORTABLE_AMD64="${DIST_DIR}/portable/Duster-${VERSION}-Portable-x64"
     mkdir -p "${PORTABLE_AMD64}"
     cp "${DIST_DIR}/duster-windows-amd64.exe" "${PORTABLE_AMD64}/du.exe"
+    cp "${DIST_DIR}/duw-windows-amd64.exe" "${PORTABLE_AMD64}/duw.exe"
     cp README.md LICENSE SECURITY.md "${PORTABLE_AMD64}/" 2>/dev/null || true
 
     # Create portable launcher script
@@ -166,6 +179,7 @@ BATCH
     PORTABLE_ARM64="${DIST_DIR}/portable/Duster-${VERSION}-Portable-arm64"
     mkdir -p "${PORTABLE_ARM64}"
     cp "${DIST_DIR}/duster-windows-arm64.exe" "${PORTABLE_ARM64}/du.exe"
+    cp "${DIST_DIR}/duw-windows-arm64.exe" "${PORTABLE_ARM64}/duw.exe"
     cp README.md LICENSE SECURITY.md "${PORTABLE_ARM64}/" 2>/dev/null || true
     cp "${PORTABLE_AMD64}/Launch-Duster.bat" "${PORTABLE_ARM64}/"
 
@@ -178,6 +192,7 @@ if [ "$BUILD_INSTALLER" = true ]; then
 
     # Copy installer-ready binary for Inno Setup
     cp "${DIST_DIR}/duster-windows-amd64.exe" "${DIST_DIR}/installer/"
+    cp "${DIST_DIR}/duw-windows-amd64.exe" "${DIST_DIR}/installer/"
     echo -e "  ${GREEN}✓${NC} Installer binary staged"
     echo -e "  ${YELLOW}→${NC} Run Inno Setup on ${BOLD}installer/duster-setup.iss${NC} to build the .exe installer"
 fi
