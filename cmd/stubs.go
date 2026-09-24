@@ -22,6 +22,8 @@ func getProcessCPUTime() (cpuTimes, error) { return cpuTimes{}, errNotWindows }
 
 func getDiskFreeBytesOS(string) int64 { return 0 }
 
+func diskFreePercent(string) float64 { return -1 }
+
 // Unknown volume: the history comparison then skips its same-disk check.
 func volumeSerial(string) uint32 { return 0 }
 
