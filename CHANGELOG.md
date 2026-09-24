@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Added
+- `du optimize` now reports the two biggest things a cleaner cannot remove for you: a previous Windows installation (`Windows.old`, often 10 to 30 GB after a feature update) and the hibernation file. It shows their size and the exact steps to remove or shrink them. Duster never deletes either: removing `Windows.old` ends the 10-day option to go back to your previous Windows, and the hibernation file is a power setting. Sizes also appear in `du optimize --json`.
+- `du optimize --deep` cleans the Windows component store (WinSxS) through DISM. It first runs the read-only analysis and skips the cleanup when Windows reports nothing to gain, so a pointless 20-minute run is avoided. It needs administrator rights, can run for tens of minutes, and shows the elapsed time while it works. It never passes `/ResetBase`, so updates you already installed can still be uninstalled. Quitting while it runs asks for confirmation first, because stopping DISM part-way through servicing Windows is not something to do by accident; if you do stop it, Duster says so and how to finish. `du optimize --deep --dry-run` (or `--deep --json` without `--yes`) shows the analysis and removes nothing. If DISM's report cannot be read in full, for example on a Windows build that ignores `/English`, the task fails and says so instead of reporting that there is nothing to reclaim.
+
+### Fixed
+- `Windows.old` is now a protected path on every drive, so no Duster command can delete a previous Windows installation.
+
 ## [1.2.0] - 2026-09-14
 
 ### Changed

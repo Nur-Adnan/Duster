@@ -83,6 +83,12 @@ func TestIsSystemProtectedPath(t *testing.T) {
 		{"EFI directory", `C:\EFI`, true},
 		{"System Volume Information", `C:\System Volume Information`, true},
 		{"WinRE agent directory", `C:\$WinREAgent`, true},
+		// Only Windows' own cleanup may remove a previous installation; it
+		// also holds the 10-day rollback.
+		{"Previous Windows installation", `C:\Windows.old`, true},
+		{"Inside a previous Windows installation", `C:\Windows.old\Users\x\Documents`, true},
+		{"Windows.old on another drive", `D:\Windows.old`, true},
+		{"Windows.old-prefixed folder is fine", `C:\Windows.older-backup`, false},
 		{"Non-windows user path", `C:\Users\TestUser\Desktop\junk`, false},
 		{"Recovery-prefixed user folder is fine", `C:\RecoveryPhotos`, false},
 		// Drive-relative and root forms: filepath.Clean("C:") is "C:." on

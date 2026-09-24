@@ -61,6 +61,7 @@ Duster hard-blocks deletions on the following directory stems (case-insensitive)
 * `C:\Windows` and all subdirs, excluding exactly the cache/log subtrees the clean categories target: `Temp`, `Prefetch`, `SoftwareDistribution\Download`, `SoftwareDistribution\DeliveryOptimization`, `Minidump`, `Logs\CBS`, `Logs\DISM`
 * `C:\Windows\System32` (strictly absolute protection, resolved via `GetSystemDirectoryW`)
 * `Program Files` & `Program Files (x86)` on any drive
+* `Windows.old` on any drive (the previous Windows installation and its 10-day rollback; only Windows' own cleanup may remove it)
 * `C:\Boot`, `C:\Recovery`, `C:\EFI`, `C:\$WinREAgent`
 * `C:\System Volume Information`
 * Root paths (e.g. `C:\`, `D:\`, `\\server\share`, `\\host\c$`)

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -112,5 +113,121 @@ func TestOptimizeModelUpdate(t *testing.T) {
 	view := optM2.View()
 	if len(view) == 0 {
 		t.Error("Expected View to return styled string, got empty string")
+	}
+}
+
+// The default run stays fast: the component store cleanup is opt-in, because
+// it needs admin rights and can run for tens of minutes.
+func TestOptimizeTasksDeepIsOptIn(t *testing.T) {
+	defaults := optimizeTasks(false)
+	wantIDs := []string{"dns", "delivery_opt", "ssd_trim"}
+	if len(defaults) != len(wantIDs) {
+		t.Fatalf("default run has %d tasks, want %d", len(defaults), len(wantIDs))
+	}
+	for i, id := range wantIDs {
+		if defaults[i].ID != id {
+			t.Errorf("task %d is %q, want %q", i, defaults[i].ID, id)
+		}
+	}
+
+	deep := optimizeTasks(true)
+	if len(deep) != len(wantIDs)+1 {
+		t.Fatalf("--deep run has %d tasks, want %d", len(deep), len(wantIDs)+1)
+	}
+	last := deep[len(deep)-1]
+	if last.ID != "component_store" {
+		t.Errorf("--deep added %q, want component_store", last.ID)
+	}
+	if last.Status != statusPending {
+		t.Errorf("component_store starts as %v, want pending", last.Status)
+	}
+}
+
+// Without admin rights the task is skipped and says why; it must never reach
+// DISM, which would fail with "elevated permissions are required".
+func TestComponentStoreTaskNeedsAdmin(t *testing.T) {
+	res := runComponentStoreTask(false, false)
+	if res.status != statusSkipped {
+		t.Errorf("status = %v, want skipped", res.status)
+	}
+	if res.note == "" || res.err != nil {
+		t.Errorf("note = %q, err = %v; want a reason and no error", res.note, res.err)
+	}
+	if res.reclaimed != 0 {
+		t.Errorf("a skipped task reported %d bytes reclaimed", res.reclaimed)
+	}
+}
+
+// runningComponentStoreModel is a TUI in the middle of the DISM servicing task.
+func runningComponentStoreModel() optimizeModel {
+	tasks := optimizeTasks(true)
+	idx := len(tasks) - 1
+	tasks[idx].Status = statusRunning
+	return optimizeModel{tasks: tasks, currentIdx: idx, running: true, isAdmin: true}
+}
+
+func isQuitCmd(cmd tea.Cmd) bool {
+	if cmd == nil {
+		return false
+	}
+	_, ok := cmd().(tea.QuitMsg)
+	return ok
+}
+
+// Stopping DISM in the middle of servicing Windows takes a second keypress.
+func TestComponentStoreQuitNeedsConfirmation(t *testing.T) {
+	m := runningComponentStoreModel()
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	m = updated.(optimizeModel)
+	if isQuitCmd(cmd) {
+		t.Fatal("the first q stopped a running component store cleanup")
+	}
+	if !m.quitConfirm {
+		t.Fatal("the first q did not ask for confirmation")
+	}
+	if view := m.View(); !strings.Contains(view, "Press q again") {
+		t.Errorf("the screen does not ask for confirmation:\n%s", view)
+	}
+
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	m = updated.(optimizeModel)
+	if !isQuitCmd(cmd) {
+		t.Error("the second q did not quit")
+	}
+	if !m.abortedCleanup {
+		t.Error("quitting mid-cleanup was not recorded, so the user is never told")
+	}
+}
+
+// Any other key means "keep going".
+func TestComponentStoreQuitConfirmationCanBeCancelled(t *testing.T) {
+	m := runningComponentStoreModel()
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	m = updated.(optimizeModel)
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	m = updated.(optimizeModel)
+	if m.quitConfirm {
+		t.Error("another key did not cancel the quit prompt")
+	}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	m = updated.(optimizeModel)
+	if isQuitCmd(cmd) || !m.quitConfirm {
+		t.Error("after cancelling, q quit without asking again")
+	}
+}
+
+// The short tasks keep quitting on the first keypress.
+func TestQuitIsImmediateForShortTasks(t *testing.T) {
+	tasks := optimizeTasks(false)
+	tasks[0].Status = statusRunning
+	m := optimizeModel{tasks: tasks, currentIdx: 0, running: true, isAdmin: true}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	m = updated.(optimizeModel)
+	if !isQuitCmd(cmd) || m.quitConfirm || m.abortedCleanup {
+		t.Error("quitting during a short task asked for confirmation")
 	}
 }

@@ -261,7 +261,15 @@ func IsSystemProtectedPath(path string) bool {
 		}
 	}
 
-	// 4. Never delete boot, recovery, or volume-metadata structures
+	// 4. Never delete a previous Windows installation, on any drive. It holds
+	// the 10-day rollback, and only Windows' own cleanup may remove it.
+	if len(resolved) >= 3 && resolved[1] == ':' {
+		if stem := resolved[2:]; stem == `\windows.old` || strings.HasPrefix(stem, `\windows.old\`) {
+			return true
+		}
+	}
+
+	// 5. Never delete boot, recovery, or volume-metadata structures
 	// (documented protections in docs/security.md §4)
 	for _, stem := range []string{"\\boot", "\\recovery", "\\efi", "\\system volume information", "\\$winreagent"} {
 		p := sysDrive + stem
