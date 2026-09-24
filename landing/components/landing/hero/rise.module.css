@@ -1,0 +1,46 @@
+/* The hero's load-in, CSS only, so it starts at first paint instead of
+   waiting for hydration. Each item sets its own --rise-delay. */
+
+/* Translate only, no opacity: an element that starts transparent doesn't count as
+   painted for LCP until the main thread paints again (~2.8s on a slow phone). */
+@keyframes rise {
+  from {
+    transform: translateY(16px);
+  }
+}
+
+/* Headline lines: translate only, never opacity. The h1 is the LCP element,
+   so its text is painted from the first frame, just clipped below its line. */
+@keyframes rise-line {
+  from {
+    transform: translateY(72%);
+  }
+}
+
+.rise {
+  animation: rise 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: var(--rise-delay, 0s);
+}
+
+.lineClip {
+  display: block;
+  overflow: hidden;
+  /* Keeps descenders inside the clip; the negative margin cancels it. */
+  padding-bottom: 0.12em;
+  margin-bottom: -0.12em;
+}
+
+.line {
+  display: block;
+  animation: rise-line 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: var(--rise-delay, 0s);
+}
+
+/* The global rule already shortens durations to ~0; this also drops the
+   delays, so nothing waits hidden before it shows. */
+@media (prefers-reduced-motion: reduce) {
+  .rise,
+  .line {
+    animation: none;
+  }
+}

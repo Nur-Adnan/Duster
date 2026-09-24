@@ -1,0 +1,699 @@
+- generic [active] [ref=f5e1]:
+  - link "Skip to content" [ref=f5e2] [cursor=pointer]:
+    - /url: "#main"
+  - banner [ref=f5e3]:
+    - generic [ref=f5e4]:
+      - link "Duster" [ref=f5e5] [cursor=pointer]:
+        - /url: "#top"
+      - button "Menu" [ref=f5e9]
+  - main [ref=f5e12]:
+    - region [ref=f5e13]:
+      - generic [ref=f5e14]:
+        - generic [ref=f5e16]:
+          - paragraph [ref=f5e18]: $ Windows · single binary · zero dependencies
+          - heading "Your drive, swept clean." [level=1] [ref=f5e19]:
+            - generic [ref=f5e20]: Your drive,
+            - generic [ref=f5e22]: swept clean.
+          - paragraph [ref=f5e25]: A single-binary Windows CLI that cleans caches, purges dev artifacts, and shows what's actually eating your disk. Every destructive command previews first.
+          - generic [ref=f5e27]:
+            - link "Install Duster" [ref=f5e28] [cursor=pointer]:
+              - /url: https://github.com/Nur-Adnan/Duster/releases/latest
+            - link "View source" [ref=f5e29] [cursor=pointer]:
+              - /url: https://github.com/Nur-Adnan/Duster
+          - generic [ref=f5e31]:
+            - paragraph [ref=f5e32]: Install with PowerShell
+            - generic [ref=f5e33]:
+              - generic [aria-hidden] [ref=f5e34]: PS>
+              - code [ref=f5e35]: irm https://raw.githubusercontent.com/Nur-Adnan/Duster/main/scripts/install.ps1 | iex
+              - button "Copy install command" [ref=f5e36]
+            - status [ref=f5e41]
+        - generic [ref=f5e45]:
+          - generic [ref=f5e46]: du clean --interactive
+          - generic [ref=f5e58]:
+            - generic [ref=f5e59]:
+              - generic [ref=f5e60]: Scanning
+              - generic [ref=f5e65]: 34 categories · 12.4 GB found
+            - tabpanel "Scanning" [ref=f5e66]:
+              - 'img "Disk map. Scanning the drive: cache categories resolve as the scan passes. Your files are mapped but not selected." [ref=f5e67]':
+                - generic [ref=f5e72]:
+                  - generic [ref=f5e73]: Browser caches
+                  - generic [ref=f5e78]: 3.1 GB
+                - generic [ref=f5e83]:
+                  - generic [ref=f5e84]: npm / pnpm store
+                  - generic [ref=f5e89]: 2.8 GB
+                - generic [ref=f5e94]:
+                  - generic [ref=f5e95]: Temp files
+                  - generic [ref=f5e100]: 2.2 GB
+                - generic [ref=f5e105]:
+                  - generic [ref=f5e106]: Windows Update
+                  - generic [ref=f5e111]: 1.9 GB
+                - generic [ref=f5e137]:
+                  - generic [ref=f5e138]: Projects
+                  - generic [ref=f5e143]: Locked
+                - generic [ref=f5e146]:
+                  - generic [ref=f5e147]: Documents
+                  - generic [ref=f5e152]: Locked
+            - generic [aria-hidden] [ref=f5e167]:
+              - generic [ref=f5e168]: Cleanable cache
+              - generic [ref=f5e170]: Your files, never touched
+            - generic [ref=f5e174]:
+              - tablist "Cleaning demo steps" [ref=f5e175]:
+                - tab "Scanning" [selected] [ref=f5e176]
+                - tab "Reviewing" [ref=f5e177]
+                - tab "Cleaned" [ref=f5e178]
+              - button "Pause demo" [ref=f5e179]
+    - region [ref=f5e182]:
+      - generic [ref=f5e185]:
+        - paragraph [ref=f5e186]: $ Commands
+        - heading "One binary, thirteen jobs" [level=2] [ref=f5e187]
+        - paragraph [ref=f5e188]: Every command ships in the same executable — no runtime, no installer step, no background service.
+      - generic [ref=f5e190]:
+        - article [ref=f5e191]:
+          - 'img "du clean sweeps three cache layers: browser cache 3.1 GB, temp files 1.4 GB and shader cache 640 MB, freeing 5.1 GB." [ref=f5e193]':
+            - paragraph [ref=f5e194]: C:\> du clean --yes
+            - generic [ref=f5e195]:
+              - generic [ref=f5e197]:
+                - generic [ref=f5e198]: Browser cache
+                - generic [ref=f5e199]: 3.1 GB
+              - generic [ref=f5e226]:
+                - generic [ref=f5e227]: Temp files
+                - generic [ref=f5e228]: 1.4 GB
+              - generic [ref=f5e255]:
+                - generic [ref=f5e256]: Shader cache
+                - generic [ref=f5e257]: 640 MB
+            - generic [ref=f5e283]:
+              - paragraph [ref=f5e284]: Found 5.1 GB in 3 categories
+              - paragraph [ref=f5e285]:
+                - generic [ref=f5e288]: 5.1 GB freed, every path logged
+          - generic [ref=f5e289]:
+            - heading "du clean" [level=3] [ref=f5e290]
+            - paragraph [ref=f5e291]: Sweeps 34 cache categories across the OS, browsers, and dev tools.
+        - article [ref=f5e292]:
+          - img "du analyze maps C:\\Users\\dev as a treemap, then drills into AppData, the heaviest folder at 18.4 GB, where Docker takes 9.8 GB." [ref=f5e294]:
+            - generic [ref=f5e295]:
+              - paragraph [ref=f5e296]:
+                - text: C:\Users\dev
+                - generic [ref=f5e297]: \AppData
+              - generic [ref=f5e298]:
+                - generic [ref=f5e299]: 37.0 GB
+                - generic [ref=f5e300]: 18.4 GB
+            - img [aria-hidden] [ref=f5e301]:
+              - generic [ref=f5e302]:
+                - generic [ref=f5e303]:
+                  - generic [ref=f5e305]: AppData
+                  - generic [ref=f5e306]: 18.4 GB
+                - generic [ref=f5e307]:
+                  - generic [ref=f5e309]: Projects
+                  - generic [ref=f5e310]: 9.2 GB
+                - generic [ref=f5e311]:
+                  - generic [ref=f5e313]: Videos
+                  - generic [ref=f5e314]: 6.1 GB
+                - generic [ref=f5e315]:
+                  - generic [ref=f5e317]: Other
+                  - generic [ref=f5e318]: 3.3 GB
+              - generic [ref=f5e320]:
+                - generic [ref=f5e321]:
+                  - generic [ref=f5e323]: Docker
+                  - generic [ref=f5e324]: 9.8 GB
+                - generic [ref=f5e325]:
+                  - generic [ref=f5e327]: npm-cache
+                  - generic [ref=f5e328]: 4.1 GB
+                - generic [ref=f5e329]:
+                  - generic [ref=f5e331]: Temp
+                  - generic [ref=f5e332]: 2.6 GB
+                - generic [ref=f5e333]:
+                  - generic [ref=f5e335]: Other
+                  - generic [ref=f5e336]: 1.9 GB
+          - generic [ref=f5e337]:
+            - heading "du analyze" [level=3] [ref=f5e338]
+            - paragraph [ref=f5e339]: Drills into any folder to find what's actually eating disk space.
+        - article [ref=f5e340]:
+          - img "du purge flags node_modules, target and .gradle for removal, each only because a project marker file (package.json, Cargo.toml, build.gradle) sits beside it." [ref=f5e342]:
+            - generic [ref=f5e343]: C:\code
+            - generic [ref=f5e345]: ├─ web-app
+            - generic [ref=f5e347]:
+              - generic [ref=f5e349]: │ ├─ package.json
+              - generic [ref=f5e350]: marker
+            - generic [ref=f5e351]:
+              - generic [ref=f5e352]:
+                - text: │ └─
+                - generic [ref=f5e353]: node_modules
+              - generic [ref=f5e354]: 412 MB
+            - generic [ref=f5e358]: ├─ api
+            - generic [ref=f5e360]:
+              - generic [ref=f5e362]: │ ├─ Cargo.toml
+              - generic [ref=f5e363]: marker
+            - generic [ref=f5e364]:
+              - generic [ref=f5e365]:
+                - text: │ └─
+                - generic [ref=f5e366]: target
+              - generic [ref=f5e367]: 1.1 GB
+            - generic [ref=f5e371]: └─ android
+            - generic [ref=f5e373]:
+              - generic [ref=f5e375]: ├─ build.gradle
+              - generic [ref=f5e376]: marker
+            - generic [ref=f5e377]:
+              - generic [ref=f5e378]:
+                - text: └─
+                - generic [ref=f5e379]: .gradle
+              - generic [ref=f5e380]: 380 MB
+          - generic [ref=f5e384]:
+            - heading "du purge" [level=3] [ref=f5e385]
+            - paragraph [ref=f5e386]: Hunts down stray node_modules, target, and .gradle folders.
+        - article [ref=f5e387]:
+          - 'img "du doctor runs ten health checks: 8 pass and 2 warn (admin rights and long paths)." [ref=f5e389]':
+            - list [ref=f5e390]:
+              - listitem [ref=f5e391]:
+                - generic [ref=f5e399]: Admin rights
+              - listitem [ref=f5e400]:
+                - generic [ref=f5e409]: Temp writable
+              - listitem [ref=f5e410]:
+                - generic [ref=f5e419]: PowerShell
+              - listitem [ref=f5e420]:
+                - generic [ref=f5e429]: Windows build
+              - listitem [ref=f5e430]:
+                - generic [ref=f5e439]: Defender
+              - listitem [ref=f5e440]:
+                - generic [ref=f5e449]: Cache access
+              - listitem [ref=f5e450]:
+                - generic [ref=f5e458]: Long paths
+              - listitem [ref=f5e459]:
+                - generic [ref=f5e468]: Junction loops
+              - listitem [ref=f5e469]:
+                - generic [ref=f5e478]: Terminal color
+              - listitem [ref=f5e479]:
+                - generic [ref=f5e488]: Install path
+            - paragraph [ref=f5e489]:
+              - generic [ref=f5e490]: 8 passed
+              - generic [ref=f5e491]: 2 warnings
+              - generic [ref=f5e492]: 0 failed
+          - generic [ref=f5e493]:
+            - heading "du doctor" [level=3] [ref=f5e494]
+            - paragraph [ref=f5e495]: Runs ten health checks and tells you exactly what's misconfigured.
+        - article [ref=f5e496]:
+          - 'img "du status shows a live dashboard: CPU 12%, RAM 41%, disk 62% and network 2.4 MB/s." [ref=f5e498]':
+            - generic [ref=f5e499]:
+              - generic [ref=f5e500]: C:\> du status
+              - generic [ref=f5e501]: live
+            - generic [ref=f5e503]:
+              - generic [ref=f5e504]:
+                - generic [ref=f5e505]: CPU
+                - generic [ref=f5e509]: 12%
+              - generic [ref=f5e510]:
+                - generic [ref=f5e511]: RAM
+                - generic [ref=f5e513]: 41%
+              - generic [ref=f5e514]:
+                - generic [ref=f5e515]: Disk
+                - generic [ref=f5e517]: 62%
+              - generic [ref=f5e518]:
+                - generic [ref=f5e519]: Net
+                - generic [ref=f5e523]: 2.4 MB/s
+          - generic [ref=f5e524]:
+            - heading "du status" [level=3] [ref=f5e525]
+            - paragraph [ref=f5e526]: A live dashboard for CPU, RAM, disk, network, and thermals.
+    - region [ref=f5e527]:
+      - generic [ref=f5e530]:
+        - paragraph [ref=f5e531]: $ Inside a scan
+        - heading "Every delete is checked before it happens" [level=2] [ref=f5e532]
+        - paragraph [ref=f5e533]: "Duster resolves every path through the same safety layer: symlinks are never followed, OneDrive placeholders are skipped instead of forced online, and protected system folders are refused outright."
+      - generic [ref=f5e534]:
+        - generic [ref=f5e536]:
+          - paragraph [ref=f5e537]: Three paths enter the same safety layer. Only one of them comes out the other side.
+          - list "Safety gates, in order" [ref=f5e538]:
+            - listitem [ref=f5e539]:
+              - paragraph [ref=f5e545]: Path validated
+              - paragraph [ref=f5e546]: Every target is normalized and checked first
+            - listitem [ref=f5e547]:
+              - paragraph [ref=f5e554]: Symlink never followed
+              - paragraph [ref=f5e555]: Links and junctions are unlinked, never walked
+              - generic [ref=f5e556]:
+                - code [ref=f5e557]: C:\Users\you\Projects\link → D:\data
+                - paragraph [ref=f5e558]: "Skipped: link not followed"
+            - listitem [ref=f5e561]:
+              - paragraph [ref=f5e566]: OneDrive placeholder skipped
+              - paragraph [ref=f5e567]: Cloud-only files are never pulled down
+            - listitem [ref=f5e568]:
+              - paragraph [ref=f5e573]: Protected folder refused
+              - paragraph [ref=f5e574]: System folders and Windows.old stay put
+              - generic [ref=f5e575]:
+                - code [ref=f5e576]: C:\Windows\System32\drivers
+                - paragraph [ref=f5e577]: "Refused: protected"
+            - listitem [ref=f5e581]:
+              - paragraph [ref=f5e587]: Dry-run preview
+              - paragraph [ref=f5e588]: Nothing moves without --yes or a confirm
+            - listitem [ref=f5e589]:
+              - paragraph [ref=f5e595]: Operation logged
+              - paragraph [ref=f5e596]: Each action lands in operations.log
+            - listitem [ref=f5e597]:
+              - paragraph [ref=f5e603]: Recycled or deleted
+              - paragraph [ref=f5e604]: Recycle Bin where the command offers it
+            - listitem [ref=f5e605]:
+              - paragraph [ref=f5e610]: Through every gate
+              - generic [ref=f5e611]:
+                - code [ref=f5e612]: "%LOCALAPPDATA%\\Temp\\*.tmp"
+                - paragraph [ref=f5e613]: Removed, logged
+        - generic [ref=f5e617]:
+          - generic [ref=f5e624]:
+            - heading "Dry-run by default" [level=3] [ref=f5e625]
+            - paragraph [ref=f5e626]: Destructive commands preview first. Nothing is removed without --yes or an explicit confirm.
+          - generic [ref=f5e635]:
+            - heading "Logged, not silent" [level=3] [ref=f5e636]
+            - paragraph [ref=f5e637]: Every deletion is written to a local operations log before it runs, so you can audit what happened.
+    - region [ref=f5e638]:
+      - generic [ref=f5e640]:
+        - generic [ref=f5e641]:
+          - paragraph [ref=f5e642]: $ Reclaimed space
+          - heading "What a first run tends to find" [level=2] [ref=f5e643]
+          - paragraph [ref=f5e644]: Numbers from real machines that hadn't been cleaned in a while.
+        - link "Read the category breakdown" [ref=f5e646] [cursor=pointer]:
+          - /url: "#developers"
+      - generic [ref=f5e650]:
+        - generic [ref=f5e651]:
+          - generic [ref=f5e652]:
+            - paragraph [ref=f5e653]: Local Disk (C:)
+            - paragraph [ref=f5e654]:
+              - generic [ref=f5e655]: 11.3GB
+              - generic [ref=f5e656]: reclaimable
+          - paragraph [ref=f5e657]: 8 categories on a first run
+        - list [ref=f5e675]:
+          - listitem [ref=f5e676]:
+            - button "Browser caches 3.1 GB 27%" [ref=f5e677]:
+              - generic [ref=f5e679]: Browser caches
+              - generic [ref=f5e680]: 3.1 GB
+              - generic [ref=f5e681]: 27%
+          - listitem [ref=f5e682]:
+            - button "npm + pnpm store 2.8 GB 25%" [ref=f5e683]:
+              - generic [ref=f5e685]: npm + pnpm store
+              - generic [ref=f5e686]: 2.8 GB
+              - generic [ref=f5e687]: 25%
+          - listitem [ref=f5e688]:
+            - button "Windows Update cache 1.9 GB 17%" [ref=f5e689]:
+              - generic [ref=f5e691]: Windows Update cache
+              - generic [ref=f5e692]: 1.9 GB
+              - generic [ref=f5e693]: 17%
+          - listitem [ref=f5e694]:
+            - button "Docker artifacts 1.2 GB 11%" [ref=f5e695]:
+              - generic [ref=f5e697]: Docker artifacts
+              - generic [ref=f5e698]: 1.2 GB
+              - generic [ref=f5e699]: 11%
+          - listitem [ref=f5e700]:
+            - button "Old installers 980 MB 8%" [ref=f5e701]:
+              - generic [ref=f5e703]: Old installers
+              - generic [ref=f5e704]: 980 MB
+              - generic [ref=f5e705]: 8%
+          - listitem [ref=f5e706]:
+            - button "GPU shader cache 640 MB 6%" [ref=f5e707]:
+              - generic [ref=f5e709]: GPU shader cache
+              - generic [ref=f5e710]: 640 MB
+              - generic [ref=f5e711]: 6%
+          - listitem [ref=f5e712]:
+            - button "Crash dumps 410 MB 4%" [ref=f5e713]:
+              - generic [ref=f5e715]: Crash dumps
+              - generic [ref=f5e716]: 410 MB
+              - generic [ref=f5e717]: 4%
+          - listitem [ref=f5e718]:
+            - button "Thumbnail cache 310 MB 3%" [ref=f5e719]:
+              - generic [ref=f5e721]: Thumbnail cache
+              - generic [ref=f5e722]: 310 MB
+              - generic [ref=f5e723]: 3%
+    - region [ref=f5e724]:
+      - generic [ref=f5e727]:
+        - paragraph [ref=f5e728]: $ Deployments
+        - heading "Runs on your terms" [level=2] [ref=f5e729]
+        - paragraph [ref=f5e730]: A one-off PowerShell install or a pinned binary in CI — same tool, same safety rules.
+      - generic [ref=f5e732]:
+        - article [ref=f5e733]:
+          - generic [ref=f5e734]:
+            - generic [ref=f5e735]: du clean
+            - generic [ref=f5e747]:
+              - paragraph [ref=f5e748]: "[i] System scan complete. Ready for cleanup."
+              - generic [ref=f5e749]:
+                - generic [ref=f5e750]: Category
+                - generic [ref=f5e751]: Size
+              - listbox "du clean categories, demo" [ref=f5e752]:
+                - option "Browser caches 3.1 GB" [selected] [ref=f5e754]:
+                  - generic [ref=f5e758]: Browser caches
+                  - generic [ref=f5e759]: 3.1 GB
+                - option "Temporary files 1.2 GB" [selected] [ref=f5e760]:
+                  - generic [ref=f5e764]: Temporary files
+                  - generic [ref=f5e765]: 1.2 GB
+                - option "Windows Update cache 1.9 GB" [selected] [ref=f5e766]:
+                  - generic [ref=f5e770]: Windows Update cache
+                  - generic [ref=f5e771]: 1.9 GB
+                - option "Thumbnail cache 310 MB" [selected] [ref=f5e772]:
+                  - generic [ref=f5e776]: Thumbnail cache
+                  - generic [ref=f5e777]: 310 MB
+                - option "Windows error reports 184 MB" [ref=f5e778]:
+                  - generic [ref=f5e782]: Windows error reports
+                  - generic [ref=f5e783]: 184 MB
+                - option "Delivery Optimization 612 MB" [ref=f5e784]:
+                  - generic [ref=f5e788]: Delivery Optimization
+                  - generic [ref=f5e789]: 612 MB
+                - option "Recycle Bin 428 MB" [ref=f5e790]:
+                  - generic [ref=f5e794]: Recycle Bin
+                  - generic [ref=f5e795]: 428 MB
+              - paragraph [ref=f5e796]:
+                - generic [ref=f5e797]: 4 selected
+                - generic [ref=f5e798]: 6.5 GB
+              - paragraph [ref=f5e799]:
+                - generic [ref=f5e800]:
+                  - generic [ref=f5e801]:
+                    - text: ↑↓
+                    - generic [ref=f5e802]: Up and down arrows
+                  - text: move
+                - generic [ref=f5e803]:
+                  - generic [ref=f5e804]: space
+                  - text: select
+                - generic [ref=f5e805]:
+                  - generic [ref=f5e806]: enter
+                  - text: clean
+          - generic [ref=f5e807]:
+            - heading "Interactive" [level=3] [ref=f5e808]
+            - paragraph [ref=f5e809]: Launch the TUI and click through categories, drivers, and startup apps.
+            - list [ref=f5e810]:
+              - listitem [ref=f5e811]: Bubble Tea terminal UI
+              - listitem [ref=f5e815]: Live system dashboard
+              - listitem [ref=f5e819]: Category checklist with previews
+              - listitem [ref=f5e823]: Keyboard-only navigation
+        - article [ref=f5e827]:
+          - generic [ref=f5e828]:
+            - generic [ref=f5e829]: PowerShell
+            - 'generic "PowerShell session: du purge --dry-run --json prints a JSON plan, which ConvertFrom-Json turns into objects. Scroll sideways to see full lines." [ref=f5e842]':
+              - code [ref=f5e843]:
+                - generic [ref=f5e844]: PS C:\dev> du purge --dry-run --json
+                - generic [ref=f5e845]: "{"
+                - generic [ref=f5e846]: "\"scanned_path\": \"C:\\\\dev\","
+                - generic [ref=f5e847]: "\"total_found\": 3,"
+                - generic [ref=f5e848]: "\"total_size_bytes\": 2903457792,"
+                - generic [ref=f5e849]: "\"artifacts\": ["
+                - generic [ref=f5e850]: "{"
+                - generic [ref=f5e851]: "\"path\": \"C:\\\\dev\\\\web\\\\node_modules\","
+                - generic [ref=f5e852]: "\"name\": \"node_modules\","
+                - generic [ref=f5e853]: "\"type\": \"node_modules\","
+                - generic [ref=f5e854]: "\"framework\": \"Node.js\","
+                - generic [ref=f5e855]: "\"size\": 1503238553,"
+                - generic [ref=f5e856]: "\"selected\": true"
+                - generic [ref=f5e857]: "},"
+                - generic [ref=f5e858]: "{ … }, { … }"
+                - generic [ref=f5e859]: "]"
+                - generic [ref=f5e860]: "}"
+                - generic [ref=f5e861]: PS C:\dev> $plan = du purge --dry-run --json | ConvertFrom-Json
+                - generic [ref=f5e862]: PS C:\dev> $plan.artifacts.name
+                - generic [ref=f5e863]: node_modules target .gradle
+          - generic [ref=f5e864]:
+            - heading "Scripted" [level=3] [ref=f5e865]
+            - paragraph [ref=f5e866]: Pipe it into CI, a scheduled task, or your own tooling.
+            - list [ref=f5e867]:
+              - listitem [ref=f5e868]: "--json output for scripts and CI"
+              - listitem [ref=f5e872]: "--dry-run on every destructive command"
+              - listitem [ref=f5e876]: "--yes for non-interactive runs"
+              - listitem [ref=f5e880]: Exit codes that scripts can trust
+    - region [ref=f5e884]:
+      - generic [ref=f5e886]:
+        - generic [ref=f5e887]:
+          - paragraph [ref=f5e888]: $ Automation
+          - heading "Built to be scripted" [level=2] [ref=f5e889]
+          - paragraph [ref=f5e890]: Every destructive command previews with --dry-run, and most commands emit structured --json, so you can wire Duster into a scheduled task or a CI health check without guessing at its behavior.
+        - generic [ref=f5e892]:
+          - button "Read the docs" [ref=f5e893] [cursor=pointer]
+          - button "View on GitHub" [ref=f5e894] [cursor=pointer]
+      - generic [ref=f5e896]:
+        - heading "What a scheduled run looks like" [level=3] [ref=f5e897]
+        - list [ref=f5e898]:
+          - listitem [ref=f5e899]:
+            - generic [ref=f5e904]:
+              - paragraph [ref=f5e905]: Task Scheduler
+              - paragraph [ref=f5e906]: Daily at 03:00, signed in or not.
+          - listitem [ref=f5e907]:
+            - generic [ref=f5e912]:
+              - paragraph [ref=f5e913]: du optimize --yes --json
+              - paragraph [ref=f5e914]: Runs headless. No prompts, no window.
+          - listitem [ref=f5e915]:
+            - generic [ref=f5e921]:
+              - paragraph [ref=f5e922]: report.json
+              - generic [ref=f5e923]:
+                - generic [ref=f5e924]: "{"
+                - generic [ref=f5e925]:
+                  - generic [ref=f5e926]: "\"total_reclaimed_bytes\""
+                  - text: ": 734003200"
+                - generic [ref=f5e927]:
+                  - generic [ref=f5e928]: "\"admin_elevated\""
+                  - text: ": false"
+                - generic [ref=f5e929]:
+                  - generic [ref=f5e930]: "\"timestamp\""
+                  - text: ": \"2026-09-24T03:00:04Z\""
+                - generic [ref=f5e931]: "}"
+          - listitem [ref=f5e932]:
+            - generic [ref=f5e937]:
+              - paragraph [ref=f5e938]: Exit code 0
+              - paragraph [ref=f5e939]: The scheduler logs 0x0. A failed task exits 1.
+      - generic [ref=f5e940]:
+        - list [ref=f5e941]:
+          - listitem [ref=f5e942]:
+            - generic [ref=f5e947]: Structured --json output
+          - listitem [ref=f5e948]:
+            - generic [ref=f5e954]: Deterministic exit codes
+          - listitem [ref=f5e955]:
+            - generic [ref=f5e960]: SHA-256 verified self-update
+          - listitem [ref=f5e961]:
+            - generic [ref=f5e967]: Single static binary, no runtime
+          - listitem [ref=f5e968]:
+            - generic [ref=f5e974]: Works headless over SSH or RDP
+        - figure "Real output, captured from the actual binary." [ref=f5e975]:
+          - generic [ref=f5e977]:
+            - generic [ref=f5e978]: du --help
+            - generic "du --help output. Scroll sideways to see full lines." [ref=f5e991]:
+              - code [ref=f5e992]: C:\>du / ______ _ _ _____ _______ ______ _____ │ / | __ \ | | | | / ____|__ __| | ____|| __ \ │ System Maintenance CLI v1.2.0 / | | \ \| | | || (___ | | | |__ | |__) | │ Keep your system clean. Keep it running smooth. /_ | | | || | | | \___ \ | | | __| | _ / │ \--/ | |__/ /| |__| | ____) | | | | |____ | | \ \ │ /__/ |______/ \____/ |_____/ |_| |______||_| \_\ │ ──────────────────────────────────────────────────────────────── USAGE du [flags] AVAILABLE COMMANDS ▪ analyze Interactive TUI disk space explorer and visual analyzer ▪ clean Deep clean system temp files, prefetch, browser caches ▪ doctor Diagnose Windows environment and terminal compatibility ▪ optimize Optimize PC performance (flush DNS, SSD trim, caches) ▪ purge Find and clean developer build artifacts recursively ▪ status Real-time system health dashboard and resource monitor ▪ uninstall Interactive application uninstaller and remnants sweeper ▪ update Check and update Duster to the latest version Use du [command] --help for more information about a command.
+    - region [ref=f5e997]:
+      - generic [ref=f5e1000]:
+        - paragraph [ref=f5e1001]: $ At scale
+        - heading "One executable, every workstation" [level=2] [ref=f5e1002]
+        - paragraph [ref=f5e1003]: No installer service, no telemetry endpoint, no dependency to patch across a fleet.
+      - generic [ref=f5e1005]:
+        - generic [ref=f5e1006]:
+          - 'img "Diagram: a single du.exe file fans out through connector lines to a grid of Windows workstations, and each one lights up with a check as it becomes ready. Copy the binary to each machine and run it; there is nothing else to install." [ref=f5e1007]':
+            - generic [ref=f5e1008]:
+              - generic [ref=f5e1009]:
+                - generic [ref=f5e1010]: Rollout
+                - generic [ref=f5e1011]: 6 of 6 ready
+              - generic [ref=f5e1014]: du.exe
+          - generic [ref=f5e1090]:
+            - paragraph [ref=f5e1091]: Fleet lifecycle
+            - list "Fleet lifecycle" [ref=f5e1093]:
+              - listitem [ref=f5e1094]:
+                - generic [ref=f5e1095]: "1"
+                - generic [ref=f5e1096]: Deploy
+              - listitem [ref=f5e1097]:
+                - generic [ref=f5e1098]: "2"
+                - generic [ref=f5e1099]: Schedule
+              - listitem [ref=f5e1100]:
+                - generic [ref=f5e1101]: "3"
+                - generic [ref=f5e1102]: Verify
+              - listitem [ref=f5e1103]:
+                - generic [ref=f5e1104]: "4"
+                - generic [ref=f5e1105]: Report
+              - listitem [ref=f5e1106]:
+                - generic [ref=f5e1107]: "5"
+                - generic [ref=f5e1108]: Update
+            - paragraph [ref=f5e1112]: After Update, the cycle starts again at Deploy.
+        - generic [ref=f5e1113]:
+          - article [ref=f5e1114]:
+            - heading "No runtime" [level=3] [ref=f5e1125]
+            - paragraph [ref=f5e1126]: CGO disabled, statically linked — copy the binary and run it.
+          - article [ref=f5e1127]:
+            - heading "Verified releases" [level=3] [ref=f5e1134]
+            - paragraph [ref=f5e1135]: SHA-256 checksums and build-provenance attestations on every release.
+          - article [ref=f5e1136]:
+            - heading "Auditable" [level=3] [ref=f5e1145]
+            - paragraph [ref=f5e1146]: Every destructive action is appended to a local operations log.
+          - article [ref=f5e1147]:
+            - heading "Self-updating" [level=3] [ref=f5e1154]
+            - paragraph [ref=f5e1155]: Checks GitHub releases and verifies SHA-256 before swapping the binary.
+    - region [ref=f5e1156]:
+      - generic [ref=f5e1157]:
+        - generic [ref=f5e1160]:
+          - paragraph [ref=f5e1161]: $ Release pipeline
+          - heading "Shipped the way it's built" [level=2] [ref=f5e1162]
+          - paragraph [ref=f5e1163]: Every release runs the same gates before it reaches a workstation.
+        - generic [ref=f5e1165]:
+          - generic [ref=f5e1166]:
+            - generic [ref=f5e1167]:
+              - heading "Release gates" [level=3] [ref=f5e1168]
+              - paragraph [ref=f5e1169]: 8 stages, in order
+            - list "Release pipeline, 8 stages" [ref=f5e1170]:
+              - listitem [ref=f5e1171]:
+                - generic [ref=f5e1183]:
+                  - generic [ref=f5e1184]: CI
+                  - generic [ref=f5e1185]: go test ./...
+                  - generic [ref=f5e1186]: ", passed"
+              - listitem [ref=f5e1187]:
+                - generic [ref=f5e1198]:
+                  - generic [ref=f5e1199]: Vet
+                  - generic [ref=f5e1200]: go vet, both targets
+                  - generic [ref=f5e1201]: ", passed"
+              - listitem [ref=f5e1202]:
+                - generic [ref=f5e1212]:
+                  - generic [ref=f5e1213]: Fmt
+                  - generic [ref=f5e1214]: gofmt -s -l .
+                  - generic [ref=f5e1215]: ", passed"
+              - listitem [ref=f5e1216]:
+                - generic [ref=f5e1227]:
+                  - generic [ref=f5e1228]: Sign
+                  - generic [ref=f5e1229]: build provenance
+                  - generic [ref=f5e1230]: ", passed"
+              - listitem [ref=f5e1231]:
+                - generic [ref=f5e1241]:
+                  - generic [ref=f5e1242]: Hash
+                  - generic [ref=f5e1243]: sha256 per asset
+                  - generic [ref=f5e1244]: ", passed"
+              - listitem [ref=f5e1245]:
+                - generic [ref=f5e1256]:
+                  - generic [ref=f5e1257]: Tag
+                  - generic [ref=f5e1258]: semver release
+                  - generic [ref=f5e1259]: ", passed"
+              - listitem [ref=f5e1260]:
+                - generic [ref=f5e1271]:
+                  - generic [ref=f5e1272]: Smoke
+                  - generic [ref=f5e1273]: real Windows runner
+                  - generic [ref=f5e1274]: ", passed"
+              - listitem [ref=f5e1275]:
+                - generic [ref=f5e1284]:
+                  - generic [ref=f5e1285]: E2E
+                  - generic [ref=f5e1286]: du.exe in ConPTY
+                  - generic [ref=f5e1287]: ", passed"
+          - generic [ref=f5e1288]:
+            - generic [ref=f5e1289]:
+              - heading "Release run" [level=3] [ref=f5e1294]
+              - generic [ref=f5e1295]: "#214"
+              - generic [ref=f5e1296]:
+                - generic [ref=f5e1302]: Branch
+                - text: main
+            - list [ref=f5e1303]:
+              - listitem [ref=f5e1304]:
+                - generic [ref=f5e1308]: gofmt, go vet, staticcheck
+                - generic [ref=f5e1309]: done
+              - listitem [ref=f5e1310]:
+                - generic [ref=f5e1314]: Windows cross-compile
+                - generic [ref=f5e1315]: done
+              - listitem [ref=f5e1316]:
+                - generic [ref=f5e1320]: Checksums + provenance attestation
+                - generic [ref=f5e1321]: done
+              - listitem [ref=f5e1322]:
+                - generic [ref=f5e1327]: Authenticode signing (SignPath)
+                - generic [ref=f5e1328]: configuring
+            - paragraph [ref=f5e1329]: 3 of 4 jobs done
+    - region [ref=f5e1330]:
+      - generic [ref=f5e1331]:
+        - generic [ref=f5e1332]:
+          - paragraph [ref=f5e1333]: $ du help
+          - heading "Questions worth answering upfront" [level=2] [ref=f5e1334]
+          - generic [ref=f5e1335]:
+            - 'img "Example GitHub issue #142, \"du purge skipped my monorepo?\", status open, with a maintainer reply" [ref=f5e1336]':
+              - generic [ref=f5e1341]:
+                - paragraph [ref=f5e1342]: du purge skipped my monorepo?
+                - generic [ref=f5e1343]:
+                  - generic [ref=f5e1344]: Open
+                  - generic [ref=f5e1348]: "#142"
+                  - generic [ref=f5e1349]: question
+                  - generic [ref=f5e1350]: purge
+              - paragraph [ref=f5e1352]: Maintainer Purge only sweeps folders with a project marker. Try --dry-run to see why.
+            - paragraph [ref=f5e1353]: Still have questions?
+            - link "Open an issue on GitHub" [ref=f5e1354] [cursor=pointer]:
+              - /url: "#"
+        - generic [ref=f5e1357]:
+          - generic [ref=f5e1358]:
+            - heading [level=3] [ref=f5e1359]:
+              - button "Does Duster need to run as administrator?" [expanded] [ref=f5e1360] [cursor=pointer]
+            - group "Does Duster need to run as administrator?" [ref=f5e1365]:
+              - paragraph [ref=f5e1366]: No. Most commands run as a normal user. A handful of operations — prefetch cleanup, drive optimization, DISM component-store cleanup — need elevation and Duster will tell you when it's blocked instead of failing silently.
+          - heading [level=3] [ref=f5e1368]:
+            - button "Will it delete something I still need?" [ref=f5e1369] [cursor=pointer]
+          - heading [level=3] [ref=f5e1375]:
+            - button "What happens to Windows.old or the hibernation file?" [ref=f5e1376] [cursor=pointer]
+          - heading [level=3] [ref=f5e1382]:
+            - button "Can I use it in a script or scheduled task?" [ref=f5e1383] [cursor=pointer]
+          - heading [level=3] [ref=f5e1389]:
+            - button "Does it phone home?" [ref=f5e1390] [cursor=pointer]
+          - heading [level=3] [ref=f5e1396]:
+            - button "What platforms does it support?" [ref=f5e1397] [cursor=pointer]
+  - contentinfo [ref=f5e1402]:
+    - generic [ref=f5e1404]:
+      - generic [ref=f5e1405]:
+        - heading "Run it once. See what it finds." [level=2] [ref=f5e1406]
+        - paragraph [ref=f5e1407]: Start with a dry run. Nothing is removed until you say so.
+      - generic [ref=f5e1408]:
+        - generic [ref=f5e1409]:
+          - generic [ref=f5e1410]: Install with PowerShell
+          - code [ref=f5e1411]:
+            - generic [aria-hidden] [ref=f5e1412]: PS>
+            - text: irm https://raw.githubusercontent.com/Nur-Adnan/Duster/main/scripts/install.ps1 | iex
+        - link "View the source on GitHub" [ref=f5e1413] [cursor=pointer]:
+          - /url: https://github.com/Nur-Adnan/Duster
+    - generic [ref=f5e1416]:
+      - generic [ref=f5e1417]:
+        - generic [ref=f5e1418]:
+          - img "Duster logo" [ref=f5e1419]
+          - generic [ref=f5e1420]: Duster
+        - paragraph [ref=f5e1421]: Duster — a Windows-native deep cleaner, built to be trusted with delete.
+      - navigation "Footer" [ref=f5e1422]:
+        - generic [ref=f5e1423]:
+          - heading "Product" [level=3] [ref=f5e1424]
+          - list [ref=f5e1425]:
+            - listitem [ref=f5e1426]:
+              - link "Commands" [ref=f5e1427] [cursor=pointer]:
+                - /url: "#"
+            - listitem [ref=f5e1428]:
+              - link "Changelog" [ref=f5e1429] [cursor=pointer]:
+                - /url: "#"
+            - listitem [ref=f5e1430]:
+              - link "Releases" [ref=f5e1431] [cursor=pointer]:
+                - /url: "#"
+            - listitem [ref=f5e1432]:
+              - link "Roadmap" [ref=f5e1433] [cursor=pointer]:
+                - /url: "#"
+        - generic [ref=f5e1434]:
+          - heading "Developers" [level=3] [ref=f5e1435]
+          - list [ref=f5e1436]:
+            - listitem [ref=f5e1437]:
+              - link "Documentation" [ref=f5e1438] [cursor=pointer]:
+                - /url: "#"
+            - listitem [ref=f5e1439]:
+              - link "GitHub" [ref=f5e1440] [cursor=pointer]:
+                - /url: "#"
+            - listitem [ref=f5e1441]:
+              - link "CLI reference" [ref=f5e1442] [cursor=pointer]:
+                - /url: "#"
+            - listitem [ref=f5e1443]:
+              - link "JSON output" [ref=f5e1444] [cursor=pointer]:
+                - /url: "#"
+        - generic [ref=f5e1445]:
+          - heading "Company" [level=3] [ref=f5e1446]
+          - list [ref=f5e1447]:
+            - listitem [ref=f5e1448]:
+              - link "About" [ref=f5e1449] [cursor=pointer]:
+                - /url: "#"
+            - listitem [ref=f5e1450]:
+              - link "Security policy" [ref=f5e1451] [cursor=pointer]:
+                - /url: "#"
+            - listitem [ref=f5e1452]:
+              - link "Contributing" [ref=f5e1453] [cursor=pointer]:
+                - /url: "#"
+        - generic [ref=f5e1454]:
+          - heading "Legal" [level=3] [ref=f5e1455]
+          - list [ref=f5e1456]:
+            - listitem [ref=f5e1457]:
+              - link "MIT license" [ref=f5e1458] [cursor=pointer]:
+                - /url: "#"
+            - listitem [ref=f5e1459]:
+              - link "Code of conduct" [ref=f5e1460] [cursor=pointer]:
+                - /url: "#"
+    - generic [ref=f5e1462]:
+      - generic [ref=f5e1463]: © 2026 Duster. MIT licensed.
+      - generic [ref=f5e1464]:
+        - link "GitHub" [ref=f5e1465] [cursor=pointer]:
+          - /url: https://github.com/Nur-Adnan/Duster
+        - link "X" [ref=f5e1468] [cursor=pointer]:
+          - /url: https://x.com
+    - generic [aria-hidden]:
+      - generic: duster
+  - button "Open Next.js Dev Tools" [ref=f5e1476] [cursor=pointer]

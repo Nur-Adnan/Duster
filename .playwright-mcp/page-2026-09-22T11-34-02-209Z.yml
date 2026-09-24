@@ -1,0 +1,370 @@
+- generic [active] [ref=f9e1]:
+  - banner [ref=f9e2]:
+    - generic [ref=f9e3]:
+      - link "Duster logo Duster" [ref=f9e4] [cursor=pointer]:
+        - /url: "#top"
+        - img "Duster logo" [ref=f9e5]
+        - generic [ref=f9e6]: Duster
+      - navigation "Primary" [ref=f9e7]:
+        - link "Commands" [ref=f9e8] [cursor=pointer]:
+          - /url: "#features"
+        - link "Inside a scan" [ref=f9e9] [cursor=pointer]:
+          - /url: "#spotlight"
+        - link "Deployments" [ref=f9e10] [cursor=pointer]:
+          - /url: "#usage"
+        - link "Developers" [ref=f9e11] [cursor=pointer]:
+          - /url: "#developers"
+      - generic [ref=f9e12]:
+        - link "Sign in" [ref=f9e13] [cursor=pointer]:
+          - /url: "#signin"
+        - button "Get started" [ref=f9e14] [cursor=pointer]
+  - main [ref=f9e15]:
+    - generic [ref=f9e17]:
+      - generic [ref=f9e18]:
+        - text: Windows · single binary · zero dependencies
+        - heading "Your Windows drive, swept clean from the terminal." [level=1] [ref=f9e19]:
+          - generic [ref=f9e20]: Your Windows drive,
+          - generic [ref=f9e21]: swept clean from
+          - generic [ref=f9e22]: the terminal.
+        - paragraph [ref=f9e23]: Duster finds the gigabytes Windows hides in caches, leftovers, and dev-tool debris, then clears them safely with one command.
+        - generic [ref=f9e24]:
+          - button "Install Duster" [ref=f9e25] [cursor=pointer]
+          - button "View source" [ref=f9e26] [cursor=pointer]
+      - generic [ref=f9e27]:
+        - generic [ref=f9e28]:
+          - generic [ref=f9e30]:
+            - generic [ref=f9e31]: du clean --interactive
+            - generic [ref=f9e37]:
+              - generic [ref=f9e38]:
+                - generic [ref=f9e39]: Scanning
+                - generic [ref=f9e40]: 34 categories · 12.4 GB found
+              - generic [ref=f9e41]:
+                - generic [ref=f9e42]:
+                  - generic [ref=f9e43]: Browser caches
+                  - generic [ref=f9e46]: 3.1 GB
+                - generic [ref=f9e47]:
+                  - generic [ref=f9e48]: npm / pnpm store
+                  - generic [ref=f9e51]: 2.8 GB
+                - generic [ref=f9e52]:
+                  - generic [ref=f9e53]: Windows Update cache
+                  - generic [ref=f9e56]: 1.9 GB
+                - generic [ref=f9e57]:
+                  - generic [ref=f9e58]: GPU shader cache
+                  - generic [ref=f9e61]: 640 MB
+          - generic [ref=f9e63]:
+            - button "Show Scanning state" [ref=f9e64]
+            - button "Show Reviewing state" [ref=f9e66]
+            - button "Show Cleaned state" [ref=f9e68]
+        - link "Book a demo" [ref=f9e70] [cursor=pointer]:
+          - /url: "#demo"
+          - img [aria-hidden] [ref=f9e71]:
+            - generic [ref=f9e73]: BOOK · A · DEMO · BOOK · A · DEMO ·
+    - generic [ref=f9e77]:
+      - generic [ref=f9e79]:
+        - generic [ref=f9e80]: I.
+        - generic [ref=f9e81]: Commands
+      - generic [ref=f9e83]:
+        - generic [ref=f9e84]:
+          - text: Commands
+          - heading "One binary, eleven jobs" [level=2] [ref=f9e85]
+          - paragraph [ref=f9e86]: Every command ships in the same executable — no runtime, no installer step, no background service.
+        - generic [ref=f9e87]:
+          - generic [ref=f9e88]:
+            - generic [ref=f9e92]: du clean
+            - generic [ref=f9e104]:
+              - generic [ref=f9e105]: du clean
+              - paragraph [ref=f9e106]: Sweeps 34 cache categories across the OS, browsers, and dev tools.
+          - generic [ref=f9e107]:
+            - generic [ref=f9e111]: du analyze
+            - generic [ref=f9e123]:
+              - generic [ref=f9e124]: du analyze
+              - paragraph [ref=f9e125]: Drills into any folder to find what's actually eating disk space.
+          - generic [ref=f9e126]:
+            - generic [ref=f9e130]: du purge
+            - generic [ref=f9e142]:
+              - generic [ref=f9e143]: du purge
+              - paragraph [ref=f9e144]: Hunts down stray node_modules, target, and .gradle folders.
+          - generic [ref=f9e145]:
+            - generic [ref=f9e149]: du doctor
+            - generic [ref=f9e161]:
+              - generic [ref=f9e162]: du doctor
+              - paragraph [ref=f9e163]: Runs ten health checks and tells you exactly what's misconfigured.
+          - generic [ref=f9e164]:
+            - generic [ref=f9e168]: du status
+            - generic [ref=f9e180]:
+              - generic [ref=f9e181]: du status
+              - paragraph [ref=f9e182]: A live dashboard for CPU, RAM, disk, network, and thermals.
+    - generic [ref=f9e183]:
+      - generic [ref=f9e185]:
+        - generic [ref=f9e186]: II.
+        - generic [ref=f9e187]: Inside a scan
+      - generic [ref=f9e189]:
+        - generic [ref=f9e190]:
+          - generic [ref=f9e194]:
+            - text: Inside a scan
+            - heading "Every delete is checked before it happens" [level=2] [ref=f9e195]
+            - paragraph [ref=f9e196]: "Duster resolves every path through the same safety layer: symlinks are never followed, OneDrive placeholders are skipped instead of forced online, and protected system folders are refused outright."
+          - generic [ref=f9e197]:
+            - generic [ref=f9e198]:
+              - generic [ref=f9e199]: Dry-run by default
+              - paragraph [ref=f9e200]: Destructive commands preview first. Nothing is removed without --yes or an explicit confirm.
+            - generic [ref=f9e201]:
+              - generic [ref=f9e202]: Logged, not silent
+              - paragraph [ref=f9e203]: Every deletion is written to a local operations log before it runs, so you can audit what happened.
+        - generic [ref=f9e205]:
+          - generic [ref=f9e206]: Recycle Bin aware
+          - generic [ref=f9e207]: Symlink safe
+          - generic [ref=f9e208]: OneDrive safe
+          - generic [ref=f9e209]: Dry-run first
+          - generic [ref=f9e210]: Admin gated
+          - generic [ref=f9e211]: Offline-file aware
+          - generic [ref=f9e212]: Path-validated
+          - generic [ref=f9e213]: Operation logged
+          - generic [ref=f9e214]: Recycle Bin aware
+          - generic [ref=f9e215]: Symlink safe
+          - generic [ref=f9e216]: OneDrive safe
+          - generic [ref=f9e217]: Dry-run first
+          - generic [ref=f9e218]: Admin gated
+          - generic [ref=f9e219]: Offline-file aware
+          - generic [ref=f9e220]: Path-validated
+          - generic [ref=f9e221]: Operation logged
+    - generic [ref=f9e222]:
+      - generic [ref=f9e224]:
+        - generic [ref=f9e225]: III.
+        - generic [ref=f9e226]: Reclaimed space
+      - generic [ref=f9e228]:
+        - generic [ref=f9e229]:
+          - generic [ref=f9e230]:
+            - text: Reclaimed space
+            - heading "What a first run tends to find" [level=2] [ref=f9e231]
+            - paragraph [ref=f9e232]: Numbers from real machines that hadn't been cleaned in a while.
+          - link "Read the category breakdown →" [ref=f9e233] [cursor=pointer]:
+            - /url: "#developers"
+        - generic [ref=f9e234]:
+          - generic [ref=f9e235]:
+            - generic [ref=f9e236]: 3.1 GB
+            - generic [ref=f9e237]: Browser caches
+          - generic [ref=f9e238]:
+            - generic [ref=f9e239]: 2.8 GB
+            - generic [ref=f9e240]: npm + pnpm store
+          - generic [ref=f9e241]:
+            - generic [ref=f9e242]: 1.9 GB
+            - generic [ref=f9e243]: Windows Update cache
+          - generic [ref=f9e244]:
+            - generic [ref=f9e245]: 640 MB
+            - generic [ref=f9e246]: GPU shader cache
+          - generic [ref=f9e247]:
+            - generic [ref=f9e248]: 410 MB
+            - generic [ref=f9e249]: Crash dumps
+          - generic [ref=f9e250]:
+            - generic [ref=f9e251]: 1.2 GB
+            - generic [ref=f9e252]: Docker artifacts
+          - generic [ref=f9e253]:
+            - generic [ref=f9e254]: 980 MB
+            - generic [ref=f9e255]: Old installers
+          - generic [ref=f9e256]:
+            - generic [ref=f9e257]: 310 MB
+            - generic [ref=f9e258]: Thumbnail cache
+    - generic [ref=f9e259]:
+      - generic [ref=f9e261]:
+        - generic [ref=f9e262]: IV.
+        - generic [ref=f9e263]: Deployments
+      - generic [ref=f9e265]:
+        - generic [ref=f9e266]:
+          - text: Deployments
+          - heading "Runs on your terms" [level=2] [ref=f9e267]
+          - paragraph [ref=f9e268]: A one-off PowerShell install or a pinned binary in CI — same tool, same safety rules.
+        - img [aria-hidden] [ref=f9e270]:
+          - generic [ref=f9e275]: Terminal
+          - generic [ref=f9e279]: CI
+          - generic [ref=f9e283]: Scheduler
+          - generic [ref=f9e287]: SSH
+        - generic [ref=f9e293]:
+          - generic [ref=f9e294]:
+            - text: Interactive
+            - paragraph [ref=f9e295]: Launch the TUI and click through categories, drivers, and startup apps.
+            - list [ref=f9e296]:
+              - listitem [ref=f9e297]: Bubble Tea terminal UI
+              - listitem [ref=f9e301]: Live system dashboard
+              - listitem [ref=f9e305]: Category checklist with previews
+              - listitem [ref=f9e309]: Keyboard-only navigation
+          - generic [ref=f9e313]:
+            - text: Scripted
+            - paragraph [ref=f9e314]: Pipe it into CI, a scheduled task, or your own tooling.
+            - list [ref=f9e315]:
+              - listitem [ref=f9e316]: "--json on every command"
+              - listitem [ref=f9e320]: "--dry-run previews everything"
+              - listitem [ref=f9e324]: "--yes for non-interactive runs"
+              - listitem [ref=f9e328]: Exit codes that scripts can trust
+    - generic [ref=f9e332]:
+      - generic [ref=f9e334]:
+        - generic [ref=f9e335]: V.
+        - generic [ref=f9e336]: Automation
+      - generic [ref=f9e338]:
+        - generic [ref=f9e339]:
+          - text: Automation
+          - heading "Built to be scripted" [level=2] [ref=f9e340]
+          - paragraph [ref=f9e341]: Every command that touches disk supports --json output and a --dry-run preview, so you can wire Duster into a scheduled task or a CI health check without guessing at its behavior.
+          - list [ref=f9e342]:
+            - listitem [ref=f9e343]: Structured --json on every command
+            - listitem [ref=f9e347]: Deterministic exit codes
+            - listitem [ref=f9e351]: SHA-256 verified self-update
+            - listitem [ref=f9e355]: Single static binary, no runtime
+            - listitem [ref=f9e359]: Works headless over SSH or RDP
+          - generic [ref=f9e363]:
+            - button "Read the docs" [ref=f9e364] [cursor=pointer]
+            - button "View on GitHub" [ref=f9e365] [cursor=pointer]
+        - img [aria-hidden] [ref=f9e367]:
+          - generic [ref=f9e374]: clean
+          - generic [ref=f9e379]: purge
+          - generic [ref=f9e384]: status --json
+          - generic [ref=f9e389]: doctor
+          - generic [ref=f9e394]: scheduler
+      - generic [ref=f9e399]:
+        - generic [ref=f9e400]: du --help — real output, captured from the actual binary
+        - code [ref=f9e406]: C:\>du / ______ _ _ _____ _______ ______ _____ │ / | __ \ | | | | / ____|__ __| | ____|| __ \ │ System Maintenance CLI v1.2.0 / | | \ \| | | || (___ | | | |__ | |__) | │ Keep your system clean. Keep it running smooth. /_ | | | || | | | \___ \ | | | __| | _ / │ \--/ | |__/ /| |__| | ____) | | | | |____ | | \ \ │ /__/ |______/ \____/ |_____/ |_| |______||_| \_\ │ ──────────────────────────────────────────────────────────────── USAGE du [flags] AVAILABLE COMMANDS ▪ analyze Interactive TUI disk space explorer and visual analyzer ▪ clean Deep clean system temp files, prefetch, browser caches ▪ doctor Diagnose Windows environment and terminal compatibility ▪ optimize Optimize PC performance (flush DNS, SSD trim, caches) ▪ purge Find and clean developer build artifacts recursively ▪ status Real-time system health dashboard and resource monitor ▪ uninstall Interactive application uninstaller and remnants sweeper ▪ update Check and update Duster to the latest version Use du [command] --help for more information about a command.
+    - generic [ref=f9e407]:
+      - generic [ref=f9e409]:
+        - generic [ref=f9e410]: VI.
+        - generic [ref=f9e411]: At scale
+      - generic [ref=f9e413]:
+        - generic [ref=f9e414]:
+          - text: At scale
+          - heading "One executable, every workstation" [level=2] [ref=f9e415]
+          - paragraph [ref=f9e416]: No installer service, no telemetry endpoint, no dependency to patch across a fleet.
+        - img [aria-hidden] [ref=f9e418]:
+          - generic [ref=f9e427]: Deploy
+          - generic [ref=f9e431]: Schedule
+          - generic [ref=f9e435]: Verify
+          - generic [ref=f9e439]: Report
+          - generic [ref=f9e443]: Update
+        - generic [ref=f9e447]:
+          - generic [ref=f9e448]:
+            - generic [ref=f9e452]: No runtime
+            - paragraph [ref=f9e453]: CGO disabled, statically linked — copy the binary and run it.
+          - generic [ref=f9e454]:
+            - generic [ref=f9e458]: Signed releases
+            - paragraph [ref=f9e459]: Checksums and build-provenance attestations on every release.
+          - generic [ref=f9e460]:
+            - generic [ref=f9e464]: Auditable
+            - paragraph [ref=f9e465]: Every destructive action is appended to a local operations log.
+          - generic [ref=f9e466]:
+            - generic [ref=f9e470]: Self-updating
+            - paragraph [ref=f9e471]: Checks GitHub releases and verifies SHA-256 before swapping the binary.
+    - generic [ref=f9e473]:
+      - generic [ref=f9e474]:
+        - generic [ref=f9e475]: VII.
+        - generic [ref=f9e476]: Release pipeline
+      - generic [ref=f9e478]:
+        - text: Release pipeline
+        - heading "Shipped the way it's built" [level=2] [ref=f9e479]
+        - paragraph [ref=f9e480]: Every release runs the same gates before it reaches a workstation.
+      - generic [ref=f9e481]:
+        - generic [ref=f9e482]:
+          - generic [ref=f9e483]: gofmt · go vet · staticcheck
+          - generic [ref=f9e484]: done
+        - generic [ref=f9e485]:
+          - generic [ref=f9e486]: Windows cross-compile
+          - generic [ref=f9e487]: done
+        - generic [ref=f9e488]:
+          - generic [ref=f9e489]: Checksum + attestation
+          - generic [ref=f9e490]: configuring
+      - generic [ref=f9e491]:
+        - generic [ref=f9e492]: CI
+        - generic [ref=f9e493]: Vet
+        - generic [ref=f9e494]: Fmt
+        - generic [ref=f9e495]: Sign
+        - generic [ref=f9e496]: Hash
+        - generic [ref=f9e497]: Tag
+        - generic [ref=f9e498]: Smoke
+        - generic [ref=f9e499]: E2E
+    - generic [ref=f9e500]:
+      - generic [ref=f9e502]:
+        - generic [ref=f9e503]: VIII.
+        - generic [ref=f9e504]: Questions
+      - generic [ref=f9e506]:
+        - generic [ref=f9e507]:
+          - heading "Questions worth answering upfront" [level=2] [ref=f9e508]
+          - generic [ref=f9e514]:
+            - generic [ref=f9e515]: Still have questions?
+            - link "Open an issue on GitHub →" [ref=f9e516] [cursor=pointer]:
+              - /url: "#"
+        - generic [ref=f9e522]:
+          - heading [level=3] [ref=f9e524]:
+            - button "Does Duster need to run as administrator?" [ref=f9e525] [cursor=pointer]
+          - heading [level=3] [ref=f9e529]:
+            - button "Will it delete something I still need?" [ref=f9e530] [cursor=pointer]
+          - heading [level=3] [ref=f9e534]:
+            - button "What happens to Windows.old or the hibernation file?" [ref=f9e535] [cursor=pointer]
+          - heading [level=3] [ref=f9e539]:
+            - button "Can I use it in a script or scheduled task?" [ref=f9e540] [cursor=pointer]
+          - heading [level=3] [ref=f9e544]:
+            - button "Does it phone home?" [ref=f9e545] [cursor=pointer]
+          - heading [level=3] [ref=f9e549]:
+            - button "What platforms does it support?" [ref=f9e550] [cursor=pointer]
+  - contentinfo [ref=f9e553]:
+    - generic [ref=f9e554]:
+      - generic [ref=f9e555]:
+        - generic [ref=f9e556]:
+          - img "Duster logo" [ref=f9e557]
+          - generic [ref=f9e558]: Duster
+        - paragraph [ref=f9e559]: Duster — a Windows-native deep cleaner, built to be trusted with delete.
+      - generic [ref=f9e560]:
+        - generic [ref=f9e561]:
+          - generic [ref=f9e562]: Product
+          - list [ref=f9e563]:
+            - listitem [ref=f9e564]:
+              - link "Commands" [ref=f9e565] [cursor=pointer]:
+                - /url: "#"
+            - listitem [ref=f9e566]:
+              - link "Changelog" [ref=f9e567] [cursor=pointer]:
+                - /url: "#"
+            - listitem [ref=f9e568]:
+              - link "Releases" [ref=f9e569] [cursor=pointer]:
+                - /url: "#"
+            - listitem [ref=f9e570]:
+              - link "Roadmap" [ref=f9e571] [cursor=pointer]:
+                - /url: "#"
+        - generic [ref=f9e572]:
+          - generic [ref=f9e573]: Developers
+          - list [ref=f9e574]:
+            - listitem [ref=f9e575]:
+              - link "Documentation" [ref=f9e576] [cursor=pointer]:
+                - /url: "#"
+            - listitem [ref=f9e577]:
+              - link "GitHub" [ref=f9e578] [cursor=pointer]:
+                - /url: "#"
+            - listitem [ref=f9e579]:
+              - link "CLI reference" [ref=f9e580] [cursor=pointer]:
+                - /url: "#"
+            - listitem [ref=f9e581]:
+              - link "JSON output" [ref=f9e582] [cursor=pointer]:
+                - /url: "#"
+        - generic [ref=f9e583]:
+          - generic [ref=f9e584]: Company
+          - list [ref=f9e585]:
+            - listitem [ref=f9e586]:
+              - link "About" [ref=f9e587] [cursor=pointer]:
+                - /url: "#"
+            - listitem [ref=f9e588]:
+              - link "Security policy" [ref=f9e589] [cursor=pointer]:
+                - /url: "#"
+            - listitem [ref=f9e590]:
+              - link "Contributing" [ref=f9e591] [cursor=pointer]:
+                - /url: "#"
+        - generic [ref=f9e592]:
+          - generic [ref=f9e593]: Legal
+          - list [ref=f9e594]:
+            - listitem [ref=f9e595]:
+              - link "MIT license" [ref=f9e596] [cursor=pointer]:
+                - /url: "#"
+            - listitem [ref=f9e597]:
+              - link "Code of conduct" [ref=f9e598] [cursor=pointer]:
+                - /url: "#"
+    - generic [ref=f9e600]:
+      - generic [ref=f9e601]: © 2026 Duster. MIT licensed.
+      - generic [ref=f9e602]:
+        - link "GitHub" [ref=f9e603] [cursor=pointer]:
+          - /url: https://github.com
+        - link "X" [ref=f9e606] [cursor=pointer]:
+          - /url: https://x.com
