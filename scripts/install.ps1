@@ -551,7 +551,11 @@ try {
 }
 
 if ($TempLauncher -and (Test-Path -LiteralPath $TempLauncher)) {
-    Copy-Item -LiteralPath $TempLauncher -Destination (Join-Path $InstallDir "duw.exe") -Force
+    try {
+        Copy-Item -LiteralPath $TempLauncher -Destination (Join-Path $InstallDir "duw.exe") -Force
+    } catch {
+        Write-Warn "Could not copy duw.exe (needed for du schedule). Run 'du update --force' later."
+    }
 }
 
 Write-OK "Installed: $ExePath"

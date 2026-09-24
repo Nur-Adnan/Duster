@@ -59,7 +59,7 @@ du analyze .   # Interactive disk explorer
 
 > `du optimize` also reports the space that only you can reclaim: a previous Windows installation (`Windows.old`) and the hibernation file. Duster measures them and tells you how to remove them, but never touches either.
 
-> Most commands support `--json` for scripting. `clean`, `purge`, `installer`, `optimize`, `vdisk`, `uninstall` and `remove` support `--dry-run` for safe previews.
+> Most commands support `--json` for scripting. `clean`, `purge`, `installer`, `optimize`, `vdisk`, `uninstall`, `remove` and `schedule on` support `--dry-run` for safe previews.
 
 ---
 

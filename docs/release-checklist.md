@@ -110,6 +110,11 @@ Run everything from a normal (non-admin) terminal unless a step says elevated. E
   - From a normal terminal, it uninstalls.
 
 **Scheduled cleaning**
+
+Known gap: the winget, Scoop and Chocolatey manifests (`scripts/manifests`) install the standalone `du.exe` only, with no `duw.exe` beside it. `du schedule on` refuses on those installs until the manifests switch to the portable zip (Chocolatey would also need a `duw.exe.ignore` to avoid a shim).
+
+- [ ] Update an older install to this release, run `du schedule on` (expect it to refuse with the `du update --force` advice), run `du update --force`, then `du schedule on` succeeds.
+- [ ] On a Windows install with a legacy (non-UTF-8) system code page and a non-ASCII user profile: `du schedule on` then `du schedule` shows the task command path correctly (runners use UTF-8 and cannot reproduce this).
 - [ ] `du schedule on`, on a laptop: unplug it and let the check time pass. `du schedule` shows the check but no clean. Plug it back in for the next check and it cleans normally.
 - [ ] `du schedule on`, then put the PC to sleep before the check time and wake it after: `StartWhenAvailable` catches the check up instead of skipping it.
 - [ ] Set Windows Terminal as the default console host (Settings > Privacy & security > For developers, or Windows Terminal's own settings), then `schtasks /Run /TN "Duster Scheduled Clean (<you>)"`: no console or Windows Terminal window appears.

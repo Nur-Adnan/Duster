@@ -133,8 +133,9 @@ Root: HKA; Subkey: "Software\{#MyAppPublisher}\{#MyAppName}"; ValueType: string;
 Filename: "{cmd}"; Parameters: "/K echo. & echo   Duster v{#MyAppVersion} installed successfully! & echo. & echo   Type 'du --help' to get started. & echo. & ""{app}\{#MyAppExeName}"" --version & echo. & pause"; Description: "Launch Duster CLI"; Flags: nowait postinstall skipifsilent shellexec
 
 [UninstallRun]
-; Delete the scheduled cleans that point at this install. Best-effort: a task
-; left behind only fails to start.
+; Delete every Duster scheduled clean this account can see (not only the one
+; from this install; "schedule off --uninstall" has no way to tell them
+; apart). Best-effort: a task left behind only fails to start.
 Filename: "{app}\{#MyAppExeName}"; Parameters: "schedule off --uninstall"; Flags: runhidden waituntilterminated; RunOnceId: "RemoveScheduledClean"
 
 [UninstallDelete]
