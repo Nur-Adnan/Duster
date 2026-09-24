@@ -44,6 +44,8 @@ Windows `$Recycle.Bin\<SID>`, and gomi. None of them overwrites on restore.
   - On the volume holding `%LOCALAPPDATA%`: `logging.Dir()\quarantine\`.
   - On any other fixed drive `X:`: `X:\.duster-quarantine\<user SID>\`. The `.duster-quarantine` folder is hidden. The SID folder gets a protected DACL: full control for the user and SYSTEM only.
   - Both roots must pass `realDir`/`ensureRealDir` (a link or junction there is refused).
+
+  Verified on a runner (spike run 36029125858): a same-volume move keeps the item's **own** ACL. The protected SID folder stops other users from listing what is kept (a second standard user, and even an administrator, got access denied), but a user who knows an item's full path can still open it if its own ACL allowed that before (bypass traverse checking). Duster does **not** rewrite item ACLs, because restore must bring back exactly the original permissions. The guarantee is: other users cannot list what you have kept, and nothing becomes readable that was not readable before.
 - **Unsupported locations.** Network drives, and volumes where the root cannot be created, get no quarantine. The item is left in place and reported, unless the command's existing permanent path is explicitly requested (see §4). Nothing is ever copied across volumes.
 - **Session.** One command run is one session, with id `<unixnanos>-<command>`. On each volume it touches, the session is a folder of numbered slots (`1\<original name>`, `2\...`) plus `session.json`:
 
