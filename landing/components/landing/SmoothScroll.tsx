@@ -20,7 +20,20 @@ export function SmoothScroll() {
     gsap.ticker.add(tick);
     gsap.ticker.lagSmoothing(0);
 
+    // The #spotlight pin inserts its spacer after the browser has restored scroll or
+    // jumped to a #hash, which lands everything below it ~810px too high. So: no
+    // browser restoration, and re-land a #hash once pins exist.
+    // ponytail: a reload starts at the top; save/restore scrollY if anyone misses it.
+    ScrollTrigger.clearScrollMemory("manual");
+    const landOnHash = () => {
+      ScrollTrigger.removeEventListener("refresh", landOnHash);
+      const target = location.hash && document.getElementById(decodeURIComponent(location.hash.slice(1)));
+      if (target) lenis.scrollTo(target, { offset: -navH, immediate: true });
+    };
+    ScrollTrigger.addEventListener("refresh", landOnHash);
+
     return () => {
+      ScrollTrigger.removeEventListener("refresh", landOnHash);
       gsap.ticker.remove(tick);
       lenis.destroy();
     };
