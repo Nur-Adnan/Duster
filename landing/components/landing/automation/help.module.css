@@ -1,0 +1,40 @@
+/*
+ * Edge fades on the scrolling `du --help` output: each edge fades only while
+ * there is more to scroll that way, driven by the pre's own scroll position.
+ * Browsers without scroll-driven animations show no fade.
+ */
+@property --fade-start {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --fade-end {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@keyframes edges {
+  0% { --fade-start: 0px; --fade-end: 56px; }
+  3% { --fade-start: 40px; }
+  97% { --fade-end: 56px; }
+  100% { --fade-start: 40px; --fade-end: 0px; }
+}
+
+@supports (animation-timeline: scroll()) {
+  .viewport {
+    mask-image: linear-gradient(
+      to right,
+      transparent,
+      #000 var(--fade-start),
+      #000 calc(100% - var(--fade-end)),
+      transparent
+    );
+    animation: edges linear both;
+    animation-timeline: scroll(self inline);
+  }
+  /* The mask clips anything outside the box, so keep the focus ring inside it. */
+  .viewport:focus-visible {
+    outline-offset: -2px;
+  }
+}

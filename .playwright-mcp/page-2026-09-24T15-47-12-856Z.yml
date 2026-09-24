@@ -1,0 +1,84 @@
+- generic:
+  - generic [active]:
+    - generic [ref=e4]:
+      - generic [ref=e5]:
+        - navigation [ref=e7]:
+          - button [disabled] [ref=e8]:
+            - img "previous" [ref=e9]
+          - generic [ref=e11]:
+            - generic [ref=e12]: 1/
+            - generic [ref=e13]: "1"
+          - button [disabled] [ref=e14]:
+            - img "next" [ref=e15]
+        - link "Next.js 16.3.5 (stale) Turbopack" [ref=e18] [cursor=pointer]:
+          - /url: https://nextjs.org/docs/messages/version-staleness
+          - generic "There is a newer version (16.3.6) available, upgrade recommended!" [ref=e21]: Next.js 16.3.5 (stale)
+          - generic [ref=e22]: Turbopack
+      - dialog "Build Error" [ref=e24]:
+        - generic [ref=e27]:
+          - generic [ref=e29]:
+            - generic [ref=e30]:
+              - generic [ref=e31]: Build Error
+              - generic [ref=e33]:
+                - button "Copy Error Info" [ref=e34] [cursor=pointer]
+                - link "Go to related documentation" [ref=e37] [cursor=pointer]:
+                  - /url: https://nextjs.org/docs/messages/module-not-found
+                - button "Attach Node.js inspector" [ref=e40] [cursor=pointer]
+            - generic [ref=e49]: "Module not found: Can't resolve './SectionDivider'"
+          - generic [ref=e52]:
+            - generic [ref=e54]:
+              - generic [ref=e59]: ./components/landing/EnterpriseSection.tsx (4:1)
+              - button "Open in editor" [ref=e60] [cursor=pointer]
+            - generic [ref=e65]:
+              - generic [ref=e66]: "Error: Module not found: Can't resolve './SectionDivider'"
+              - generic [ref=e67]: 2 |
+              - text: import
+              - generic [ref=e68]: "{"
+              - text: Container
+              - generic [ref=e69]: "}"
+              - text: from "./Container"
+              - generic [ref=e70]: ;
+              - generic [ref=e71]: 3 |
+              - text: import
+              - generic [ref=e72]: "{"
+              - text: Reveal
+              - generic [ref=e73]: "}"
+              - text: from "./Reveal"
+              - generic [ref=e74]: ;
+              - text: ">"
+              - generic [ref=e75]: 4 |
+              - text: import
+              - generic [ref=e76]: "{"
+              - text: SectionDivider
+              - generic [ref=e77]: "}"
+              - text: from "./SectionDivider"
+              - generic [ref=e78]: ;
+              - generic [ref=e79]: "|"
+              - text: ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+              - generic [ref=e80]: 5 |
+              - generic [ref=e81]: 6 |
+              - text: const ORBIT_COLORS
+              - generic [ref=e82]: = [
+              - text: "\"#60A5FA\""
+              - generic [ref=e83]: ","
+              - text: "\"#FFCC00\""
+              - generic [ref=e84]: ","
+              - text: "\"#93C5FD\""
+              - generic [ref=e85]: ","
+              - text: "\"#FF4D4D\""
+              - generic [ref=e86]: ","
+              - text: "\"#2563EB\""
+              - generic [ref=e87]: "];"
+              - generic [ref=e88]: 7 |
+              - generic [ref=e89]:
+                - text: "Import trace: Server Component: ./components/landing/EnterpriseSection.tsx ./app/page.tsx"
+                - link "https://nextjs.org/docs/messages/module-not-found" [ref=e90] [cursor=pointer]:
+                  - /url: https://nextjs.org/docs/messages/module-not-found
+    - generic [ref=e95] [cursor=pointer]:
+      - button "Open Next.js Dev Tools" [ref=e96]
+      - button "Open issues overlay" [ref=e101]:
+        - generic [ref=e102]:
+          - generic [aria-hidden] [ref=e103]: "0"
+          - generic [ref=e104]: "1"
+        - generic [ref=e105]: Issue
+  - alert [ref=e1]

@@ -1,0 +1,133 @@
+@import "tailwindcss";
+/* HeroUI: only what the page uses (Button via buttonVariants, Disclosure for the FAQ).
+   The full "@heroui/react/styles" bundle ships ~60 components of render-blocking CSS.
+   Add a component's file here when you start using it. */
+@import "@heroui/styles/base/base.css" layer(base);
+@import "@heroui/styles/themes/shared/theme.css";
+@import "@heroui/styles/themes/default/variables.css" layer(theme);
+@import "@heroui/styles/components/button.css" layer(components);
+@import "@heroui/styles/components/disclosure-group.css" layer(components);
+@import "@heroui/styles/components/disclosure.css" layer(components);
+@import "@heroui/styles/utilities";
+@import "@heroui/styles/variants";
+@import "lenis/dist/lenis.css";
+
+:root {
+  /* Surfaces: dark CMD-terminal family, stepped by elevation. */
+  --bg: #0b0d12;
+  --bg-soft: #12151b;
+  --bg-raised: #171b23;
+  --surface-dark: #05060a;
+  --ink: #e7eaf0;
+  --ink-muted: #9ca5b7;
+  --ink-faint: #7a8395;
+  --hairline: rgb(255 255 255 / 0.09);
+  --hairline-strong: rgb(255 255 255 / 0.16);
+
+  /* Brand accent (dark blue). Also feeds HeroUI's --accent token, so
+     HeroUI's Button/Disclosure components inherit it automatically. */
+  --accent: #2563eb;
+  --accent-foreground: #ffffff;
+  --accent-text: #7fb0ff;
+  --accent-glow: #2563eb;
+  --accent-glow-soft: rgb(37 99 235 / 0.22);
+
+  /* Status: always paired with text or an icon, never color alone. */
+  --ok: #34d399;
+  --warn: #fbbf24;
+  --danger: #f87171;
+
+  /* Data colors for illustrations (disk categories, charts). */
+  --data-1: #3b82f6;
+  --data-2: #38bdf8;
+  --data-3: #818cf8;
+  --data-4: #2dd4bf;
+  --data-5: #fbbf24;
+  --data-6: #f472b6;
+
+  --background: var(--bg);
+  --foreground: var(--ink);
+
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+
+  /* Fixed nav height; anchors and Lenis offset by this. */
+  --nav-h: 4rem;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-bg-soft: var(--bg-soft);
+  --color-bg-raised: var(--bg-raised);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-faint: var(--ink-faint);
+  --color-surface-dark: var(--surface-dark);
+  --color-brand-accent: var(--accent);
+  --color-accent-text: var(--accent-text);
+  --color-accent-glow: var(--accent-glow);
+  --color-hairline: var(--hairline);
+  --color-hairline-strong: var(--hairline-strong);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-danger: var(--danger);
+  --color-data-1: var(--data-1);
+  --color-data-2: var(--data-2);
+  --color-data-3: var(--data-3);
+  --color-data-4: var(--data-4);
+  --color-data-5: var(--data-5);
+  --color-data-6: var(--data-6);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+html {
+  /* Keyboard focus and anchor jumps land below the fixed nav (WCAG 2.4.11). */
+  scroll-padding-top: calc(var(--nav-h) + 1rem);
+  background: var(--bg);
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: rgb(37 99 235 / 0.45);
+  color: #fff;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+/* Section kicker: small mono label naming the topic. */
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: var(--accent-text);
+}
+
+/* Faint engineering grid used behind hero and dark bands. */
+.bg-grid {
+  background-image:
+    linear-gradient(to right, rgb(255 255 255 / 0.04) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(255 255 255 / 0.04) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
