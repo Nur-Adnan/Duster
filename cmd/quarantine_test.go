@@ -338,6 +338,35 @@ func TestQuarantineMoveErrorWithUncheckableDestKeepsRecord(t *testing.T) {
 	}
 }
 
+// When every item is back but the emptied folder cannot be removed, the
+// record must already say so: the restored items are never listed as kept.
+func TestRestoreRecordsBeforeRemovingTheFolder(t *testing.T) {
+	work := tempQuarantine(t)
+	a := filepath.Join(work, "a.txt")
+	os.WriteFile(a, []byte("a"), 0o644)
+	if err := quarantinePath(newQuarantineSession("installer"), a, 1); err != nil {
+		t.Fatal(err)
+	}
+	prev := restoredSessionRemove
+	t.Cleanup(func() { restoredSessionRemove = prev })
+	restoredSessionRemove = func(string) error { return errors.New("simulated: folder in use") }
+
+	rs := groupSessions(loadKeptSessions(quarantineRoots()))[0]
+	res := restoreItems(rs, 0, false)
+	if len(res) != 2 || res[0].Status != "restored" || res[1].Status != "failed" || !strings.Contains(res[1].Reason, "could not be removed") {
+		t.Fatalf("restore: %+v", res)
+	}
+	if strings.Contains(res[1].Reason, "listed again") {
+		t.Errorf("the record was written, so the reason must not say otherwise: %s", res[1].Reason)
+	}
+	if left := groupSessions(loadKeptSessions(quarantineRoots())); len(left) != 0 {
+		t.Fatalf("restored items are listed as kept again: %+v", left)
+	}
+	if !exists(a) {
+		t.Fatal("the item is not back")
+	}
+}
+
 func TestRestoreTwiceReportsOnlyWhatIsLeft(t *testing.T) {
 	work := tempQuarantine(t)
 	a, b := filepath.Join(work, "a.txt"), filepath.Join(work, "b.txt")
