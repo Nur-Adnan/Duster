@@ -73,7 +73,7 @@ func TestUpdateModelTransitions(t *testing.T) {
 	}
 
 	// 4. Simulate download complete
-	downloadMsg := downloadCompleteMsg{bytes: []byte("mock binary content"), err: nil}
+	downloadMsg := downloadCompleteMsg{bins: releaseBinaries{du: []byte("mock binary content")}, err: nil}
 	updatedModel4, cmd4 := upM3.Update(downloadMsg)
 	upM4 := updatedModel4.(updateModel)
 

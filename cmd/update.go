@@ -4,10 +4,12 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -149,8 +151,8 @@ type checkCompleteMsg struct {
 }
 
 type downloadCompleteMsg struct {
-	bytes []byte
-	err   error
+	bins releaseBinaries
+	err  error
 }
 
 type swapCompleteMsg struct {
@@ -308,16 +310,21 @@ func expectedChecksumFor(checksums []byte, assetName string) (string, error) {
 	return "", fmt.Errorf("no checksum entry found for %s", assetName)
 }
 
-// extractBinaryFromZip pulls the du executable out of the release archive.
-func extractBinaryFromZip(archive []byte) ([]byte, error) {
+// errNotInArchive means the release archive lacks the requested file. For
+// duw.exe that is normal: releases before scheduled cleaning did not ship it.
+var errNotInArchive = errors.New("not in the release archive")
+
+// extractFileFromZip pulls one executable (du.exe or duw.exe) out of the
+// release archive, wherever it is nested.
+func extractFileFromZip(archive []byte, name string) ([]byte, error) {
 	reader, err := zip.NewReader(bytes.NewReader(archive), int64(len(archive)))
 	if err != nil {
 		return nil, fmt.Errorf("release archive is not a valid zip: %w", err)
 	}
 
 	for _, f := range reader.File {
-		name := strings.ToLower(f.Name)
-		if name != "du.exe" && !strings.HasSuffix(name, "/du.exe") {
+		entry := strings.ToLower(f.Name)
+		if entry != name && !strings.HasSuffix(entry, "/"+name) {
 			continue
 		}
 		if f.UncompressedSize64 > maxBinaryBytes {
@@ -342,80 +349,117 @@ func extractBinaryFromZip(archive []byte) ([]byte, error) {
 		}
 		return data, nil
 	}
-	return nil, fmt.Errorf("release archive does not contain du.exe")
+	return nil, fmt.Errorf("%s: %w", name, errNotInArchive)
+}
+
+// releaseBinaries are the verified executables from one release archive. duw
+// is nil for releases that predate scheduled cleaning.
+type releaseBinaries struct {
+	du, duw []byte
 }
 
 // downloadVerifiedBinary downloads the platform archive, verifies it against the
-// release's published SHA-256 checksum, and returns the extracted binary bytes.
-func downloadVerifiedBinary(rel releaseMetadata) ([]byte, error) {
+// release's published SHA-256 checksum, and returns the extracted binaries.
+func downloadVerifiedBinary(rel releaseMetadata) (releaseBinaries, error) {
 	archiveAsset, err := selectArchiveAsset(rel)
 	if err != nil {
-		return nil, err
+		return releaseBinaries{}, err
 	}
 	checksumsAsset, err := selectChecksumsAsset(rel)
 	if err != nil {
 		// SECURITY: verification is mandatory. A release without checksums is not installable.
-		return nil, err
+		return releaseBinaries{}, err
 	}
 
 	checksums, err := downloadAsset(checksumsAsset, maxChecksumBytes)
 	if err != nil {
-		return nil, err
+		return releaseBinaries{}, err
 	}
 	expected, err := expectedChecksumFor(checksums, archiveAsset.Name)
 	if err != nil {
-		return nil, err
+		return releaseBinaries{}, err
 	}
 
 	archive, err := downloadAsset(archiveAsset, maxArchiveBytes)
 	if err != nil {
-		return nil, err
+		return releaseBinaries{}, err
 	}
 
 	actual := sha256Hex(archive)
 	if actual != expected {
-		return nil, fmt.Errorf("SHA-256 mismatch for %s: expected %s, got %s — refusing to install",
+		return releaseBinaries{}, fmt.Errorf("SHA-256 mismatch for %s: expected %s, got %s — refusing to install",
 			archiveAsset.Name, expected, actual)
 	}
 
-	return extractBinaryFromZip(archive)
+	du, err := extractFileFromZip(archive, "du.exe")
+	if err != nil {
+		return releaseBinaries{}, err
+	}
+	duw, err := extractFileFromZip(archive, "duw.exe")
+	if err != nil && !errors.Is(err, errNotInArchive) {
+		return releaseBinaries{}, err
+	}
+	return releaseBinaries{du: du, duw: duw}, nil
 }
 
-// swapBinary atomically replaces the running executable with the verified bytes.
-// The new binary is staged next to the current one (same volume) so both renames
-// are atomic, and the original is restored if any step fails.
-func swapBinary(newBytes []byte) error {
+// swapBinary installs a verified release: duw.exe first, then du.exe. If duw.exe
+// cannot be replaced nothing has changed yet; the launcher does not depend on
+// du.exe's version, so a failure after it leaves a working install.
+func swapBinary(bins releaseBinaries) error {
 	currentExe, err := os.Executable()
 	if err != nil {
 		return err
 	}
-
-	stagedExe := currentExe + ".new"
-	oldExe := currentExe + ".old"
-
-	if err := os.WriteFile(stagedExe, newBytes, 0o755); err != nil {
-		return fmt.Errorf("cannot stage new binary: %w", err)
-	}
-
-	_ = os.Remove(oldExe) // clear leftovers from a previous update
-	if err := os.Rename(currentExe, oldExe); err != nil {
-		_ = os.Remove(stagedExe)
-		return fmt.Errorf("cannot move current binary aside: %w", err)
-	}
-
-	if err := os.Rename(stagedExe, currentExe); err != nil {
-		// Roll back: put the original binary back in place.
-		if rbErr := os.Rename(oldExe, currentExe); rbErr != nil {
-			return fmt.Errorf("swap failed (%v) and rollback failed (%v) — restore %s manually", err, rbErr, oldExe)
+	if bins.duw != nil {
+		old, err := replaceFile(filepath.Join(filepath.Dir(currentExe), "duw.exe"), bins.duw)
+		if err != nil {
+			return fmt.Errorf("cannot update duw.exe: %w", err)
 		}
-		_ = os.Remove(stagedExe)
-		return fmt.Errorf("cannot activate new binary: %w", err)
+		if old != "" {
+			scheduleDelayedDelete(old) // locked while a scheduled clean runs
+		}
 	}
-
+	old, err := replaceFile(currentExe, bins.du)
+	if err != nil {
+		return err
+	}
 	// The old binary stays locked while this process runs; delete it after exit.
-	scheduleDelayedDelete(oldExe)
-	logUpOperation("self-update", currentExe, int64(len(newBytes)), true)
+	scheduleDelayedDelete(old)
+	logUpOperation("self-update", currentExe, int64(len(bins.du)), true)
 	return nil
+}
+
+// replaceFile swaps target for data through a staged file beside it (same
+// volume, so both renames are atomic), restoring the original if the swap
+// fails. It returns where the original now is, or "" when there was none.
+func replaceFile(target string, data []byte) (string, error) {
+	staged, old := target+".new", target+".old"
+	base := filepath.Base(target)
+	if err := os.WriteFile(staged, data, 0o755); err != nil {
+		return "", fmt.Errorf("cannot stage new %s: %w", base, err)
+	}
+	_ = os.Remove(old) // clear leftovers from a previous update
+	moved := true
+	if err := os.Rename(target, old); err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			_ = os.Remove(staged)
+			return "", fmt.Errorf("cannot move current %s aside: %w", base, err)
+		}
+		moved = false
+	}
+	if err := os.Rename(staged, target); err != nil {
+		if moved {
+			if rbErr := os.Rename(old, target); rbErr != nil {
+				return "", fmt.Errorf("swap failed (%v) and rollback failed (%v): restore %s manually", err, rbErr, old)
+			}
+		}
+		_ = os.Remove(staged)
+		return "", fmt.Errorf("cannot activate new %s: %w", base, err)
+	}
+	if !moved {
+		return "", nil
+	}
+	return old, nil
 }
 
 // isNewerVersion reports whether latest should be offered as an update to
@@ -472,14 +516,14 @@ func runCheckReleaseCmd() tea.Cmd {
 
 func runDownloadBinaryCmd(rel releaseMetadata) tea.Cmd {
 	return func() tea.Msg {
-		data, err := downloadVerifiedBinary(rel)
-		return downloadCompleteMsg{bytes: data, err: err}
+		bins, err := downloadVerifiedBinary(rel)
+		return downloadCompleteMsg{bins: bins, err: err}
 	}
 }
 
-func runSwapBinaryCmd(newBytes []byte) tea.Cmd {
+func runSwapBinaryCmd(bins releaseBinaries) tea.Cmd {
 	return func() tea.Msg {
-		return swapCompleteMsg{err: swapBinary(newBytes)}
+		return swapCompleteMsg{err: swapBinary(bins)}
 	}
 }
 
@@ -545,7 +589,7 @@ func (m updateModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		m.state = stateUpSwapping
 		m.statusMsg = "Applying binary updates..."
-		return m, runSwapBinaryCmd(msg.bytes)
+		return m, runSwapBinaryCmd(msg.bins)
 
 	case swapCompleteMsg:
 		m.state = stateUpFinished
@@ -679,10 +723,10 @@ func runHeadlessUpdate() {
 
 	var swapErr error
 	if install {
-		if data, err := downloadVerifiedBinary(rel); err != nil {
+		if bins, err := downloadVerifiedBinary(rel); err != nil {
 			swapErr = err
 		} else {
-			swapErr = swapBinary(data)
+			swapErr = swapBinary(bins)
 		}
 	}
 

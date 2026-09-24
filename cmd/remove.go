@@ -64,8 +64,9 @@ const (
 var RemoveCmd = &cobra.Command{
 	Use:   "remove",
 	Short: "Uninstall Duster and delete all configuration files and logs",
-	Long: `Cleans all system traces of Duster, deletes the application directory containing 
-configuration files and operations logs, and schedules a self-deletion script for the Duster binary itself.`,
+	Long: `Cleans all system traces of Duster, deletes the application directory containing
+configuration files and operations logs, and schedules a self-deletion script for the Duster binary itself.
+It also deletes your scheduled clean, if any (du schedule).`,
 	Run: executeRemove,
 }
 
@@ -148,6 +149,7 @@ func runUninstallCmd(currentExe, logDir string, dryRun bool) tea.Cmd {
 		// 2. Schedule safe delayed binary self-deletion
 		// SECURITY: Uses discrete argument passing instead of cmd.exe /C shell injection
 		if !dryRun {
+			removeScheduleAndLauncher(currentExe)
 			scheduleDelayedDelete(currentExe)
 		}
 
@@ -334,6 +336,7 @@ func runSilentRemove(currentExe string) {
 
 	if !rmDryRun {
 		// SECURITY: Uses safe delayed delete instead of cmd.exe /C shell injection
+		removeScheduleAndLauncher(currentExe)
 		scheduleDelayedDelete(currentExe)
 		os.Exit(0)
 	} else {
@@ -355,6 +358,7 @@ func runHeadlessRemove(currentExe string) {
 		err = cleanDusterDir(logDir, currentExe, false)
 		if err == nil {
 			// SECURITY: Uses safe delayed delete instead of cmd.exe /C shell injection
+			removeScheduleAndLauncher(currentExe)
 			scheduleDelayedDelete(currentExe)
 		}
 	}

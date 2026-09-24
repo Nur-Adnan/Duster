@@ -3,6 +3,7 @@ package cmd
 import (
 	"archive/zip"
 	"bytes"
+	"errors"
 	"testing"
 )
 
@@ -30,7 +31,7 @@ func TestExtractBinaryFromZip(t *testing.T) {
 	mz := []byte("MZ\x90\x00\x03 fake pe payload")
 
 	t.Run("valid du.exe at root", func(t *testing.T) {
-		got, err := extractBinaryFromZip(makeZip(t, map[string][]byte{"du.exe": mz}))
+		got, err := extractFileFromZip(makeZip(t, map[string][]byte{"du.exe": mz}), "du.exe")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -40,10 +41,10 @@ func TestExtractBinaryFromZip(t *testing.T) {
 	})
 
 	t.Run("valid du.exe nested in a folder", func(t *testing.T) {
-		got, err := extractBinaryFromZip(makeZip(t, map[string][]byte{
+		got, err := extractFileFromZip(makeZip(t, map[string][]byte{
 			"Duster-1.0.2-Portable-x64/du.exe":    mz,
 			"Duster-1.0.2-Portable-x64/README.md": []byte("docs"),
-		}))
+		}), "du.exe")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -53,22 +54,38 @@ func TestExtractBinaryFromZip(t *testing.T) {
 	})
 
 	t.Run("rejects non-MZ payload", func(t *testing.T) {
-		_, err := extractBinaryFromZip(makeZip(t, map[string][]byte{"du.exe": []byte("#!/bin/sh")}))
+		_, err := extractFileFromZip(makeZip(t, map[string][]byte{"du.exe": []byte("#!/bin/sh")}), "du.exe")
 		if err == nil {
 			t.Error("expected error for a non-Windows-executable payload, got nil")
 		}
 	})
 
 	t.Run("rejects archive without du.exe", func(t *testing.T) {
-		_, err := extractBinaryFromZip(makeZip(t, map[string][]byte{"notes.txt": mz}))
+		_, err := extractFileFromZip(makeZip(t, map[string][]byte{"notes.txt": mz}), "du.exe")
 		if err == nil {
 			t.Error("expected error when du.exe is absent, got nil")
 		}
 	})
 
 	t.Run("rejects a non-zip blob", func(t *testing.T) {
-		if _, err := extractBinaryFromZip([]byte("not a zip file at all")); err == nil {
+		if _, err := extractFileFromZip([]byte("not a zip file at all"), "du.exe"); err == nil {
 			t.Error("expected error for invalid zip, got nil")
 		}
 	})
+}
+
+func TestExtractLauncherFromZip(t *testing.T) {
+	mz := []byte("MZ launcher")
+	got, err := extractFileFromZip(makeZip(t, map[string][]byte{
+		"Duster-1.3.0-Portable-x64/du.exe":  []byte("MZ du"),
+		"Duster-1.3.0-Portable-x64/duw.exe": mz,
+	}), "duw.exe")
+	if err != nil || !bytes.Equal(got, mz) {
+		t.Fatalf("duw.exe: %q, %v", got, err)
+	}
+	// Releases before scheduled cleaning have no duw.exe: not an error for update.
+	_, err = extractFileFromZip(makeZip(t, map[string][]byte{"du.exe": []byte("MZ du")}), "duw.exe")
+	if !errors.Is(err, errNotInArchive) {
+		t.Errorf("missing duw.exe: %v, want errNotInArchive", err)
+	}
 }
