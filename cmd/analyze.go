@@ -228,6 +228,7 @@ type analyzeModel struct {
 	largeFiles     []FileNode
 	confirmRecycle bool
 	errorMsg       string
+	notice         string
 	width, height  int
 	// Cached once at scan completion: counting walks the whole tree, and
 	// View runs on every keystroke, so recomputing there lagged large scans.
@@ -245,6 +246,10 @@ type analyzeModel struct {
 	historyReady bool
 	showChanges  bool
 	changes      changeReport
+
+	// undo is this run's quarantine session, created on the first delete the
+	// Recycle Bin does not take.
+	undo *quarantineSession
 }
 
 type scanProgressInfo struct {
@@ -330,11 +335,18 @@ func (m analyzeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 				m.confirmRecycle = false
-				err := recyclePath(path, size)
+				if m.undo == nil {
+					m.undo = newQuarantineSession("analyze")
+				}
+				kept, err := recyclePath(m.undo, path, size)
 				if err != nil {
 					m.errorMsg = fmt.Sprintf("Error recycling: %v", err)
 				} else {
-					m.errorMsg = ""
+					if kept {
+						m.notice = "Kept in Duster's quarantine (the Recycle Bin did not take it): du restore puts it back"
+					} else {
+						m.errorMsg = ""
+					}
 					m.selectedIdx = 0
 					m.stale = true // ancestors in historyStack still count the recycled item
 					// Re-trigger scanning on the current folder node's path to refresh sizes
@@ -476,9 +488,11 @@ func (m analyzeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.showLargeFiles {
 				if len(m.largeFiles) > 0 {
 					m.confirmRecycle = true
+					m.notice = ""
 				}
 			} else if m.tree != nil && len(m.tree.Entries) > 0 {
 				m.confirmRecycle = true
+				m.notice = ""
 			}
 
 		case "L":
@@ -612,6 +626,9 @@ func (m analyzeModel) View() string {
 
 	if m.errorMsg != "" {
 		s.WriteString("  " + styleDanger.Render(" "+m.errorMsg+" ") + "\n\n")
+	}
+	if m.notice != "" {
+		s.WriteString("  " + styleSuccess.Render(" "+m.notice+" ") + "\n\n")
 	}
 
 	// Part 2: Path Analysis Summary (counts cached at scan completion)
@@ -891,18 +908,24 @@ func openInExplorer(path string) error {
 	return nil
 }
 
-func recyclePath(path string, size int64) error {
+// recyclePath sends path to the Recycle Bin, falling back to Duster's own
+// quarantine when the bin refuses it (too big, or too long a path). kept
+// reports which one happened, for the caller's status line.
+func recyclePath(s *quarantineSession, path string, size int64) (kept bool, err error) {
 	// Guard #1: Absolute Safety boundaries verification
 	if !fs.IsValidPath(path) {
 		logDestructiveOperation("recycle", path, size, false)
-		return fmt.Errorf("deleting system protected paths or drive letters is non-negotiably blocked for security reasons")
+		return false, fmt.Errorf("deleting system protected paths or drive letters is non-negotiably blocked for security reasons")
 	}
 
-	err := recyclePathNative(path)
+	kept, err = recycleOrQuarantine(s, path, size)
 
-	success := err == nil
-	logDestructiveOperation("recycle", path, size, success)
-	return err
+	action := "recycle"
+	if kept {
+		action = "quarantine"
+	}
+	logDestructiveOperation(action, path, size, err == nil)
+	return kept, err
 }
 
 // logDestructiveOperation delegates to the shared structured logging system,

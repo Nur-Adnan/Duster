@@ -109,7 +109,10 @@ type installerModel struct {
 	cursor       int
 	scrollOffset int
 	sweepSize    int64
-	reclaimed    int64
+	keptSize     int64 // kept (or, in a dry run, would be): still on disk until the quarantine sweep
+	kept         int
+	keepFailed   int    // selected installers that could not be kept and stayed in place
+	sweepWarn    string // sweepNotice of the quarantine sweep before the run (low-space removals, errors)
 	width        int
 	height       int
 }
@@ -119,7 +122,10 @@ type installerScanCompleteMsg struct {
 }
 
 type setupSweepCompleteMsg struct {
-	reclaimed int64
+	size      int64 // kept, or in a dry run what would be; never freed yet
+	kept      int
+	failed    int
+	sweepWarn string
 }
 
 func initialInstallerModel() installerModel {
@@ -217,7 +223,14 @@ func scanInstallersCmd(minSizeMB int64) tea.Cmd {
 
 func runSetupSweepCmd(items []installerItem, dry bool) tea.Cmd {
 	return func() tea.Msg {
-		var reclaimed int64
+		var s *quarantineSession
+		var warn string
+		if !dry {
+			warn = sweepNotice(sweepQuarantine(time.Now(), sweepFull))
+			s = newQuarantineSession("installer")
+		}
+		var size int64
+		var failed int
 		for _, item := range items {
 			if !item.Selected {
 				continue
@@ -225,18 +238,24 @@ func runSetupSweepCmd(items []installerItem, dry bool) tea.Cmd {
 
 			var err error
 			if !dry {
-				err = removeFileSafe(item.Path)
+				err = quarantinePath(s, item.Path, item.Size)
 			}
 
 			success := err == nil
 			if !dry { // a dry run deleted nothing, so there is nothing to log
-				logInstOperation("sweep", item.Path, item.Size, success)
+				logInstOperation("quarantine", item.Path, item.Size, success)
 			}
 			if success {
-				reclaimed += item.Size
+				size += item.Size
+			} else {
+				failed++ // e.g. errNoQuarantine on a network-redirected Downloads
 			}
 		}
-		return setupSweepCompleteMsg{reclaimed: reclaimed}
+		var kept int
+		if s != nil {
+			kept = s.Kept()
+		}
+		return setupSweepCompleteMsg{size: size, kept: kept, failed: failed, sweepWarn: warn}
 	}
 }
 
@@ -335,7 +354,10 @@ func (m installerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case setupSweepCompleteMsg:
-		m.reclaimed = msg.reclaimed
+		m.keptSize = msg.size
+		m.kept = msg.kept
+		m.keepFailed = msg.failed
+		m.sweepWarn = msg.sweepWarn
 		m.state = instStateFinished
 		return m, nil
 	}
@@ -444,15 +466,15 @@ func (m installerModel) View() string {
 	case instStateConfirming:
 		var confBox strings.Builder
 		confBox.WriteString("⚠️  " + instFailStyle.Render("CONFIRM SETUPS PURGE WORKFLOW") + "\n\n")
-		confBox.WriteString(fmt.Sprintf("  You are about to permanently delete %d selected setup files.\n", countSelectedInstallers(m.items)))
-		confBox.WriteString(fmt.Sprintf("  Total space to reclaim: %s\n\n", instSuccessStyle.Render(formatBytes(m.sweepSize))))
+		confBox.WriteString(fmt.Sprintf("  This moves %d selected setup files to Duster's quarantine (restorable for 7 days with du restore).\n", countSelectedInstallers(m.items)))
+		confBox.WriteString(fmt.Sprintf("  Total size to keep: %s\n\n", instSuccessStyle.Render(formatBytes(m.sweepSize))))
 		confBox.WriteString("  This operation will bypass the Recycle Bin. Proceed? [y to Deconstruct / n to Go Back]")
 		boxLayout = instLeftBoxStyle.Render(confBox.String())
 
 	case instStateSweeping:
 		var sweepBox strings.Builder
-		sweepBox.WriteString("🔥  " + instFailStyle.Render("DESTROYING BULKY INSTALLERS") + "\n\n")
-		sweepBox.WriteString("  Purging setup packages from local storage. Please stand by...")
+		sweepBox.WriteString("📦  " + instFailStyle.Render("MOVING INSTALLERS TO DUSTER'S QUARANTINE") + "\n\n")
+		sweepBox.WriteString("  Keeping the selected setup files for 7 days (du restore puts them back). Please stand by...")
 		boxLayout = instLeftBoxStyle.Render(sweepBox.String())
 
 	case instStateFinished:
@@ -460,10 +482,19 @@ func (m installerModel) View() string {
 		finBox.WriteString("✓  " + instSuccessStyle.Render("INSTALLER SWEEP TRANSACTION COMPLETED") + "\n\n")
 		if instDryRun {
 			finBox.WriteString(fmt.Sprintf("  Status      : %s (Simulation only)\n", instSuccessStyle.Render("SIMULATED")))
-			finBox.WriteString(fmt.Sprintf("  Est Reclaim : %s simulated\n\n", formatBytes(m.reclaimed)))
+			finBox.WriteString(fmt.Sprintf("  Est Reclaim : %s simulated\n\n", formatBytes(m.keptSize)))
 		} else {
 			finBox.WriteString(fmt.Sprintf("  Status      : %s\n", instSuccessStyle.Render("SWEPT CLEAN")))
-			finBox.WriteString(fmt.Sprintf("  Reclaimed   : %s reclaimed successfully\n\n", instSuccessStyle.Render(formatBytes(m.reclaimed))))
+			if m.kept > 0 {
+				finBox.WriteString(fmt.Sprintf("  Installers  : Kept %s for 7 days (du restore puts it back)\n", instSuccessStyle.Render(strings.TrimSpace(formatBytes(m.keptSize)))))
+			}
+			if m.keepFailed > 0 {
+				finBox.WriteString(instFailStyle.Render("  "+notKeptNote(m.keepFailed)) + "\n")
+			}
+			if m.sweepWarn != "" {
+				finBox.WriteString(instGrayText("  "+m.sweepWarn) + "\n")
+			}
+			finBox.WriteString("\n")
 		}
 		finBox.WriteString("  Press [q] or [esc] to return to the CLI shell.")
 		boxLayout = instLeftBoxStyle.Render(finBox.String())

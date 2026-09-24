@@ -7,8 +7,13 @@ package cmd
 
 import (
 	"errors"
+	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"time"
+
+	"github.com/Nur-Adnan/duster/internal/logging"
 )
 
 var errNotWindows = errors.New("only supported on Windows")
@@ -23,6 +28,8 @@ func getProcessCPUTime() (cpuTimes, error) { return cpuTimes{}, errNotWindows }
 func getDiskFreeBytesOS(string) int64 { return 0 }
 
 func diskFreePercent(string) float64 { return -1 }
+
+func diskSpace(string) (free, total int64, ok bool) { return 0, 0, false }
 
 // Unknown volume: the history comparison then skips its same-disk check.
 func volumeSerial(string) uint32 { return 0 }
@@ -90,3 +97,33 @@ func registerScheduleTask(string, []byte) error { return errScheduleNeedsWindows
 func queryScheduleTask(string) ([]byte, bool)   { return nil, false }
 func deleteScheduleTask(string) error           { return errScheduleNeedsWindows }
 func listScheduleTaskNames() ([]string, error)  { return nil, errScheduleNeedsWindows }
+
+// Non-Windows quarantine primitives: one local root, so tests run anywhere.
+func quarantineRoot(string) (string, error) {
+	d := logging.Dir()
+	if d == "" {
+		return "", errNoQuarantine
+	}
+	for _, p := range []string{d, filepath.Join(d, "quarantine")} {
+		if err := ensureRealDir(p); err != nil {
+			return "", err
+		}
+	}
+	return filepath.Join(d, "quarantine"), nil
+}
+
+func quarantineRoots() []string {
+	if d := logging.Dir(); d != "" && realDir(filepath.Join(d, "quarantine")) {
+		return []string{filepath.Join(d, "quarantine")}
+	}
+	return nil
+}
+
+func moveNoReplace(from, to string) error {
+	if _, err := os.Lstat(to); err == nil {
+		return fmt.Errorf("%s: %w", to, os.ErrExist)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return os.Rename(from, to)
+}

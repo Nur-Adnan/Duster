@@ -25,6 +25,7 @@ Run **Windows Smoke Test** (Actions tab > Run workflow, or push a `smoke/**` bra
 - the Downloads `installer` scan
 - an end-to-end `update`
 - `du schedule`: `on --dry-run` registers nothing, an opt-in-only category is refused, `on` registers the task, `schtasks /Run` starts `duw.exe`, the run is recorded and `off` removes the task; the same for a standard (non-admin) user managing their own task
+- the undo window: `du purge` keeps a project instead of deleting it, `du restore` lists and brings it back, on both the profile volume and a second drive; a restore over a recreated folder is skipped, never overwritten; a standard user's quarantine folder on that second drive is unreadable to another standard user; `du restore --empty` empties it
 - in a real terminal (`e2e/`, a Windows pseudo console):
   - `status` renders with a Temp line (a value or N/A) and `q` quits; `status --json` has a plausible `CPUTempC` or none
   - `analyze`: Enter and Backspace, then `d` sends a file to the Recycle Bin
@@ -49,6 +50,8 @@ What the runner can't do, so check these by hand:
 - Windows Terminal set as the default console still showing no window when `duw.exe` runs
 - two users signed in on one PC each getting their own scheduled clean
 - uninstalling with the setup exe deleting the scheduled task
+- a USB drive holding a kept session, unplugged and then replugged: `du restore` must list it again rather than losing track of it
+- a low-space sweep: purge or delete enough on a nearly full drive that its quarantine is swept before the 7-day window, oldest kept session first, and confirm the drive is back at or above 10% free
 
 The full list below stays, so a failure can be reproduced by hand.
 
@@ -108,6 +111,10 @@ Run everything from a normal (non-admin) terminal unless a step says elevated. E
 - [ ] A per-user app (for example the VS Code user installer):
   - From an elevated terminal, `du uninstall` refuses with "per-user app: run Duster without administrator rights".
   - From a normal terminal, it uninstalls.
+
+**Undo window (`du restore`)**
+- [ ] A USB drive: purge a project on it, unplug the drive, then run `du restore`. It must not lose track of the session; unplug it before the session is 7 days old, plug it back in, and `du restore` lists it again with the item still restorable.
+- [ ] A low-space sweep: fill a drive to under 10% free with several kept sessions already on it, then run `du restore` first: it must list every session and remove none of them (it applies only the 7-day expiry). Then run `du purge` or `du schedule run`: the oldest session on that drive is swept first, one at a time, until the drive is back at or above 10% free or its quarantine is empty, and the finish screen (or `schedule.log`) says how many sessions were removed early and on which drive. Sessions on other drives are left alone.
 
 **Scheduled cleaning**
 

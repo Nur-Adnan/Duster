@@ -53,6 +53,27 @@ func diskFreePercent(path string) float64 {
 	return float64(freeAvail) * 100 / float64(totalBytes)
 }
 
+// diskSpace returns the free bytes (as this user sees them) and the size of
+// the volume holding path. ok is false when they cannot be read; a full volume
+// is ok with free == 0.
+func diskSpace(path string) (free, total int64, ok bool) {
+	pathPtr, err := syscall.UTF16PtrFromString(path)
+	if err != nil {
+		return 0, 0, false
+	}
+	var freeAvail, totalBytes, totalFree uint64
+	ret, _, _ := _procGetDiskFreeSpace.Call(
+		uintptr(unsafe.Pointer(pathPtr)),
+		uintptr(unsafe.Pointer(&freeAvail)),
+		uintptr(unsafe.Pointer(&totalBytes)),
+		uintptr(unsafe.Pointer(&totalFree)),
+	)
+	if ret == 0 || totalBytes == 0 {
+		return 0, 0, false
+	}
+	return int64(freeAvail), int64(totalBytes), true
+}
+
 // volumeSerial returns the serial number of the volume holding path, or 0 when
 // it cannot be read. It tells a USB stick from the one that had the same drive
 // letter last week.
