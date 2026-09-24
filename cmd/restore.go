@@ -57,8 +57,9 @@ func restoreFail(err error) {
 }
 
 func executeRestore(c *cobra.Command, args []string) {
-	if errs := sweepQuarantine(time.Now()); len(errs) > 0 {
-		for _, e := range errs {
+	// A dry run changes nothing, so it does not apply retention either.
+	if !restoreDryRun {
+		for _, e := range sweepQuarantine(time.Now()) {
 			fmt.Fprintf(os.Stderr, "Warning: %v\n", e)
 		}
 	}
@@ -91,7 +92,39 @@ func executeRestore(c *cobra.Command, args []string) {
 	if err != nil {
 		restoreFail(err)
 	}
-	executeRestoreSession(session)
+	n, _ := strconv.Atoi(args[0]) // pickRestoreSession accepted it
+	if err := restoreRequestError(session, n, restoreItem, itemGiven); err != nil {
+		restoreFail(err)
+	}
+	executeRestoreSession(session, n, itemGiven)
+}
+
+// damaged reports whether any of the session's folders has no readable
+// manifest, so its items cannot be listed or restored.
+func (r restoreSession) damaged() bool {
+	for _, k := range r.Parts {
+		if k.Damaged {
+			return true
+		}
+	}
+	return false
+}
+
+func damagedSessionMsg(n int) string {
+	return fmt.Sprintf("session %d is damaged: its items cannot be listed or restored; empty it with du restore --empty %d", n, n)
+}
+
+// restoreRequestError says why du restore <n> [--item k] cannot run: a session
+// with nothing but damaged folders, or an item number outside 1..len(Items()).
+func restoreRequestError(r restoreSession, n, item int, itemGiven bool) error {
+	items := len(r.Items())
+	if items == 0 && r.damaged() {
+		return errors.New(damagedSessionMsg(n))
+	}
+	if itemGiven && (item < 1 || item > items) {
+		return fmt.Errorf("session %d has no item %d: it holds %s, numbered from 1 (du restore --json lists them)", n, item, plural(items, "item"))
+	}
+	return nil
 }
 
 // pickRestoreSession resolves the 1-based number `du restore` printed to the
@@ -117,10 +150,17 @@ func renderRestoreList(w io.Writer, rs []restoreSession, now time.Time) {
 	var held int64
 	for i, r := range rs {
 		items := len(r.Items())
+		count, note := plural(items, "item"), ""
+		switch {
+		case items == 0 && r.damaged():
+			count = "damaged"
+		case r.damaged():
+			note = "  (part damaged)"
+		}
 		expires := r.Created.Add(quarantineKeep).Local().Format(restoreExpiryLayout)
-		fmt.Fprintf(w, "  %d  %s  %-10s %-10s %s  expires %s\n",
+		fmt.Fprintf(w, "  %d  %s  %-10s %-10s %s  expires %s%s\n",
 			i+1, r.Created.Local().Format(restoreDateLayout), r.Command,
-			plural(items, "item"), strings.TrimSpace(formatBytes(r.Size())), expires)
+			count, strings.TrimSpace(formatBytes(r.Size())), expires, note)
 		held += r.Size()
 	}
 	fmt.Fprintf(w, "Held: %s. Restore with: du restore <n>   Empty now: du restore --empty\n", strings.TrimSpace(formatBytes(held)))
@@ -141,6 +181,7 @@ type restoreSessionJSON struct {
 	Expires time.Time         `json:"expires"`
 	Items   []restoreItemJSON `json:"items"`
 	Size    int64             `json:"size"`
+	Damaged bool              `json:"damaged,omitempty"`
 }
 
 func printRestoreListJSON(rs []restoreSession) {
@@ -152,7 +193,7 @@ func printRestoreListJSON(rs []restoreSession) {
 		}
 		sessions = append(sessions, restoreSessionJSON{
 			Number: i + 1, ID: r.ID, Command: r.Command, Created: r.Created,
-			Expires: r.Created.Add(quarantineKeep), Items: items, Size: r.Size(),
+			Expires: r.Created.Add(quarantineKeep), Items: items, Size: r.Size(), Damaged: r.damaged(),
 		})
 	}
 	b, _ := json.MarshalIndent(map[string][]restoreSessionJSON{"sessions": sessions}, "", "  ")
@@ -160,8 +201,15 @@ func printRestoreListJSON(rs []restoreSession) {
 }
 
 // executeRestoreSession runs du restore <n> [--item k] [--dry-run] [--json].
-func executeRestoreSession(session restoreSession) {
-	results := restoreItems(session, restoreItem, restoreDryRun)
+func executeRestoreSession(session restoreSession, n int, itemGiven bool) {
+	item := 0
+	if itemGiven {
+		item = restoreItem
+	}
+	results := restoreItems(session, item, restoreDryRun)
+	if !itemGiven {
+		results = append(results, damagedPartResults(session, n)...)
+	}
 	failed := false
 	for _, r := range results {
 		if r.Status == "failed" {
@@ -177,6 +225,18 @@ func executeRestoreSession(session restoreSession) {
 	if failed {
 		os.Exit(1)
 	}
+}
+
+// damagedPartResults reports each damaged folder of a partly readable session
+// as failed, so restoring "everything" never silently leaves part of it behind.
+func damagedPartResults(r restoreSession, n int) []restoreResult {
+	var out []restoreResult
+	for _, k := range r.Parts {
+		if k.Damaged {
+			out = append(out, restoreResult{Path: k.Dir, Status: "failed", Reason: damagedSessionMsg(n)})
+		}
+	}
+	return out
 }
 
 func printRestoreResults(w io.Writer, results []restoreResult) {
