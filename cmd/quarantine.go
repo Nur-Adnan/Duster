@@ -379,12 +379,12 @@ func groupSessions(ks []keptSession) []restoreSession {
 type volSpace struct{ Free, Total int64 }
 
 // pickSweep decides which session folders to delete: every one older than
-// quarantineKeep, then on each volume below quarantineLowSpace the oldest
-// remaining ones until the volume would be back at or above it. Expired
-// sessions count as freed space first, so the low-space pass never deletes a
-// fresh session that the expired ones already made room for. Pure: vols is
-// not modified.
-func pickSweep(ks []keptSession, vols map[string]volSpace, now time.Time) []string {
+// quarantineKeep, then, when lowSpace is set, on each volume below
+// quarantineLowSpace the oldest remaining ones until the volume would be back
+// at or above it. Expired sessions count as freed space first, so the
+// low-space pass never deletes a fresh session that the expired ones already
+// made room for. Pure: vols is not modified.
+func pickSweep(ks []keptSession, vols map[string]volSpace, now time.Time, lowSpace bool) []string {
 	space := make(map[string]volSpace, len(vols))
 	for r, v := range vols {
 		space[r] = v
@@ -402,9 +402,12 @@ func pickSweep(ks []keptSession, vols map[string]volSpace, now time.Time) []stri
 		}
 	}
 	for _, k := range sorted {
-		if now.Sub(k.Created) > quarantineKeep {
+		if sessionExpired(k, now) {
 			take(k)
 		}
+	}
+	if !lowSpace {
+		return out
 	}
 	for _, k := range sorted {
 		if gone[k.Dir] {
@@ -419,41 +422,130 @@ func pickSweep(ks []keptSession, vols map[string]volSpace, now time.Time) []stri
 	return out
 }
 
-// sweepQuarantine applies retention to every quarantine on this machine.
-func sweepQuarantine(now time.Time) []error {
+func sessionExpired(k keptSession, now time.Time) bool {
+	return now.Sub(k.Created) > quarantineKeep
+}
+
+// sweepMode says which retention rules sweepQuarantine applies.
+type sweepMode int
+
+const (
+	// sweepExpiredOnly removes only sessions past quarantineKeep. du restore
+	// uses it: the user came to get something back, so a session they may be
+	// about to restore is never removed early for space.
+	sweepExpiredOnly sweepMode = iota
+	// sweepFull also removes the oldest sessions on a volume below
+	// quarantineLowSpace. The commands that keep items (and du schedule run)
+	// use it.
+	sweepFull
+)
+
+// sweepReport is what sweepQuarantine removed and why. A session spread over
+// several volumes counts once.
+type sweepReport struct {
+	Expired       int   // sessions removed for being older than quarantineKeep
+	ExpiredBytes  int64 // what they held
+	LowSpace      int   // sessions removed early because their volume was low on space
+	LowSpaceBytes int64
+	LowSpaceVols  []string // those volumes, e.g. "D:"
+	Errs          []error  // folders that could not be removed (they stay kept, and listed)
+}
+
+// sweepQuarantine applies retention to every quarantine on this machine and
+// reports what it removed.
+func sweepQuarantine(now time.Time, mode sweepMode) sweepReport {
 	roots := quarantineRoots()
 	ks := loadKeptSessions(roots)
 	vols := map[string]volSpace{}
-	for _, r := range roots {
-		// A volume that cannot be read is left to the age rule; a full one
-		// (free == 0) is exactly the one that needs the low-space pass.
-		if free, total, ok := diskSpace(r); ok {
-			vols[r] = volSpace{Free: free, Total: total}
+	if mode == sweepFull {
+		for _, r := range roots {
+			// A volume that cannot be read is left to the age rule; a full one
+			// (free == 0) is exactly the one that needs the low-space pass.
+			if free, total, ok := diskSpace(r); ok {
+				vols[r] = volSpace{Free: free, Total: total}
+			}
 		}
 	}
-	sizes := map[string]int64{}
+	byDir := map[string]keptSession{}
 	for _, k := range ks {
-		sizes[k.Dir] = k.size()
+		byDir[k.Dir] = k
 	}
-	var errs []error
-	for _, dir := range pickSweep(ks, vols, now) {
+	var rep sweepReport
+	expiredIDs, lowIDs, lowVols := map[string]bool{}, map[string]bool{}, map[string]bool{}
+	for _, dir := range pickSweep(ks, vols, now, mode == sweepFull) {
+		k := byDir[dir]
 		err := removeSessionDir(dir)
-		logging.LogDestructiveOperation("restore", "expire", dir, sizes[dir], err == nil)
+		logging.LogDestructiveOperation("restore", "expire", dir, k.size(), err == nil)
 		if err != nil {
-			errs = append(errs, err)
+			rep.Errs = append(rep.Errs, err)
+			continue
+		}
+		if sessionExpired(k, now) {
+			if !expiredIDs[k.Manifest.ID] {
+				expiredIDs[k.Manifest.ID] = true
+				rep.Expired++
+			}
+			rep.ExpiredBytes += k.size()
+			continue
+		}
+		if !lowIDs[k.Manifest.ID] {
+			lowIDs[k.Manifest.ID] = true
+			rep.LowSpace++
+		}
+		rep.LowSpaceBytes += k.size()
+		vol := filepath.VolumeName(k.Root)
+		if vol == "" {
+			vol = k.Root
+		}
+		if !lowVols[vol] {
+			lowVols[vol] = true
+			rep.LowSpaceVols = append(rep.LowSpaceVols, vol)
 		}
 	}
-	return errs
+	sort.Strings(rep.LowSpaceVols)
+	return rep
+}
+
+// expiredLine is du restore's line for the sessions the sweep removed for age
+// ("" when none).
+func (r sweepReport) expiredLine() string {
+	if r.Expired == 0 {
+		return ""
+	}
+	return fmt.Sprintf("Removed %s (%s).", plural(r.Expired, "expired session"), strings.TrimSpace(formatBytes(r.ExpiredBytes)))
+}
+
+// lowSpaceLine says which kept sessions the sweep removed before their 7 days
+// were up because their drive was low on space ("" when none).
+func (r sweepReport) lowSpaceLine() string {
+	if r.LowSpace == 0 {
+		return ""
+	}
+	return fmt.Sprintf("Removed %s (%s) before 7 days: low space on %s.",
+		plural(r.LowSpace, "kept session"), strings.TrimSpace(formatBytes(r.LowSpaceBytes)), strings.Join(r.LowSpaceVols, ", "))
+}
+
+// sweepNotice is the one line the commands that keep items show about the
+// sweep before their run: low-space removals, then any removal errors ("" when
+// there is nothing to say). Expired sessions are routine and not mentioned.
+func sweepNotice(r sweepReport) string {
+	var parts []string
+	for _, s := range []string{r.lowSpaceLine(), sweepWarning(r.Errs)} {
+		if s != "" {
+			parts = append(parts, s)
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 // sweepWarning folds sweepQuarantine's errors into one warning line ("" when
 // there are none), for the commands that sweep before they keep anything. A
-// failed sweep never stops them: the expired items stay kept, and listed.
+// failed sweep never stops them: the items stay kept, and listed.
 func sweepWarning(errs []error) string {
 	if len(errs) == 0 {
 		return ""
 	}
-	return "Warning: some expired kept items could not be removed: " + strings.ReplaceAll(errors.Join(errs...).Error(), "\n", "; ")
+	return "Warning: some kept items due for removal could not be removed: " + strings.ReplaceAll(errors.Join(errs...).Error(), "\n", "; ")
 }
 
 // notKeptNote is the finish views' line for selected items that could not be

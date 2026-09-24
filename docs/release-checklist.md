@@ -114,7 +114,7 @@ Run everything from a normal (non-admin) terminal unless a step says elevated. E
 
 **Undo window (`du restore`)**
 - [ ] A USB drive: purge a project on it, unplug the drive, then run `du restore`. It must not lose track of the session; unplug it before the session is 7 days old, plug it back in, and `du restore` lists it again with the item still restorable.
-- [ ] A low-space sweep: fill a drive to under 10% free with several kept sessions already on it, then run `du restore` or `du schedule run` again. The oldest session on that drive is swept first, one at a time, until the drive is back at or above 10% free or its quarantine is empty. Sessions on other drives, and anything not yet 7 days old, are left alone.
+- [ ] A low-space sweep: fill a drive to under 10% free with several kept sessions already on it, then run `du restore` first: it must list every session and remove none of them (it applies only the 7-day expiry). Then run `du purge` or `du schedule run`: the oldest session on that drive is swept first, one at a time, until the drive is back at or above 10% free or its quarantine is empty, and the finish screen (or `schedule.log`) says how many sessions were removed early and on which drive. Sessions on other drives are left alone.
 
 **Scheduled cleaning**
 

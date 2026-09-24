@@ -249,7 +249,7 @@ func TestPickSweep(t *testing.T) {
 			for k, v := range tt.vols {
 				before[k] = v
 			}
-			if got := strings.Join(pickSweep(tt.ks, tt.vols, now), ","); got != tt.want {
+			if got := strings.Join(pickSweep(tt.ks, tt.vols, now, true), ","); got != tt.want {
 				t.Errorf("pickSweep = %q, want %q", got, tt.want)
 			}
 			for k, v := range before {
