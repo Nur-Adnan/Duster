@@ -110,6 +110,7 @@ type installerModel struct {
 	scrollOffset int
 	sweepSize    int64
 	reclaimed    int64
+	kept         int
 	width        int
 	height       int
 }
@@ -120,6 +121,7 @@ type installerScanCompleteMsg struct {
 
 type setupSweepCompleteMsg struct {
 	reclaimed int64
+	kept      int
 }
 
 func initialInstallerModel() installerModel {
@@ -217,6 +219,11 @@ func scanInstallersCmd(minSizeMB int64) tea.Cmd {
 
 func runSetupSweepCmd(items []installerItem, dry bool) tea.Cmd {
 	return func() tea.Msg {
+		var s *quarantineSession
+		if !dry {
+			sweepQuarantine(time.Now())
+			s = newQuarantineSession("installer")
+		}
 		var reclaimed int64
 		for _, item := range items {
 			if !item.Selected {
@@ -225,18 +232,22 @@ func runSetupSweepCmd(items []installerItem, dry bool) tea.Cmd {
 
 			var err error
 			if !dry {
-				err = removeFileSafe(item.Path)
+				err = quarantinePath(s, item.Path, item.Size)
 			}
 
 			success := err == nil
 			if !dry { // a dry run deleted nothing, so there is nothing to log
-				logInstOperation("sweep", item.Path, item.Size, success)
+				logInstOperation("quarantine", item.Path, item.Size, success)
 			}
 			if success {
 				reclaimed += item.Size
 			}
 		}
-		return setupSweepCompleteMsg{reclaimed: reclaimed}
+		var kept int
+		if s != nil {
+			kept = s.Kept()
+		}
+		return setupSweepCompleteMsg{reclaimed: reclaimed, kept: kept}
 	}
 }
 
@@ -336,6 +347,7 @@ func (m installerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case setupSweepCompleteMsg:
 		m.reclaimed = msg.reclaimed
+		m.kept = msg.kept
 		m.state = instStateFinished
 		return m, nil
 	}
@@ -444,7 +456,7 @@ func (m installerModel) View() string {
 	case instStateConfirming:
 		var confBox strings.Builder
 		confBox.WriteString("⚠️  " + instFailStyle.Render("CONFIRM SETUPS PURGE WORKFLOW") + "\n\n")
-		confBox.WriteString(fmt.Sprintf("  You are about to permanently delete %d selected setup files.\n", countSelectedInstallers(m.items)))
+		confBox.WriteString(fmt.Sprintf("  This moves %d selected setup files to Duster's quarantine (restorable for 7 days with du restore).\n", countSelectedInstallers(m.items)))
 		confBox.WriteString(fmt.Sprintf("  Total space to reclaim: %s\n\n", instSuccessStyle.Render(formatBytes(m.sweepSize))))
 		confBox.WriteString("  This operation will bypass the Recycle Bin. Proceed? [y to Deconstruct / n to Go Back]")
 		boxLayout = instLeftBoxStyle.Render(confBox.String())
@@ -464,6 +476,9 @@ func (m installerModel) View() string {
 		} else {
 			finBox.WriteString(fmt.Sprintf("  Status      : %s\n", instSuccessStyle.Render("SWEPT CLEAN")))
 			finBox.WriteString(fmt.Sprintf("  Reclaimed   : %s reclaimed successfully\n\n", instSuccessStyle.Render(formatBytes(m.reclaimed))))
+			if m.kept > 0 {
+				finBox.WriteString("  Kept for 7 days: du restore lists it, du restore 1 puts it back.\n\n")
+			}
 		}
 		finBox.WriteString("  Press [q] or [esc] to return to the CLI shell.")
 		boxLayout = instLeftBoxStyle.Render(finBox.String())
