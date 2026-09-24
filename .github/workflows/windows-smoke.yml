@@ -491,6 +491,14 @@ jobs:
           $j = & $du schedule on --every daily --at 03:00 --add npm --json | Out-String | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0 -or -not $j.enabled -or $j.every -ne 'daily' -or $j.categories -notcontains 'npm') { throw "on: $($j | ConvertTo-Json -Depth 5)" }
 
+          # Prove the scheduled path actually deletes something: earlier steps
+          # have already emptied the caches npm would otherwise clean, so
+          # plant our own file in %TEMP% for the temp category to sweep.
+          $probe = Join-Path $env:TEMP 'duster-schedule-probe'
+          New-Item -ItemType Directory -Force $probe | Out-Null
+          fsutil file createnew "$probe\probe.bin" 1048576 | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "fsutil createnew failed: exit=$LASTEXITCODE" }
+
           schtasks /Run /TN $name | Out-Null
           if ($LASTEXITCODE -ne 0) { throw "schtasks /Run failed: exit=$LASTEXITCODE" }
           for ($i = 0; $i -lt 180 -and -not (Test-Path $rec); $i++) { Start-Sleep 1 }
@@ -498,6 +506,10 @@ jobs:
           if (-not (Test-Path $rec)) { throw 'the task did not record a run' }
           $j = & $du schedule --json | Out-String | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0 -or $j.last_check.result -ne 'cleaned' -or -not $j.last_clean) { throw "after the run: $($j | ConvertTo-Json -Depth 6)" }
+          if (Test-Path $probe) { throw 'the scheduled clean left the probe in %TEMP%' }
+          if ([int64]$j.last_clean.freed -lt 1048576) { throw "the scheduled clean freed only $($j.last_clean.freed) bytes" }
+          $tempCat = $j.last_clean.categories | Where-Object { $_.id -eq 'temp' }
+          if (-not $tempCat -or ($tempCat.status -ne 'cleaned' -and $tempCat.status -ne 'partial')) { throw "temp category: $($tempCat | ConvertTo-Json -Depth 5)" }
 
           $j = & $du schedule off --json | Out-String | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0 -or $j.enabled) { throw 'off' }
