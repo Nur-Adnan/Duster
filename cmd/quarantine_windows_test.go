@@ -263,12 +263,12 @@ func TestMoveNoReplaceLongPath(t *testing.T) {
 }
 
 func TestExtendedPath(t *testing.T) {
-	long := `C:\` + strings.Repeat(`dir\`, 60) + "f"
-	unc := `\\srv\share\` + strings.Repeat(`dir\`, 60) + "f"
+	long := `C:\` + strings.Repeat(`dir\`, 70) + "f"
+	unc := `\\srv\share\` + strings.Repeat(`dir\`, 70) + "f"
 	for in, want := range map[string]string{
 		`C:\short\path`:            `C:\short\path`,
 		long:                       `\\?\` + long,
-		unc:                        `\\?\UNC\srv\share\` + strings.Repeat(`dir\`, 60) + "f",
+		unc:                        `\\?\UNC\srv\share\` + strings.Repeat(`dir\`, 70) + "f",
 		`\\?\` + long:              `\\?\` + long,
 		strings.Repeat(`rel\`, 60): strings.Repeat(`rel\`, 60),
 	} {
