@@ -24,6 +24,7 @@ Run **Windows Smoke Test** (Actions tab > Run workflow, or push a `smoke/**` bra
 - `purge` project markers, and `--safe` sending to the Recycle Bin
 - the Downloads `installer` scan
 - an end-to-end `update`
+- `du schedule`: `on --dry-run` registers nothing, an opt-in-only category is refused, `on` registers the task, `schtasks /Run` starts `duw.exe`, the run is recorded and `off` removes the task; the same for a standard (non-admin) user managing their own task
 - in a real terminal (`e2e/`, a Windows pseudo console):
   - `status` renders with a Temp line (a value or N/A) and `q` quits; `status --json` has a plausible `CPUTempC` or none
   - `analyze`: Enter and Backspace, then `d` sends a file to the Recycle Bin
@@ -44,6 +45,10 @@ What the runner can't do, so check these by hand:
 - uninstall a per-user app from a non-admin terminal
 - MSI (7-Zip) and InstallShield or rundll32 uninstallers
 - a real CPU temperature: runners are VMs that usually expose no thermal zone, and they run English Windows
+- an unplugged laptop skipping a scheduled clean, and one asleep at the check time catching up when it wakes (`StartWhenAvailable`)
+- Windows Terminal set as the default console still showing no window when `duw.exe` runs
+- two users signed in on one PC each getting their own scheduled clean
+- uninstalling with the setup exe deleting the scheduled task
 
 The full list below stays, so a failure can be reproduced by hand.
 
@@ -103,6 +108,13 @@ Run everything from a normal (non-admin) terminal unless a step says elevated. E
 - [ ] A per-user app (for example the VS Code user installer):
   - From an elevated terminal, `du uninstall` refuses with "per-user app: run Duster without administrator rights".
   - From a normal terminal, it uninstalls.
+
+**Scheduled cleaning**
+- [ ] `du schedule on`, on a laptop: unplug it and let the check time pass. `du schedule` shows the check but no clean. Plug it back in for the next check and it cleans normally.
+- [ ] `du schedule on`, then put the PC to sleep before the check time and wake it after: `StartWhenAvailable` catches the check up instead of skipping it.
+- [ ] Set Windows Terminal as the default console host (Settings > Privacy & security > For developers, or Windows Terminal's own settings), then `schtasks /Run /TN "Duster Scheduled Clean (<you>)"`: no console or Windows Terminal window appears.
+- [ ] Two users signed in on the same PC each run `du schedule on`: `schtasks /Query` lists two separate tasks, one per account, and each user's `du schedule off` removes only their own.
+- [ ] Install with the setup exe, run `du schedule on`, then uninstall with the setup exe: `schtasks /Query /TN "Duster Scheduled Clean (<you>)"` fails afterwards, the task is gone.
 
 **Update and remove**
 - [ ] Build with `-ldflags "-X main.Version=1.0.1"` and run `du update --json`. It reports an update and installs nothing.

@@ -1,6 +1,6 @@
 # Scheduled cleaning (`du schedule`) — design
 
-Status: approved in conversation 2026-09-24, pending review of this document.
+Status: approved; implemented on feat/scheduled-clean.
 Branch: `feat/scheduled-clean` (stacked on `feat/analyze-changes`, whose
 link-refusing directory helpers it reuses).
 
@@ -58,7 +58,8 @@ Rejected, with reasons:
 |---|---|---|
 | `cmd/schedule.go` | `du schedule` command: `status` (default), `on`, `off`, hidden `run` | the units below |
 | `cmd/schedule_policy.go` | Pure logic, no I/O: category policy, due decision, argument encoding and parsing | nothing |
-| `cmd/schedule_task_windows.go` | Build task XML; register, delete and query through System32 `schtasks.exe` | `systemExecutable` |
+| `cmd/schedule_task.go` | Build and parse task XML, and read task names out of `schtasks` CSV output; untagged, so it is tested on every OS | `encoding/xml` |
+| `cmd/schedule_task_windows.go` | Register, delete and query the task through System32 `schtasks.exe`; only this file is Windows-only | `systemExecutable`, `cmd/schedule_task.go` |
 | `cmd/stubs.go` | Non-Windows stubs for every symbol in the Windows file | — |
 | `launcher/duw/main.go` | Windowless launcher: runs `du.exe` from its own folder with no console, appends output to the schedule log | stdlib, `internal/logging` |
 
@@ -108,9 +109,12 @@ du schedule off                    delete this user's task; keep the history rec
 "System drive" always means the drive holding the Windows directory, from
 `systemDriveRoot()` (kernel-resolved, never `%SystemDrive%`). `off` with no
 task registered prints "Scheduled clean is already off" and exits 0.
-`status --json` carries the same facts as the text: `enabled`, `every`, `at`,
-`low_space_percent` (null when off), `categories`, `next_check`,
-`last_check`, `last_clean`, `task_command`, `warnings`.
+`--uninstall` has no wildcard `schtasks` query to call, so it finds its
+targets by reading the name column out of `schtasks /Query /FO CSV /NH` and
+deleting every name that starts with `Duster Scheduled Clean (`.
+`status --json` carries the same facts as the text: `enabled`, `task_name`,
+`every`, `at`, `low_space_percent` (null when off), `categories`,
+`next_check`, `last_check`, `last_clean`, `task_command`, `warnings`.
 
 Validation:
 
@@ -166,14 +170,18 @@ the allow-list.
 
    | Situation | Result |
    |---|---|
-   | No successful clean recorded | Due: "first scheduled clean" |
-   | Last clean at least cadence − 4 h ago (daily 20 h, weekly 164 h, monthly 716 h) | Due: the cadence name |
+   | No clean has fully succeeded yet (`last_success` unset) | Due: "no successful clean yet" |
+   | Last success at least cadence − 4 h ago (daily 20 h, weekly 164 h, monthly 716 h) | Due: the cadence name |
    | Low space enabled and system drive free % below it | Due: "low space (N% free)" |
    | Otherwise | Not due |
 
-   The 4-hour slack absorbs start-time jitter, so a clean at 19:02 does not
-   make the next day's 19:00 check "not yet". Low space can trigger at most
-   once per day because the task fires daily.
+   The decision keys on `last_success`, the last clean where at least one
+   category did not fail, not merely the last attempt: a run where every
+   category failed leaves `last_success` untouched, so the next day's check
+   is still "no successful clean yet" and retries rather than waiting out
+   the cadence. The 4-hour slack absorbs start-time jitter, so a clean at
+   19:02 does not make the next day's 19:00 check "not yet". Low space can
+   trigger at most once per day because the task fires daily.
 3. **Clean** each allowed category in `cleanGroups` order through
    `runCategory(cat, false)`, exactly as `du clean` does, inheriting every
    safety invariant. `adminOnlyBlocked` categories never appear (policy).
@@ -186,9 +194,11 @@ the allow-list.
    - any other error: `failed`.
 5. **Record** in `%LOCALAPPDATA%\Duster\schedule.json` (atomic temp + rename;
    the directory must not be a link, via `ensureRealDir`/`realDir`):
-   last check (time, result, free %), and last clean (time, reason, total
+   last check (time, result, free %), last clean (time, reason, total
    freed, per-category `{id, freed, files, status, error}`, free % before
-   and after). A damaged file reads as "no history".
+   and after), and `last_success` (the time of the last clean where at
+   least one category did not fail; what step 2's due decision reads back).
+   A damaged file reads as "no history".
 6. **Exit** 0 for cleaned, partial or not due; 1 for refused arguments or any
    `failed` category. Task Scheduler's "Last Run Result" therefore matches.
 
@@ -200,11 +210,16 @@ file, deleted afterwards.
 
 - **Name**: `Duster Scheduled Clean (<account>)`, with the account name
   reduced to `[A-Za-z0-9._-]`. Task names are machine-wide; one per user
-  prevents two users' tasks from colliding.
+  prevents two users' tasks from colliding. When sanitising drops a
+  character, the name gets a `-<6 hex of sha256(account)>` suffix, so two
+  different account names that sanitise to the same string (`José` and
+  `Jos`) never collide on one task.
 - **Principal**: the current user's SID, `LogonType InteractiveToken`,
   `RunLevel LeastPrivilege`. Never `HighestAvailable`.
 - **Trigger**: one `CalendarTrigger`, daily at `--at`.
-- **Action**: `Command` = absolute path of `duw.exe`; `Arguments` =
+- **Action**: `Command` = the quoted absolute path of `duw.exe`
+  (`"C:\Program Files\Duster\duw.exe"`, as Task Scheduler's own exports do,
+  so a path with a space is still one program); `Arguments` =
   `schedule run --every <e> --low-space <n|off> [--add a,b]` (validated tokens
   only, so Windows argv quoting cannot be abused).
 - **Settings**: `DisallowStartIfOnBatteries` true, `StopIfGoingOnBatteries`
