@@ -9,8 +9,14 @@ import (
 	"time"
 )
 
+// tempQuarantine points the local quarantine at a temp folder and turns off
+// the other drives' quarantines, so a test never lists, sweeps or empties a
+// developer's real kept items (on Windows those live on every other drive).
 func tempQuarantine(t *testing.T) string {
 	t.Helper()
+	prev := otherDriveQuarantines
+	otherDriveQuarantines = false
+	t.Cleanup(func() { otherDriveQuarantines = prev })
 	t.Setenv("LOCALAPPDATA", t.TempDir())
 	t.Setenv("DU_NO_OPLOG", "1")
 	return t.TempDir()

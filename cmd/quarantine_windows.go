@@ -335,7 +335,8 @@ func unpinQuarantineDir(dir string) {
 // mounted in a folder, and an error for a root that is a link or that another
 // user owns. The caller then leaves the item in place. A folder on another
 // drive is pinned (pinQuarantineDir) before it is returned, so it cannot be
-// swapped while this process uses it.
+// swapped while this process uses it. With otherDriveQuarantines off (unit
+// tests) every other drive gets errNoQuarantine.
 func quarantineRoot(path string) (string, error) {
 	vr, err := volumeRoot(path)
 	if err != nil {
@@ -355,7 +356,7 @@ func quarantineRoot(path string) (string, error) {
 		}
 		return q, nil
 	}
-	if !isDriveLetterRoot(vr) {
+	if !isDriveLetterRoot(vr) || !otherDriveQuarantines {
 		return "", errNoQuarantine
 	}
 
@@ -399,13 +400,17 @@ func quarantineRoot(path string) (string, error) {
 // quarantineRoots lists every quarantine on this machine that belongs to the
 // current user: the local one plus X:\.duster-quarantine\<SID> on each fixed
 // or removable drive. It only reads; a root that is a link or owned by another
-// user is left out, so restore and expiry never act on a planted folder.
+// user is left out, so restore and expiry never act on a planted folder. With
+// otherDriveQuarantines off (unit tests) it lists only the local one.
 func quarantineRoots() []string {
 	var roots []string
 	if d := logging.Dir(); d != "" {
 		if q := filepath.Join(d, "quarantine"); realDir(d) && realDir(q) {
 			roots = append(roots, q)
 		}
+	}
+	if !otherDriveQuarantines {
+		return roots
 	}
 	sid, err := currentUserSID()
 	if err != nil {
