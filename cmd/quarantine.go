@@ -1,0 +1,464 @@
+package cmd
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/Nur-Adnan/duster/internal/logging"
+	"github.com/Nur-Adnan/duster/lib/fs"
+)
+
+// The undo window: user-facing deletes move items into a quarantine on the
+// item's own volume (a rename: no copy, permissions kept) that `du restore`
+// can put back for quarantineKeep. See docs/superpowers/specs/2026-09-24-undo-restore-design.md.
+
+const (
+	quarantineKeep         = 7 * 24 * time.Hour
+	quarantineLowSpace     = 10.0 // % free: below it the oldest sessions on that volume go first
+	quarantineManifestName = "session.json"
+	quarantineDirName      = ".duster-quarantine"
+)
+
+var errNoQuarantine = errors.New("this drive has no Duster quarantine (network drive?), so the item was left in place")
+
+type quarantineItem struct {
+	Slot  int       `json:"slot"`
+	Path  string    `json:"path"`
+	Size  int64     `json:"size"`
+	Dir   bool      `json:"dir"`
+	State string    `json:"state"` // pending, kept, restored
+	At    time.Time `json:"at"`
+}
+
+type quarantineManifest struct {
+	ID      string           `json:"id"`
+	Command string           `json:"command"`
+	Created time.Time        `json:"created"`
+	Items   []quarantineItem `json:"items"`
+}
+
+// quarantineSession is one command run. Its folder on a volume is created the
+// first time an item from that volume is kept.
+type quarantineSession struct {
+	mu      sync.Mutex
+	id      string
+	command string
+	created time.Time
+	dirs    map[string]*quarantineManifest // session folder -> its manifest
+	kept    int
+}
+
+func newQuarantineSession(command string) *quarantineSession {
+	now := time.Now()
+	return &quarantineSession{
+		id: fmt.Sprintf("%d-%s", now.UnixNano(), command), command: command,
+		created: now, dirs: map[string]*quarantineManifest{},
+	}
+}
+
+// Kept is how many items this session has kept so far.
+func (s *quarantineSession) Kept() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.kept
+}
+
+// insideQuarantine reports whether path is in a quarantine root, so a kept
+// item is never kept again.
+func insideQuarantine(path string) bool {
+	p := strings.ToLower(filepath.Clean(path))
+	sep := string(filepath.Separator)
+	if strings.Contains(p+sep, sep+quarantineDirName+sep) {
+		return true
+	}
+	if d := logging.Dir(); d != "" {
+		q := strings.ToLower(filepath.Join(d, "quarantine"))
+		return p == q || strings.HasPrefix(p, q+sep)
+	}
+	return false
+}
+
+// quarantinePath moves path into the session's folder on the same volume.
+// The item is recorded as pending before the move and kept after, so a crash
+// leaves it either in place or in its slot, never lost. The caller logs.
+func quarantinePath(s *quarantineSession, path string, size int64) error {
+	if !fs.IsValidPath(path) {
+		return fmt.Errorf("deleting system protected paths is blocked for safety")
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if fs.IsOfflineInfo(info) {
+		return fmt.Errorf("%s is a OneDrive online-only file, so it was left in place", path)
+	}
+	if insideQuarantine(path) {
+		return fmt.Errorf("%s is already in Duster's quarantine", path)
+	}
+	root, err := quarantineRoot(path)
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	dir := filepath.Join(root, s.id)
+	m := s.dirs[dir]
+	if m == nil {
+		if err := ensureRealDir(dir); err != nil {
+			return err
+		}
+		m = &quarantineManifest{ID: s.id, Command: s.command, Created: s.created}
+		s.dirs[dir] = m
+	}
+	slot := len(m.Items) + 1
+	isDir := info.IsDir() && info.Mode()&(os.ModeSymlink|os.ModeIrregular) == 0
+	m.Items = append(m.Items, quarantineItem{Slot: slot, Path: path, Size: size, Dir: isDir, State: "pending", At: time.Now()})
+	undo := func() { m.Items = m.Items[:len(m.Items)-1]; _ = writeManifest(dir, m) }
+	if err := writeManifest(dir, m); err != nil {
+		m.Items = m.Items[:len(m.Items)-1]
+		return err
+	}
+	slotDir := filepath.Join(dir, strconv.Itoa(slot))
+	if err := os.Mkdir(slotDir, 0o700); err != nil {
+		undo()
+		return err
+	}
+	if err := moveNoReplace(path, filepath.Join(slotDir, filepath.Base(path))); err != nil {
+		os.Remove(slotDir)
+		undo()
+		return fmt.Errorf("could not move %s into Duster's quarantine, so it was left in place: %w", path, err)
+	}
+	m.Items[slot-1].State = "kept"
+	_ = writeManifest(dir, m) // on failure the item stays pending with its slot filled: load treats that as kept
+	s.kept++
+	return nil
+}
+
+// recycleOrQuarantine sends path to the Recycle Bin and, when the bin does not
+// take it (too big and the user said No to Windows' permanent-delete prompt,
+// or a path too long for the bin's API), keeps it in the quarantine instead.
+func recycleOrQuarantine(s *quarantineSession, path string, size int64) (bool, error) {
+	rerr := recyclePathNative(path)
+	if rerr == nil {
+		return false, nil
+	}
+	if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
+		return false, nil // Windows deleted it (the user answered Yes to its prompt)
+	}
+	if qerr := quarantinePath(s, path, size); qerr != nil {
+		return false, fmt.Errorf("%v; keeping it in Duster's quarantine also failed: %v", rerr, qerr)
+	}
+	return true, nil
+}
+
+func writeManifest(dir string, m *quarantineManifest) error {
+	b, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".session-*")
+	if err != nil {
+		return err
+	}
+	_, werr := tmp.Write(b)
+	if err := errors.Join(werr, tmp.Close()); err != nil {
+		os.Remove(tmp.Name())
+		return err
+	}
+	if err := os.Rename(tmp.Name(), filepath.Join(dir, quarantineManifestName)); err != nil {
+		os.Remove(tmp.Name())
+		return err
+	}
+	return nil
+}
+
+// keptSession is one session folder on one volume.
+type keptSession struct {
+	Root     string
+	Dir      string
+	Manifest quarantineManifest
+	Damaged  bool      // session.json missing or unreadable: aged by folder time, emptiable only
+	Created  time.Time // manifest time, or the folder's when damaged
+}
+
+// slotPath is where item it of session k is stored.
+func (k keptSession) slotPath(it quarantineItem) string {
+	return filepath.Join(k.Dir, strconv.Itoa(it.Slot), filepath.Base(it.Path))
+}
+
+// loadKeptSessions reads every session folder under roots. Pending items whose
+// slot is filled are treated as kept; pending items with an empty slot were
+// never moved and are dropped. Restored items are dropped from the listing.
+func loadKeptSessions(roots []string) []keptSession {
+	var out []keptSession
+	for _, root := range roots {
+		if !realDir(root) {
+			continue
+		}
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			dir := filepath.Join(root, e.Name())
+			if !realDir(dir) {
+				continue
+			}
+			k := keptSession{Root: root, Dir: dir}
+			b, err := readSmallFile(filepath.Join(dir, quarantineManifestName), 4<<20)
+			if err != nil || json.Unmarshal(b, &k.Manifest) != nil || k.Manifest.ID == "" {
+				k.Damaged = true
+				if info, err := os.Lstat(dir); err == nil {
+					k.Created = info.ModTime()
+				}
+				k.Manifest = quarantineManifest{ID: e.Name()}
+				out = append(out, k)
+				continue
+			}
+			k.Created = k.Manifest.Created
+			var items []quarantineItem
+			for _, it := range k.Manifest.Items {
+				if it.State == "pending" {
+					if _, err := os.Lstat(k.slotPath(it)); err != nil {
+						continue
+					}
+					it.State = "kept"
+				}
+				if it.State == "kept" {
+					items = append(items, it)
+				}
+			}
+			if len(items) == 0 {
+				continue
+			}
+			k.Manifest.Items = items
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+func readSmallFile(path string, limit int64) ([]byte, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Size() > limit {
+		return nil, fmt.Errorf("%s is not a small regular file", path)
+	}
+	return os.ReadFile(path)
+}
+
+// restoreSession is one command run's kept items across every volume.
+type restoreSession struct {
+	ID      string
+	Command string
+	Created time.Time
+	Parts   []keptSession
+}
+
+type keptItemRef struct {
+	Part  int
+	Index int
+	Item  quarantineItem
+}
+
+// Items lists the session's kept items in a stable order (numbered from 1 by `du restore`).
+func (r restoreSession) Items() []keptItemRef {
+	var out []keptItemRef
+	for p, k := range r.Parts {
+		for i, it := range k.Manifest.Items {
+			out = append(out, keptItemRef{Part: p, Index: i, Item: it})
+		}
+	}
+	return out
+}
+
+func (r restoreSession) Size() int64 {
+	var n int64
+	for _, ref := range r.Items() {
+		n += ref.Item.Size
+	}
+	return n
+}
+
+// groupSessions merges one run's folders from every volume, newest first.
+func groupSessions(ks []keptSession) []restoreSession {
+	byID := map[string]*restoreSession{}
+	var order []string
+	for _, k := range ks {
+		r := byID[k.Manifest.ID]
+		if r == nil {
+			r = &restoreSession{ID: k.Manifest.ID, Command: k.Manifest.Command, Created: k.Created}
+			byID[k.Manifest.ID] = r
+			order = append(order, k.Manifest.ID)
+		}
+		r.Parts = append(r.Parts, k)
+	}
+	out := make([]restoreSession, 0, len(order))
+	for _, id := range order {
+		r := byID[id]
+		sort.Slice(r.Parts, func(i, j int) bool { return r.Parts[i].Root < r.Parts[j].Root })
+		out = append(out, *r)
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Created.After(out[j].Created) })
+	return out
+}
+
+type volSpace struct{ Free, Total int64 }
+
+// pickSweep decides which session folders to delete: every one older than
+// quarantineKeep, then on each volume below quarantineLowSpace the oldest
+// remaining ones until the volume would be back at or above it. Pure.
+func pickSweep(ks []keptSession, vols map[string]volSpace, now time.Time) []string {
+	sorted := append([]keptSession(nil), ks...)
+	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Created.Before(sorted[j].Created) })
+	var out []string
+	gone := map[string]bool{}
+	for _, k := range sorted {
+		if now.Sub(k.Created) > quarantineKeep {
+			out = append(out, k.Dir)
+			gone[k.Dir] = true
+		}
+	}
+	for _, k := range sorted {
+		if gone[k.Dir] {
+			continue
+		}
+		v, ok := vols[k.Root]
+		if !ok || v.Total <= 0 || float64(v.Free)*100/float64(v.Total) >= quarantineLowSpace {
+			continue
+		}
+		out = append(out, k.Dir)
+		gone[k.Dir] = true
+		var size int64
+		for _, it := range k.Manifest.Items {
+			size += it.Size
+		}
+		v.Free += size
+		vols[k.Root] = v
+	}
+	return out
+}
+
+// sweepQuarantine applies retention to every quarantine on this machine.
+func sweepQuarantine(now time.Time) []error {
+	roots := quarantineRoots()
+	ks := loadKeptSessions(roots)
+	vols := map[string]volSpace{}
+	for _, r := range roots {
+		free, pct := getDiskFreeBytes(r), diskFreePercent(r)
+		if pct > 0 {
+			vols[r] = volSpace{Free: free, Total: int64(float64(free) * 100 / pct)}
+		}
+	}
+	var errs []error
+	for _, dir := range pickSweep(ks, vols, now) {
+		err := removeAllSafe(dir)
+		logging.LogDestructiveOperation("restore", "expire", dir, 0, err == nil)
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errs
+}
+
+type restoreResult struct {
+	Path   string `json:"path"`
+	Size   int64  `json:"size"`
+	Status string `json:"status"` // restored, would restore, skipped, failed
+	Reason string `json:"reason,omitempty"`
+}
+
+// restoreItems puts a session's items back (item 0 = all, else the 1-based
+// number from Items()). It never overwrites: an existing target is skipped
+// and the item stays kept. Missing parent folders are created.
+func restoreItems(rs restoreSession, item int, dryRun bool) []restoreResult {
+	var out []restoreResult
+	touched := map[int]bool{}
+	for n, ref := range rs.Items() {
+		if item != 0 && n+1 != item {
+			continue
+		}
+		k := rs.Parts[ref.Part]
+		it := ref.Item
+		r := restoreResult{Path: it.Path, Size: it.Size}
+		switch {
+		case !fs.IsValidPath(it.Path):
+			r.Status, r.Reason = "failed", "the original location is protected"
+		case exists(it.Path):
+			r.Status, r.Reason = "skipped", "a newer one is there"
+		case dryRun:
+			r.Status = "would restore"
+		default:
+			err := os.MkdirAll(filepath.Dir(it.Path), 0o755)
+			if err == nil {
+				err = moveNoReplace(k.slotPath(it), it.Path)
+			}
+			if err != nil {
+				r.Status, r.Reason = "failed", err.Error()
+			} else {
+				r.Status = "restored"
+				rs.Parts[ref.Part].Manifest.Items[ref.Index].State = "restored"
+				os.Remove(filepath.Join(k.Dir, strconv.Itoa(it.Slot)))
+				touched[ref.Part] = true
+			}
+			logging.LogDestructiveOperation("restore", "restore", it.Path, it.Size, err == nil)
+		}
+		out = append(out, r)
+	}
+	for p := range touched {
+		k := rs.Parts[p]
+		if allRestored(k.Manifest.Items) {
+			_ = removeAllSafe(k.Dir) // nothing kept is left in it
+		} else {
+			_ = writeManifest(k.Dir, &rs.Parts[p].Manifest)
+		}
+	}
+	return out
+}
+
+func allRestored(items []quarantineItem) bool {
+	for _, it := range items {
+		if it.State != "restored" {
+			return false
+		}
+	}
+	return true
+}
+
+func exists(path string) bool {
+	_, err := os.Lstat(path)
+	return err == nil
+}
+
+// emptySessions deletes the given sessions for good.
+func emptySessions(rs []restoreSession) error {
+	var errs []error
+	for _, r := range rs {
+		for _, k := range r.Parts {
+			err := removeAllSafe(k.Dir)
+			logging.LogDestructiveOperation("restore", "empty", k.Dir, r.Size(), err == nil)
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// quarantineHeld is the total size kept on this machine.
+func quarantineHeld() int64 {
+	var n int64
+	for _, r := range groupSessions(loadKeptSessions(quarantineRoots())) {
+		n += r.Size()
+	}
+	return n
+}
