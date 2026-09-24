@@ -237,6 +237,14 @@ func quarantinePinned(dir string) bool {
 // folder for a junction or a folder of their own between the check and the
 // moves: kept items and session.json always land in the folder that was
 // verified. A second call for the same dir reuses the handle.
+//
+// NTFS only applies share-mode checks against handles that hold data access
+// (FILE_LIST_DIRECTORY/FILE_ADD_FILE/FILE_TRAVERSE/DELETE for a directory); a
+// handle with only FILE_READ_ATTRIBUTES/READ_CONTROL imposes no restriction on
+// other handles at all, so the pin needs FILE_LIST_DIRECTORY too for the
+// no-FILE_SHARE_DELETE share mode below to actually block a rename. The owner
+// can always list their own private quarantine folder, so this needs no extra
+// privilege.
 func pinQuarantineDir(dir, volRoot, sid string) error {
 	pinnedMu.Lock()
 	defer pinnedMu.Unlock()
@@ -249,7 +257,7 @@ func pinQuarantineDir(dir, volRoot, sid string) error {
 		return err
 	}
 	h, err := windows.CreateFile(p,
-		windows.FILE_READ_ATTRIBUTES|windows.READ_CONTROL,
+		windows.FILE_LIST_DIRECTORY|windows.FILE_READ_ATTRIBUTES|windows.READ_CONTROL,
 		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, // no FILE_SHARE_DELETE: that is the pin
 		nil, windows.OPEN_EXISTING,
 		windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
