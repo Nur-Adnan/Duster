@@ -68,3 +68,13 @@ func setProcessGroup(*exec.Cmd)       {}
 func setRawCmdLine(*exec.Cmd, string) {}
 
 func runTree(c *exec.Cmd, _ func() bool) error { return c.Run() }
+
+// Virtual disk support: WSL and Docker Desktop are Windows-only, so off
+// Windows there are no distributions to find and no file to measure. The size
+// fallback in describeVirtualDisk covers the zero here, which keeps the
+// discovery and rendering paths testable on any platform.
+func wslDistroEntries() []wslDistro { return nil }
+
+func fileDiskUsage(string) (int64, bool, bool, bool) { return 0, false, false, false }
+
+func shortPathName(string) string { return "" }

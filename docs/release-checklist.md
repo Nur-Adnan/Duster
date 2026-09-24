@@ -59,7 +59,7 @@ Run everything from a normal (non-admin) terminal unless a step says elevated. E
   - `d` on a scratch file sends it to the Recycle Bin.
 - [ ] Set the Recycle Bin's maximum size to 1 MB. Then `d` on a larger file: Windows asks before permanently deleting it. Restore the size afterwards.
 
-**Clean, purge, installer, optimize**
+**Clean, purge, installer, optimize, vdisk**
 - [ ] `du clean --dry-run`: lists sizes and deletes nothing. In its TUI, `c` does nothing.
 - [ ] Locked file: `$h = [IO.File]::Open("$env:TEMP\duster-locked.txt", 'Create', 'ReadWrite', 'None')`, then `du clean --yes --debug`.
   - The temp category prints a ✗ line saying items could not be deleted, and the run ends with a warning.
@@ -79,6 +79,14 @@ Run everything from a normal (non-admin) terminal unless a step says elevated. E
 - [ ] Elevated `du optimize --deep` on a VM with pending cleanup: the task runs DISM, shows its elapsed time, and finishes. Afterwards `dism /Online /Cleanup-Image /AnalyzeComponentStore` reports a smaller overhead, and an installed update can still be uninstalled from Settings (Duster never passes `/ResetBase`).
 - [ ] While `du optimize --deep` runs DISM, press `q`: it asks to confirm, any other key keeps going, and a second `q` stops it and prints that the cleanup was stopped part-way.
 - [ ] Non-English Windows: `du optimize --deep --dry-run` either reports the analysis or fails with "its component store report could not be read". It must never report 0 bytes of overhead.
+- [ ] `du vdisk --dry-run` on a machine with a WSL 2 distribution and Docker Desktop: both disks are listed, biggest first, with a size that matches the `.vhdx` in Explorer. Nothing is stopped and nothing changes.
+- [ ] With a distribution already running, `du vdisk --dry-run` fills in its "Used" and "Recover" columns from the guest. With every distribution stopped, both read `?` and no distribution is started to find out.
+- [ ] Elevated `du vdisk` with Docker Desktop still open: it runs `wsl --shutdown`, the Docker disk fails with a sharing violation naming the locked file, and the WSL disks still compact. Docker Desktop restarts normally afterwards.
+- [ ] Elevated `du vdisk` with Docker Desktop quit: every selected disk reports "compacted", the `.vhdx` files are smaller in Explorer, and `wsl -l -v` plus `docker run --rm hello-world` both still work. Data inside the distribution is untouched.
+- [ ] A sparse disk (`wsl --manage <distro> --set-sparse true --allow-unsafe` on a spare distribution): Duster lists it as sparse, refuses to select it, and never hands it to diskpart. Duster must never turn sparse mode on by itself.
+- [ ] While `du vdisk` is compacting, press `q`: it asks to confirm, any other key keeps going, and a second `q` stops it. Afterwards `diskpart` → `select vdisk file=...` → `detail vdisk` shows the disk is **not** attached, and the distribution starts normally.
+- [ ] If Windows offers to format a disk while `du vdisk` is compacting, dismissing it must not affect the run, and the disk must be unchanged afterwards (it is attached read-only).
+- [ ] A Windows profile whose name is not ASCII: `du vdisk` either compacts the disk (8.3 names on) or refuses it with the manual diskpart instructions. It must never report success without shrinking anything.
 - [ ] Landing screen: run `du`, open Startup, press `d`. It asks first; any other key cancels; `d` twice removes the entries.
 
 **Uninstall**

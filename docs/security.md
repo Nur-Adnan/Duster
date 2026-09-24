@@ -40,6 +40,10 @@ Duster is a system utility designed for deep-cleaning operations. Because file d
 * **Threat**: When an application-control policy forces a Program Files install, `install.ps1` re-launches itself elevated. Re-running a script saved under `%TEMP%` would let a non-admin process swap it before it runs as admin.
 * **Mitigation**: The elevated process receives its command through `-EncodedCommand`, with every forwarded value as a single-quoted literal. A piped (`irm | iex`) install fetches the script straight into memory over HTTPS, never through a file.
 
+### G. Virtual Disk Compaction
+* **Threat**: `du vdisk` drives `diskpart` with administrator rights. diskpart can erase physical disks, so any path or command it is given is security-relevant, and a VHDX left attached would break the distribution that owns it. A diskpart script file is also read in the system ANSI code page, so a path outside ASCII would not name the file it appears to name.
+* **Mitigation**: diskpart is resolved inside the System32 directory (`GetSystemDirectoryW`), never through `PATH`, and only ever receives `select vdisk` / `attach vdisk readonly` / `compact vdisk` / `detach vdisk`. No `select disk`, `select volume` or `clean` is ever written, so no command in the script can reach a physical disk. Every target is checked first: it has to be an existing regular `.vhdx` file, found under a registered WSL distribution's own `BasePath` or a Docker Desktop disk folder, and `Lstat` refuses a symlink or junction at the target rather than following it. A path that cannot be written to an ANSI script is refused outright, with the manual commands, rather than compacted at a mangled path: the 8.3 short name is the only fallback. The disk is attached read-only, so the guest file system cannot be modified, and the detach runs on its own context after any failure, timeout or cancellation, so an interrupted run never leaves a disk attached. Sparse, NTFS-compressed and EFS-encrypted disks are reported and skipped before diskpart is started at all.
+
 ---
 
 ## 3. Cryptographic Self-Updater Security

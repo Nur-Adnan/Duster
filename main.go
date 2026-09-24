@@ -44,6 +44,7 @@ func init() {
 	rootCmd.AddCommand(cmd.StatusCmd)
 	rootCmd.AddCommand(cmd.PurgeCmd)
 	rootCmd.AddCommand(cmd.InstallerCmd)
+	rootCmd.AddCommand(cmd.VdiskCmd)
 	rootCmd.AddCommand(cmd.UpdateCmd)
 	rootCmd.AddCommand(cmd.RemoveCmd)
 	rootCmd.AddCommand(cmd.DoctorCmd)
