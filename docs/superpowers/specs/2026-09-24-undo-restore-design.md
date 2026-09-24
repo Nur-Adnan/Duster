@@ -85,13 +85,14 @@ Restore rules:
 | Command | Today | After |
 |---|---|---|
 | `purge` (TUI and headless) | `purgePermanentPath` (permanent) | quarantine. New `--permanent` flag keeps the old behavior |
-| `purge --safe` | `purgeRecyclePath` (Recycle Bin) | Recycle Bin; when it refuses the item as too big, quarantine |
+| `purge --safe` | `purgeRecyclePath` (Recycle Bin) | Recycle Bin; if the bin does not take the item, quarantine |
 | uninstall leftover sweep (`runSweepCmd`) | `removeAllSafe` (permanent) | quarantine |
 | `installer` sweep (`runSetupSweepCmd`) | `removeFileSafe` (permanent) | quarantine |
-| `analyze d` (`recyclePath`) | Recycle Bin; too big → asks to delete permanently | Recycle Bin; too big → quarantine, no prompt |
+| `analyze d` (`recyclePath`) | Recycle Bin; too big → Windows asks to delete permanently, No → error | Recycle Bin; if the bin does not take the item, quarantine |
 | `clean`, scheduled cleans, `vdisk`, `remove` | unchanged | unchanged |
 
 Other changes:
+- "The bin does not take the item" means `recyclePathNative` returned an error. That happens when the item is too big and the user answers No in Windows' own "permanently delete?" dialog (Duster passes `FOF_WANTNUKEWARNING`, so Windows asks first; Duster cannot know in advance whether an item fits), or when the path is longer than the Recycle Bin API accepts (MAX_PATH). Answering No to *permanent* deletion therefore means "remove it, but keep it restorable". Answering Yes is Windows deleting permanently at the user's explicit request, as today.
 - All call sites use one helper, `quarantinePath(s *quarantineSession, path string) error`, with the session opened once per command run.
 - Finish screens and JSON gain the session number and the line "Kept for 7 days. Undo with `du restore <n>`".
 - `du remove` empties every quarantine: `logging.Dir()` already covers the local one, and each fixed drive's SID folder is emptied too. Its confirmation states how much is held.
@@ -134,7 +135,7 @@ The sweep only deletes inside verified roots, with `removeAllSafe`. A session wi
   - `purge` of a real `node_modules` on C: and on D:, then `du restore`, then `du restore --empty`;
   - a standard user's D: SID folder is unreadable to a second standard user;
   - a restore onto an existing target is skipped;
-  - the `analyze` too-big fallback: the e2e test `TestRecycleBinTooSmallAsksFirst` changes to "kept, restorable".
+  - the `analyze` too-big fallback: `TestRecycleBinTooSmallAsksFirst` still answers No in Windows' dialog, and now expects the file gone from its folder, kept in the quarantine and back after `du restore`.
 - **Manual (release checklist):** a USB drive unplugged then replugged; a low-space sweep on a nearly full drive.
 
 ## 8. Documentation
