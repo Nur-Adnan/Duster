@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/Nur-Adnan/duster/internal/logging"
+	"github.com/Nur-Adnan/duster/lib/fs"
 	"golang.org/x/sys/windows"
 )
 
@@ -82,13 +83,19 @@ func TestCreatePrivateDirIsOwnedAndProtected(t *testing.T) {
 		t.Fatalf("DACL not protected (control %#x, %v)", ctrl, err)
 	}
 	// Exactly two entries, the user and SYSTEM: nothing inherited, nobody else.
-	sddl := sd.String()
-	i := strings.Index(sddl, "(")
-	if i < 0 || !strings.HasPrefix(sddl, "D:") || !strings.Contains(sddl[:i], "P") {
+	// The wanted entries go through the same SDDL rendering, so a user SID that
+	// Windows abbreviates (LA for the built-in Administrator) still compares.
+	wantSD, err := windows.SecurityDescriptorFromString("D:P(A;OICI;FA;;;" + sid + ")(A;OICI;FA;;;SY)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sddl, wantSDDL := sd.String(), wantSD.String()
+	i, j := strings.Index(sddl, "("), strings.Index(wantSDDL, "(")
+	if i < 0 || j < 0 || !strings.HasPrefix(sddl, "D:") || !strings.Contains(sddl[:i], "P") {
 		t.Fatalf("DACL %q is not protected", sddl)
 	}
-	if want := "(A;OICI;FA;;;" + sid + ")(A;OICI;FA;;;SY)"; sddl[i:] != want {
-		t.Fatalf("DACL entries %q, want %q", sddl[i:], want)
+	if sddl[i:] != wantSDDL[j:] {
+		t.Fatalf("DACL entries %q, want %q", sddl[i:], wantSDDL[j:])
 	}
 	if err := checkOwnQuarantine(dir, filepath.VolumeName(dir)+`\`, sid); err != nil {
 		t.Fatalf("own private folder refused: %v", err)
@@ -146,7 +153,9 @@ func TestPinnedQuarantineCannotBeRenamed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	parent := filepath.Join(t.TempDir(), "base")
+	// The pin compares the handle's final path, which Windows reports in long
+	// form, so an 8.3 TEMP (C:\Users\RUNNER~1) must be expanded first.
+	parent := filepath.Join(fs.LongPath(t.TempDir()), "base")
 	if err := os.Mkdir(parent, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +198,7 @@ func TestPinRefusesForeignOwnerAndJunctionPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dir := filepath.Join(t.TempDir(), "priv")
+	dir := filepath.Join(fs.LongPath(t.TempDir()), "priv")
 	if err := createPrivateDir(dir, sid); err != nil {
 		t.Fatal(err)
 	}
@@ -200,6 +209,8 @@ func TestPinRefusesForeignOwnerAndJunctionPath(t *testing.T) {
 	if err := pinQuarantineDir(dir, vr, "S-1-5-18"); err == nil {
 		unpinQuarantineDir(dir)
 		t.Fatal("pinned a folder owned by someone else")
+	} else if !strings.Contains(err.Error(), "belongs to someone else") {
+		t.Fatalf("refused for the wrong reason: %v", err)
 	}
 	if quarantinePinned(dir) {
 		t.Fatal("a refused folder stayed pinned")
