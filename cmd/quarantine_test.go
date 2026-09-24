@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Nur-Adnan/duster/internal/logging"
 )
 
 // tempQuarantine points the local quarantine at a temp folder and turns off
@@ -483,5 +485,36 @@ func TestLoadZeroCreatedIsDamaged(t *testing.T) {
 	ks := loadKeptSessions([]string{root})
 	if len(ks) != 1 || !ks[0].Damaged || ks[0].Created.IsZero() {
 		t.Fatalf("a manifest without a creation time must be damaged and aged by its folder: %+v", ks)
+	}
+}
+
+// insideQuarantine must recognize the quarantine root itself, a path under
+// it (any case), and a .duster-quarantine folder on another drive, but not
+// an unrelated path. On Windows this also has to survive an 8.3 short-path
+// LOCALAPPDATA vs. a long-form walked path (TestScanArtifactsSkipsQuarantines
+// covers that machine-specific case); this test only exercises the parts
+// that hold true on every OS.
+func TestInsideQuarantine(t *testing.T) {
+	tempQuarantine(t)
+	root := filepath.Join(logging.Dir(), "quarantine")
+	sub := filepath.Join(root, "1-purge", "1", "app")
+	other := filepath.Join(logging.Dir(), "elsewhere")
+	dusterDir := filepath.Join(other, quarantineDirName, "S-1-5-21", "1-purge", "1", "app")
+
+	cases := []struct {
+		name string
+		path string
+		want bool
+	}{
+		{"raw root", root, true},
+		{"subpath", sub, true},
+		{"differently-cased subpath", strings.ToUpper(sub), true},
+		{".duster-quarantine path", dusterDir, true},
+		{"unrelated path", other, false},
+	}
+	for _, c := range cases {
+		if got := insideQuarantine(c.path); got != c.want {
+			t.Errorf("insideQuarantine(%s) = %v, want %v", c.name, got, c.want)
+		}
 	}
 }
