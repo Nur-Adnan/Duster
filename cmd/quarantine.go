@@ -27,6 +27,13 @@ const (
 	quarantineDirName      = ".duster-quarantine"
 )
 
+// otherDriveQuarantines lets quarantineRoot and quarantineRoots use the
+// per-user X:\.duster-quarantine\<SID> folders on drives other than the
+// profile's. It is a test seam: tempQuarantine turns it off, so unit tests only
+// ever see the logging.Dir() root they point at a temp folder, and never list,
+// sweep or empty a developer's real kept items on another drive.
+var otherDriveQuarantines = true
+
 var errNoQuarantine = errors.New("this drive has no Duster quarantine (network drive?), so the item was left in place")
 
 type quarantineItem struct {
