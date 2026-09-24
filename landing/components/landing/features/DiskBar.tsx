@@ -143,15 +143,17 @@ export function DiskBar({ tiles }: { tiles: Tile[] }) {
               onFocus={() => setPreview(i)}
               onBlur={() => setPreview(null)}
               onClick={() => setPinned(pinned === i ? null : i)}
-              className={`flex min-h-11 w-full items-center gap-3 rounded-md px-2 py-1.5 text-left text-sm transition-colors ${
+              className={`flex min-h-11 w-full items-start gap-3 rounded-md px-2 py-3 text-left text-sm leading-5 transition-colors ${
                 active === i ? "bg-white/[0.05] text-ink" : "text-ink-muted"
               }`}
             >
-              <span className="size-3 shrink-0 rounded-sm" style={{ background: item.color }} aria-hidden="true" />
-              <span className="min-w-0 flex-1 leading-snug">{item.label}</span>
-              <span className="tabular-nums text-ink">{item.value}</span>
+              {/* Top-aligned on shared 20px line boxes: a label that wraps grows
+                  under itself while swatch, size and percent stay on line one. */}
+              <span className="mt-1 size-3 shrink-0 rounded-sm" style={{ background: item.color }} aria-hidden="true" />
+              <span className="min-w-0 flex-1">{item.label}</span>
+              <span className="w-16 shrink-0 text-right tabular-nums text-ink">{item.value}</span>
               <span
-                className={`w-9 text-right text-xs tabular-nums ${active === i ? "text-ink-muted" : "text-ink-faint"}`}
+                className={`w-9 shrink-0 text-right text-xs leading-5 tabular-nums ${active === i ? "text-ink-muted" : "text-ink-faint"}`}
               >{pct(item.bytes)}%</span>
             </button>
           </li>
