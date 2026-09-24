@@ -132,7 +132,7 @@ export function DiskBar({ tiles }: { tiles: Tile[] }) {
         ))}
       </div>
 
-      <ul className="mt-6 grid gap-x-6 gap-y-1 sm:grid-cols-2 lg:grid-cols-4">
+      <ul className="mt-6 grid gap-x-6 gap-y-1 sm:grid-cols-2 xl:grid-cols-4">
         {items.map((item, i) => (
           <li key={item.label}>
             <button

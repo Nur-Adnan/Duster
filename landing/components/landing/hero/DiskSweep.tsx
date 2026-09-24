@@ -74,9 +74,9 @@ const bytes = (...sizes: string[]) => sizes.reduce((sum, v) => sum + parseSize(v
 const MOBILE_BLOCKS: Block[] = [
   { id: "browser", label: "Browser caches", size: BROWSER, x: 0, y: 0, w: 52.5, h: 34, tone: "bg-data-1/15 border-data-1/45" },
   { id: "npm", label: "npm + pnpm store", size: NPM, x: 52.5, y: 0, w: 47.5, h: 34, tone: "bg-data-2/15 border-data-2/45" },
-  { id: "temp", label: "Temp files", size: TEMP, x: 0, y: 34, w: 42, h: 36, tone: "bg-data-3/15 border-data-3/45" },
-  { id: "wu", label: "Windows Update", size: WU, x: 42, y: 34, w: 30, h: 36, tone: "bg-data-4/15 border-data-4/45" },
-  { id: "other", label: "Other caches", size: formatSize(bytes(GPU, RECYCLE, DUMPS)), x: 72, y: 34, w: 28, h: 36, tone: "bg-data-5/15 border-data-5/45" },
+  { id: "temp", label: "Temp files", size: TEMP, x: 0, y: 34, w: 46, h: 36, tone: "bg-data-3/15 border-data-3/45" },
+  { id: "wu", label: "Windows Update", size: WU, x: 46, y: 34, w: 54, h: 18, tone: "bg-data-4/15 border-data-4/45" },
+  { id: "other", label: "Other caches", size: formatSize(bytes(GPU, RECYCLE, DUMPS)), x: 46, y: 52, w: 54, h: 18, tone: "bg-data-5/15 border-data-5/45" },
   { id: "files", label: "Your files", x: 0, y: 70, w: 100, h: 30 },
 ];
 
@@ -404,9 +404,9 @@ function MapBlock({
           </span>
           <div className="flex items-center justify-between gap-1.5">
             {b.size ? (
-              <span className="font-mono text-xs leading-4 text-ink tabular-nums">{b.size}</span>
+              <span className="font-mono text-xs leading-4 whitespace-nowrap text-ink tabular-nums">{b.size}</span>
             ) : (
-              <span className="text-xs leading-4 text-ink-muted">Locked</span>
+              <span className="text-xs leading-4 whitespace-nowrap text-ink-muted">Locked</span>
             )}
             {/* The lock shows in every state: user files are never selectable. */}
             <span className="flex @min-[34rem]:absolute @min-[34rem]:top-2.5 @min-[34rem]:right-2.5">
