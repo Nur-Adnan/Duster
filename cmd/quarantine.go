@@ -96,11 +96,31 @@ func insideQuarantine(path string) bool {
 	if strings.Contains(p+sep, sep+quarantineDirName+sep) {
 		return true
 	}
-	if d := logging.Dir(); d != "" {
-		q := strings.ToLower(filepath.Join(d, "quarantine"))
-		return p == q || strings.HasPrefix(p, q+sep)
+	d := logging.Dir()
+	if d == "" {
+		return false
 	}
-	return false
+	// scanArtifacts expands its walk root with fs.LongPath, so on a runner
+	// whose LOCALAPPDATA is an 8.3 short path (e.g. RUNNER~1) the walked
+	// paths come back long-form while logging.Dir() (built from the raw
+	// env var) stays short-form. Compare against the quarantine root in
+	// both its raw and LongPath forms so either form of caller path
+	// matches; only fall back to expanding the caller's own path (an extra
+	// GetLongPathNameW per directory) when the cheap raw comparisons miss.
+	rawRoot := strings.ToLower(filepath.Join(d, "quarantine"))
+	if p == rawRoot || strings.HasPrefix(p, rawRoot+sep) {
+		return true
+	}
+	longRoot := strings.ToLower(fs.LongPath(filepath.Join(d, "quarantine")))
+	if longRoot != rawRoot && (p == longRoot || strings.HasPrefix(p, longRoot+sep)) {
+		return true
+	}
+	longP := strings.ToLower(fs.LongPath(filepath.Clean(path)))
+	if longP == p {
+		return false
+	}
+	return longP == rawRoot || strings.HasPrefix(longP, rawRoot+sep) ||
+		longP == longRoot || strings.HasPrefix(longP, longRoot+sep)
 }
 
 // quarantinePath moves path into the session's folder on the same volume.
