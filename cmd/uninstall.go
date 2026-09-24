@@ -143,7 +143,7 @@ type uninstallModel struct {
 	sweepSize    int64
 	kept         int
 	keepFailed   int    // selected leftovers that could not be kept and stayed in place
-	sweepWarn    string // sweepWarning of the quarantine sweep before the run
+	sweepWarn    string // sweepNotice of the quarantine sweep before the run (low-space removals, errors)
 	uninstErr    error
 	sweepSkipped bool // uninstaller failed or the app is still installed: nothing is swept
 	width        int
@@ -261,7 +261,7 @@ func runSweepCmd(items []leftoverItem, dry bool) tea.Cmd {
 		var s *quarantineSession
 		var warn string
 		if !dry {
-			warn = sweepWarning(sweepQuarantine(time.Now()))
+			warn = sweepNotice(sweepQuarantine(time.Now(), sweepFull))
 			s = newQuarantineSession("uninstall")
 		}
 		var size int64

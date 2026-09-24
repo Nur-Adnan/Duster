@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestUninstallSweepKeepsLeftovers(t *testing.T) {
@@ -87,5 +88,87 @@ func TestSweepWarningIsOneLine(t *testing.T) {
 	w := sweepWarning([]error{errors.New("a"), errors.New("b")})
 	if strings.Contains(w, "\n") || !strings.HasPrefix(w, "Warning:") || !strings.Contains(w, "a; b") {
 		t.Errorf("sweepWarning: %q", w)
+	}
+}
+
+// du restore sweeps with expiry only: a fresh session on a nearly full drive
+// must never be removed before the user can restore it.
+func TestPickSweepExpiredOnlyNeverTakesFreshSessionsForSpace(t *testing.T) {
+	now := time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC)
+	mk := func(name string, age time.Duration) keptSession {
+		return keptSession{Root: "D", Dir: "D/" + name, Created: now.Add(-age),
+			Manifest: quarantineManifest{ID: name, Items: []quarantineItem{{Size: 1, State: "kept"}}}}
+	}
+	ks := []keptSession{mk("old", 8*24*time.Hour), mk("fresh", time.Hour)}
+	vols := map[string]volSpace{"D": {Free: 0, Total: 100}}
+	if got := strings.Join(pickSweep(ks, vols, now, false), ","); got != "D/old" {
+		t.Errorf("expiry only: %q, want only the expired session", got)
+	}
+	if got := strings.Join(pickSweep(ks, vols, now, true), ","); got != "D/old,D/fresh" {
+		t.Errorf("full sweep on a full drive: %q", got)
+	}
+}
+
+// ageSession rewrites every manifest under the local root so its sessions
+// look created at t.
+func ageSession(t *testing.T, at time.Time) {
+	t.Helper()
+	for _, k := range loadKeptSessions(quarantineRoots()) {
+		m := k.Manifest
+		m.Created = at
+		if err := writeManifest(k.Dir, &m); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestSweepQuarantineReportsWhatItRemoved(t *testing.T) {
+	work := tempQuarantine(t)
+	for _, name := range []string{"a.txt", "b.txt"} {
+		f := filepath.Join(work, name)
+		os.WriteFile(f, []byte("abc"), 0o644)
+		if err := quarantinePath(newQuarantineSession("purge-"+name), f, 3); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ageSession(t, time.Now().Add(-8*24*time.Hour))
+	f := filepath.Join(work, "fresh.txt")
+	os.WriteFile(f, []byte("x"), 0o644)
+	if err := quarantinePath(newQuarantineSession("purge"), f, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	rep := sweepQuarantine(time.Now(), sweepExpiredOnly)
+	if rep.Expired != 2 || rep.ExpiredBytes != 6 || rep.LowSpace != 0 || len(rep.Errs) != 0 {
+		t.Fatalf("report: %+v", rep)
+	}
+	if l := rep.expiredLine(); !strings.HasPrefix(l, "Removed 2 expired sessions (") {
+		t.Errorf("expiredLine: %q", l)
+	}
+	if left := groupSessions(loadKeptSessions(quarantineRoots())); len(left) != 1 || left[0].Size() != 1 {
+		t.Errorf("the fresh session must stay kept: %+v", left)
+	}
+	if rep := sweepQuarantine(time.Now(), sweepExpiredOnly); rep.expiredLine() != "" || sweepNotice(rep) != "" {
+		t.Errorf("a sweep that removed nothing must say nothing: %+v", rep)
+	}
+}
+
+func TestSweepNoticeNamesLowSpaceRemovals(t *testing.T) {
+	rep := sweepReport{Expired: 3, ExpiredBytes: 10, LowSpace: 2, LowSpaceBytes: 2048, LowSpaceVols: []string{"D:"}}
+	n := sweepNotice(rep)
+	if strings.Contains(n, "\n") || !strings.Contains(n, "2 kept sessions") || !strings.Contains(n, "2.00 KB") || !strings.Contains(n, "low space on D:") {
+		t.Errorf("sweepNotice: %q", n)
+	}
+	if strings.Contains(n, "expired") {
+		t.Errorf("finish views do not report routine expiry: %q", n)
+	}
+	rep.Errs = []error{errors.New("locked")}
+	if n := sweepNotice(rep); strings.Contains(n, "\n") || !strings.Contains(n, "low space on D:") || !strings.Contains(n, "Warning:") {
+		t.Errorf("sweepNotice with errors: %q", n)
+	}
+	rep.Errs = nil
+	pm := purgeModel{state: stateFinished, purgeTally: purgeTally{sweep: rep}}
+	if v := pm.View(); !strings.Contains(v, "low space on D:") {
+		t.Errorf("purge finish view lacks the low-space line:\n%s", v)
 	}
 }

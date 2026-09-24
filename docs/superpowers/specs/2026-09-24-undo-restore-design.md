@@ -103,16 +103,18 @@ Other changes:
 
 ## 5. Retention sweep
 
-`sweepQuarantine(now)` runs:
-- at the start of every command that opens a session;
-- on every `du restore`;
-- on every `du schedule run`.
+`sweepQuarantine(now, mode)` runs:
+- at the start of every command that opens a session (full sweep);
+- on every `du schedule run` (full sweep);
+- on every `du restore` except a dry run, with expiry only (step 1). `du restore` never runs step 2: the user came to get something back, and on a nearly full drive step 2 could otherwise delete the very session they are about to restore (for example, `du purge` then `du restore` on a full disk).
 
 What it removes:
 1. Items kept more than 7 days, logged as `expire`.
-2. On any volume below 10% free, the oldest sessions on that volume, one at a time, until the volume is at or above 10% or its quarantine is empty. Space freed by the expired sessions of step 1 counts first, so a fresh session is not deleted when expiry already made room. A volume at 0 bytes free is still swept; only a volume whose size cannot be read is left to step 1.
+2. Full sweep only: on any volume below 10% free, the oldest sessions on that volume, one at a time, until the volume is at or above 10% or its quarantine is empty. Space freed by the expired sessions of step 1 counts first, so a fresh session is not deleted when expiry already made room. A volume at 0 bytes free is still swept; only a volume whose size cannot be read is left to step 1.
 
-Which sessions to delete is decided by a pure function over (sessions, free space per volume, now), so it can be unit-tested.
+Which sessions to delete is decided by a pure function over (sessions, free space per volume, now, whether step 2 applies), so it can be unit-tested.
+
+The sweep returns what it removed, split by reason (expired, or low space on which drives), with the sessions and bytes. `du restore` prints the expired count and size ("Removed 2 expired sessions (3.1 GB)."). The purge, uninstall and installer finish screens, `du purge --yes` and `du schedule run` report low-space removals in one line, and `du purge --json --yes` adds a `swept_low_space` object (sessions, bytes, volumes, note).
 
 The sweep only deletes inside verified roots, with `removeAllSafe`. A session with a missing or damaged `session.json`, or one without a creation time, is aged by its folder's modification time.
 

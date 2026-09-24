@@ -310,7 +310,7 @@ func runPurgeCmd(artifacts []DiscoveredArtifact, ch chan purgeProgressMsg, safe,
 		var s *quarantineSession
 		if !dry {
 			s = newQuarantineSession("purge")
-			t.sweepWarn = sweepWarning(sweepQuarantine(time.Now()))
+			t.sweep = sweepQuarantine(time.Now(), sweepFull)
 		}
 
 		for _, a := range artifacts {
@@ -613,7 +613,7 @@ func (m purgeModel) View() string {
 				boxContent.WriteString("  " + line + "\n")
 			}
 			boxContent.WriteString("\n")
-			if w := m.purgeTally.sweepWarn; w != "" {
+			if w := sweepNotice(m.purgeTally.sweep); w != "" {
 				boxContent.WriteString(purgeGrayText("  "+w) + "\n\n")
 			}
 			if m.purgeFailed > 0 {
@@ -725,7 +725,7 @@ type purgeTally struct {
 	keptCount int
 	failed    int
 	errs      []string
-	sweepWarn string // sweepWarning of the sweep before the run, "" when it went fine
+	sweep     sweepReport // what the sweep before the run removed, and what it could not
 }
 
 func (t *purgeTally) add(path string, size int64, quarantined, permanent bool, err error) {
@@ -759,6 +759,15 @@ func (t purgeTally) lines() []string {
 			"du restore lists it, du restore 1 puts it back.")
 	}
 	return out
+}
+
+// sweptLowSpaceJSON is du purge --json --yes's report of the kept sessions the
+// sweep before the run removed early for space.
+type sweptLowSpaceJSON struct {
+	Sessions int      `json:"sessions"`
+	Bytes    int64    `json:"bytes"`
+	Volumes  []string `json:"volumes"`
+	Note     string   `json:"note"`
 }
 
 // logPurgeOperation delegates to the shared structured logging system,
@@ -796,6 +805,9 @@ func runHeadlessPurge(target string) {
 		KeptBytes     int64    `json:"kept_bytes"`
 		Failed        int      `json:"failed"`
 		Errors        []string `json:"errors"`
+		// Kept sessions the sweep before the run removed early because their
+		// drive was below 10% free (absent when none).
+		SweptLowSpace *sweptLowSpaceJSON `json:"swept_low_space,omitempty"`
 	}
 
 	var totalSize int64
@@ -806,7 +818,7 @@ func runHeadlessPurge(target string) {
 	var t purgeTally
 	if purgeYes && !purgeDryRun && len(list) > 0 {
 		s := newQuarantineSession("purge")
-		t.sweepWarn = sweepWarning(sweepQuarantine(time.Now()))
+		t.sweep = sweepQuarantine(time.Now(), sweepFull)
 		for _, a := range list {
 			q, perr := purgeOne(s, a.Path, a.Size, purgeSafe, purgePermanent)
 			t.add(a.Path, a.Size, q, purgePermanent, perr)
@@ -825,9 +837,13 @@ func runHeadlessPurge(target string) {
 		Failed:         t.failed,
 		Errors:         append([]string{}, t.errs...), // [] rather than null
 	}
-	if t.sweepWarn != "" {
+	if w := sweepWarning(t.sweep.Errs); w != "" {
 		// Reported, but a failed sweep does not fail the purge.
-		out.Errors = append(out.Errors, t.sweepWarn)
+		out.Errors = append(out.Errors, w)
+	}
+	if t.sweep.LowSpace > 0 {
+		out.SweptLowSpace = &sweptLowSpaceJSON{Sessions: t.sweep.LowSpace, Bytes: t.sweep.LowSpaceBytes,
+			Volumes: t.sweep.LowSpaceVols, Note: t.sweep.lowSpaceLine()}
 	}
 	if t.keptCount > 0 {
 		out.Undo = "du restore 1"
@@ -919,7 +935,7 @@ func runNonInteractivePurge(target string) {
 	var s *quarantineSession
 	if !purgeDryRun {
 		s = newQuarantineSession("purge")
-		if w := sweepWarning(sweepQuarantine(time.Now())); w != "" {
+		if w := sweepNotice(sweepQuarantine(time.Now(), sweepFull)); w != "" {
 			fmt.Fprintln(os.Stderr, w)
 		}
 	}

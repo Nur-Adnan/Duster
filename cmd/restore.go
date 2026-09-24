@@ -17,7 +17,7 @@ import (
 // du restore lists, restores and empties what the undo window is holding:
 // items other commands moved into the quarantine (cmd/quarantine.go) instead
 // of deleting outright, kept for quarantineKeep before sweepQuarantine expires
-// them.
+// them. du restore itself applies expiry only (sweepExpiredOnly).
 
 var (
 	restoreJSON   bool
@@ -57,9 +57,20 @@ func restoreFail(err error) {
 }
 
 func executeRestore(c *cobra.Command, args []string) {
-	// A dry run changes nothing, so it does not apply retention either.
+	// A dry run changes nothing, so it does not apply retention either. Only
+	// expiry applies here, never the low-space pass: the user came to restore,
+	// so a fresh session is never removed before they can get it back.
 	if !restoreDryRun {
-		for _, e := range sweepQuarantine(time.Now()) {
+		rep := sweepQuarantine(time.Now(), sweepExpiredOnly)
+		if l := rep.expiredLine(); l != "" {
+			// Kept off stdout under --json, so the JSON stays parseable.
+			if restoreJSON {
+				fmt.Fprintln(os.Stderr, l)
+			} else {
+				fmt.Println(l)
+			}
+		}
+		for _, e := range rep.Errs {
 			fmt.Fprintf(os.Stderr, "Warning: %v\n", e)
 		}
 	}

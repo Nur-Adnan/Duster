@@ -112,7 +112,7 @@ type installerModel struct {
 	keptSize     int64 // kept (or, in a dry run, would be): still on disk until the quarantine sweep
 	kept         int
 	keepFailed   int    // selected installers that could not be kept and stayed in place
-	sweepWarn    string // sweepWarning of the quarantine sweep before the run
+	sweepWarn    string // sweepNotice of the quarantine sweep before the run (low-space removals, errors)
 	width        int
 	height       int
 }
@@ -226,7 +226,7 @@ func runSetupSweepCmd(items []installerItem, dry bool) tea.Cmd {
 		var s *quarantineSession
 		var warn string
 		if !dry {
-			warn = sweepWarning(sweepQuarantine(time.Now()))
+			warn = sweepNotice(sweepQuarantine(time.Now(), sweepFull))
 			s = newQuarantineSession("installer")
 		}
 		var size int64
