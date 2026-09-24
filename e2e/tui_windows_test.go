@@ -69,7 +69,8 @@ func TestAnalyzeShowsWhatGrew(t *testing.T) {
 	tm.waitFor("Change:", time.Minute)
 	tm.send("c")
 	tm.waitFor("What changed since", 5*time.Second)
-	if s := squash(tm.screen()); !strings.Contains(s, "november-new.bin") || !strings.Contains(s, "+24 MB") {
+	// squash drops all whitespace, so "+24 MB" on screen reads "+24MB" here.
+	if s := squash(tm.screen()); !strings.Contains(s, "november-new.bin") || !strings.Contains(s, "+24MB") {
 		t.Fatalf("the changes panel does not name the new file:\n%s", tm.screen())
 	}
 	tm.send(keyEnter)
