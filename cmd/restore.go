@@ -28,12 +28,14 @@ var (
 )
 
 var RestoreCmd = &cobra.Command{
-	Use:   "restore [n]",
+	Use:   "restore [n|id]",
 	Short: "List, restore or empty what Duster kept instead of deleting",
 	Long: `User-facing deletes (purge, uninstall leftovers, old installers) are moved
 into a per-volume quarantine instead of being removed outright, and kept there
 for 7 days. Run without arguments to list what is kept, du restore <n> to put
-a session back, or du restore --empty to delete it for good.`,
+a session back, or du restore --empty to delete it for good. <n> is the number
+du restore lists, or the session id du restore --json prints (an id always
+names the same session, even after the numbering shifts).`,
 	Args: cobra.MaximumNArgs(1),
 	Run:  executeRestore,
 }
@@ -99,11 +101,10 @@ func executeRestore(c *cobra.Command, args []string) {
 		return
 	}
 
-	session, err := pickRestoreSession(rs, args[0])
+	session, n, err := pickRestoreSession(rs, args[0])
 	if err != nil {
 		restoreFail(err)
 	}
-	n, _ := strconv.Atoi(args[0]) // pickRestoreSession accepted it
 	if err := restoreRequestError(session, n, restoreItem, itemGiven); err != nil {
 		restoreFail(err)
 	}
@@ -138,14 +139,23 @@ func restoreRequestError(r restoreSession, n, item int, itemGiven bool) error {
 	return nil
 }
 
-// pickRestoreSession resolves the 1-based number `du restore` printed to the
-// session it refers to.
-func pickRestoreSession(rs []restoreSession, arg string) (restoreSession, error) {
-	n, err := strconv.Atoi(arg)
-	if err != nil || n < 1 || n > len(rs) {
-		return restoreSession{}, fmt.Errorf("no kept session %s: run du restore to list them", arg)
+// pickRestoreSession resolves the 1-based number `du restore` printed, or a
+// session id from `du restore --json`, to the session it refers to and its
+// current number. An id never matches a number (ids hold a "-"), and it
+// names the same session however the list has shifted since it was printed.
+func pickRestoreSession(rs []restoreSession, arg string) (restoreSession, int, error) {
+	if n, err := strconv.Atoi(arg); err == nil {
+		if n < 1 || n > len(rs) {
+			return restoreSession{}, 0, fmt.Errorf("no kept session %s: run du restore to list them", arg)
+		}
+		return rs[n-1], n, nil
 	}
-	return rs[n-1], nil
+	for i, r := range rs {
+		if arg != "" && r.ID == arg {
+			return r, i + 1, nil
+		}
+	}
+	return restoreSession{}, 0, fmt.Errorf("no kept session %s: run du restore to list them", arg)
 }
 
 const restoreDateLayout = "Jan 2, 15:04"
@@ -286,11 +296,40 @@ func printRestoreResults(w io.Writer, results []restoreResult) {
 	fmt.Fprintln(w, summary+".")
 }
 
-// executeRestoreEmpty runs du restore --empty [n].
+// restoreSessionLine names one session for a prompt: command, time, item
+// count and size.
+func restoreSessionLine(r restoreSession) string {
+	count := plural(len(r.Items()), "item")
+	if len(r.Items()) == 0 && r.damaged() {
+		count = "damaged"
+	}
+	return fmt.Sprintf("%s from %s, %s, %s", r.Command, r.Created.Local().Format(restoreDateLayout),
+		count, strings.TrimSpace(formatBytes(r.Size())))
+}
+
+// emptyPrompt is du restore --empty's question: it names each session that
+// would be deleted for good, so the user sees exactly what they confirm.
+func emptyPrompt(targets []restoreSession) string {
+	var b strings.Builder
+	if len(targets) == 1 {
+		fmt.Fprintf(&b, "Delete %s for good? [y/N] ", restoreSessionLine(targets[0]))
+		return b.String()
+	}
+	var size int64
+	b.WriteString("This deletes for good:\n")
+	for _, r := range targets {
+		fmt.Fprintf(&b, "  %s\n", restoreSessionLine(r))
+		size += r.Size()
+	}
+	fmt.Fprintf(&b, "Delete these %s (%s) kept by Duster for good? [y/N] ", plural(len(targets), "session"), strings.TrimSpace(formatBytes(size)))
+	return b.String()
+}
+
+// executeRestoreEmpty runs du restore --empty [n|id].
 func executeRestoreEmpty(rs []restoreSession, args []string) {
 	var targets []restoreSession
 	if len(args) > 0 {
-		session, err := pickRestoreSession(rs, args[0])
+		session, _, err := pickRestoreSession(rs, args[0])
 		if err != nil {
 			restoreFail(err)
 		}
@@ -330,7 +369,7 @@ func executeRestoreEmpty(rs []restoreSession, args []string) {
 		if restoreJSON || isPiped() {
 			restoreFail(errors.New("use --yes to empty the quarantine without a prompt"))
 		}
-		fmt.Printf("Delete %s kept by Duster for good? [y/N] ", strings.TrimSpace(formatBytes(size)))
+		fmt.Print(emptyPrompt(targets))
 		reader := bufio.NewReader(os.Stdin)
 		line, _ := reader.ReadString('\n')
 		line = strings.ToLower(strings.TrimSpace(line))

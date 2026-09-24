@@ -26,11 +26,11 @@ func TestRestoreListAndPick(t *testing.T) {
 			t.Errorf("list lacks %q:\n%s", want, b.String())
 		}
 	}
-	if _, err := pickRestoreSession(rs, "1"); err != nil {
+	if _, _, err := pickRestoreSession(rs, "1"); err != nil {
 		t.Fatal(err)
 	}
 	for _, bad := range []string{"0", "2", "x", ""} {
-		if _, err := pickRestoreSession(rs, bad); err == nil {
+		if _, _, err := pickRestoreSession(rs, bad); err == nil {
 			t.Errorf("pickRestoreSession(%q) accepted", bad)
 		}
 	}
@@ -83,5 +83,45 @@ func TestRestoreListShowsDamaged(t *testing.T) {
 	renderRestoreList(&b, rs, now)
 	if !strings.Contains(b.String(), "damaged") || strings.Contains(b.String(), "0 items") {
 		t.Errorf("damaged session listing:\n%s", b.String())
+	}
+}
+
+// du restore --empty <n> also takes the session id, so a list that shifted
+// since it was printed (a new session on top) cannot empty the wrong one.
+func TestPickRestoreSessionByID(t *testing.T) {
+	now := time.Now()
+	mk := func(id string, at time.Time) restoreSession {
+		return restoreSession{ID: id, Command: "purge", Created: at}
+	}
+	rs := []restoreSession{mk("200-installer", now), mk("100-purge", now.Add(-time.Hour))}
+	r, n, err := pickRestoreSession(rs, "100-purge")
+	if err != nil || r.ID != "100-purge" || n != 2 {
+		t.Fatalf("by id: %+v, %d, %v", r, n, err)
+	}
+	if r, n, err := pickRestoreSession(rs, "1"); err != nil || r.ID != "200-installer" || n != 1 {
+		t.Fatalf("by number: %+v, %d, %v", r, n, err)
+	}
+	if _, _, err := pickRestoreSession(rs, "300-purge"); err == nil {
+		t.Error("an unknown id was accepted")
+	}
+}
+
+func TestEmptyPromptNamesWhatIsDeleted(t *testing.T) {
+	at := time.Date(2026, 9, 24, 15, 4, 0, 0, time.Local)
+	one := restoreSession{ID: "1-purge", Command: "purge", Created: at, Parts: []keptSession{{Manifest: quarantineManifest{
+		Items: []quarantineItem{{Size: 1024, State: "kept"}, {Size: 1024, State: "kept"}}}}}}
+	p := emptyPrompt([]restoreSession{one})
+	for _, want := range []string{"purge", "Sep 24, 15:04", "2 items", "2.00 KB", "for good", "[y/N]"} {
+		if !strings.Contains(p, want) {
+			t.Errorf("single prompt lacks %q: %q", want, p)
+		}
+	}
+	two := one
+	two.Command, two.ID = "installer", "2-installer"
+	p = emptyPrompt([]restoreSession{one, two})
+	for _, want := range []string{"purge from", "installer from", "2 sessions", "4.00 KB", "for good"} {
+		if !strings.Contains(p, want) {
+			t.Errorf("multi prompt lacks %q: %q", want, p)
+		}
 	}
 }
