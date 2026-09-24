@@ -22,6 +22,7 @@ func TestScreensStartTextAtTheLeftMargin(t *testing.T) {
 		"remove":    initialRemoveModel(`C:\Tools\du.exe`).View(),
 		"installer": initialInstallerModel().View(),
 		"purge":     initialPurgeModel(t.TempDir()).View(),
+		"vdisk":     initialVdiskModel().View(),
 	}
 	for name, v := range views {
 		for i, line := range strings.Split(sgr.ReplaceAllString(v, ""), "\n") {
