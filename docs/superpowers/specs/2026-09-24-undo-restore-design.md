@@ -97,7 +97,7 @@ Restore rules:
 
 Other changes:
 - "The bin does not take the item" means `recyclePathNative` returned an error. That happens when the item is too big and the user answers No in Windows' own "permanently delete?" dialog (Duster passes `FOF_WANTNUKEWARNING`, so Windows asks first; Duster cannot know in advance whether an item fits), or when the path is longer than the Recycle Bin API accepts (MAX_PATH). Answering No to *permanent* deletion therefore means "remove it, but keep it restorable". Answering Yes is Windows deleting permanently at the user's explicit request, as today.
-- All call sites use one helper, `quarantinePath(s *quarantineSession, path string) error`, with the session opened once per command run.
+- All call sites use one helper, `quarantinePath(s *quarantineSession, path string, size int64) error` (size is the byte count the caller already measured, recorded in the manifest), with the session opened once per command run.
 - Finish screens and JSON gain the session number and the line "Kept for 7 days. Undo with `du restore <n>`".
 - `du remove` empties every quarantine: `logging.Dir()` already covers the local one, and each fixed drive's SID folder is emptied too. Its confirmation states how much is held.
 
@@ -110,11 +110,11 @@ Other changes:
 
 What it removes:
 1. Items kept more than 7 days, logged as `expire`.
-2. On any volume below 10% free, the oldest sessions on that volume, one at a time, until the volume is at or above 10% or its quarantine is empty.
+2. On any volume below 10% free, the oldest sessions on that volume, one at a time, until the volume is at or above 10% or its quarantine is empty. Space freed by the expired sessions of step 1 counts first, so a fresh session is not deleted when expiry already made room. A volume at 0 bytes free is still swept; only a volume whose size cannot be read is left to step 1.
 
 Which sessions to delete is decided by a pure function over (sessions, free space per volume, now), so it can be unit-tested.
 
-The sweep only deletes inside verified roots, with `removeAllSafe`. A session with a missing or damaged `session.json` is aged by its folder's modification time.
+The sweep only deletes inside verified roots, with `removeAllSafe`. A session with a missing or damaged `session.json`, or one without a creation time, is aged by its folder's modification time.
 
 ## 6. Units
 

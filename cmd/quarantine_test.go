@@ -3,6 +3,7 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -214,15 +215,196 @@ func TestGroupSessionsAcrossVolumes(t *testing.T) {
 
 func TestPickSweep(t *testing.T) {
 	now := time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC)
-	ks := []keptSession{
-		{Root: "C", Dir: "C/old", Created: now.Add(-8 * 24 * time.Hour), Manifest: quarantineManifest{Items: []quarantineItem{{Size: 1, State: "kept"}}}},
-		{Root: "C", Dir: "C/new", Created: now.Add(-time.Hour), Manifest: quarantineManifest{Items: []quarantineItem{{Size: 1, State: "kept"}}}},
-		{Root: "D", Dir: "D/a", Created: now.Add(-3 * 24 * time.Hour), Manifest: quarantineManifest{Items: []quarantineItem{{Size: 30, State: "kept"}}}},
-		{Root: "D", Dir: "D/b", Created: now.Add(-2 * 24 * time.Hour), Manifest: quarantineManifest{Items: []quarantineItem{{Size: 30, State: "kept"}}}},
+	mk := func(root, name string, age time.Duration, size int64) keptSession {
+		return keptSession{Root: root, Dir: root + "/" + name, Created: now.Add(-age),
+			Manifest: quarantineManifest{Items: []quarantineItem{{Size: size, State: "kept"}}}}
 	}
-	vols := map[string]volSpace{"C": {Free: 50, Total: 100}, "D": {Free: 5, Total: 100}} // D at 5% free
-	got := strings.Join(pickSweep(ks, vols, now), ",")
-	if got != "C/old,D/a" {
-		t.Errorf("pickSweep = %q, want expired C/old then oldest D/a (5%%+30%% >= 10%%)", got)
+	day := 24 * time.Hour
+	tests := []struct {
+		name string
+		ks   []keptSession
+		vols map[string]volSpace
+		want string
+	}{
+		{"expired, then oldest on a low volume",
+			[]keptSession{mk("C", "old", 8*day, 1), mk("C", "new", time.Hour, 1), mk("D", "a", 3*day, 30), mk("D", "b", 2*day, 30)},
+			map[string]volSpace{"C": {Free: 50, Total: 100}, "D": {Free: 5, Total: 100}}, // D at 5% free
+			"C/old,D/a"},
+		{"expired bytes count before the low-space pass (same volume)",
+			[]keptSession{mk("D", "expired", 8*day, 30), mk("D", "fresh", time.Hour, 30)},
+			map[string]volSpace{"D": {Free: 5, Total: 100}},
+			"D/expired"},
+		{"a full volume is still swept",
+			[]keptSession{mk("D", "a", 2*day, 5), mk("D", "b", day, 10), mk("D", "c", time.Hour, 10)},
+			map[string]volSpace{"D": {Free: 0, Total: 100}},
+			"D/a,D/b"},
+		{"an unreadable volume is left to the age rule",
+			[]keptSession{mk("E", "a", 2*day, 5)},
+			map[string]volSpace{},
+			""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			before := map[string]volSpace{}
+			for k, v := range tt.vols {
+				before[k] = v
+			}
+			if got := strings.Join(pickSweep(tt.ks, tt.vols, now), ","); got != tt.want {
+				t.Errorf("pickSweep = %q, want %q", got, tt.want)
+			}
+			for k, v := range before {
+				if tt.vols[k] != v {
+					t.Errorf("pickSweep changed the caller's map: %s %+v -> %+v", k, v, tt.vols[k])
+				}
+			}
+		})
+	}
+}
+
+func TestQuarantineFirstFailureLeavesNoFolder(t *testing.T) {
+	work := tempQuarantine(t)
+	target := filepath.Join(work, "a.txt")
+	os.WriteFile(target, []byte("a"), 0o644)
+	root, err := quarantineRoot(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := newQuarantineSession("installer")
+	dir := filepath.Join(root, s.id)
+	os.MkdirAll(dir, 0o700)
+	os.WriteFile(filepath.Join(dir, "1"), nil, 0o600) // slot 1 cannot be created
+	if err := quarantinePath(s, target, 1); err == nil {
+		t.Fatal("expected the first keep to fail")
+	}
+	if exists(dir) {
+		t.Error("a session folder that kept nothing was left behind")
+	}
+	if len(s.dirs) != 0 || s.Kept() != 0 {
+		t.Errorf("the failed folder is still tracked: dirs=%d kept=%d", len(s.dirs), s.Kept())
+	}
+	if b, _ := os.ReadFile(target); string(b) != "a" {
+		t.Fatal("the item was touched by a failed keep")
+	}
+	if err := quarantinePath(s, target, 1); err != nil {
+		t.Fatalf("a later keep on the same volume: %v", err)
+	}
+}
+
+func TestRestoreTwiceReportsOnlyWhatIsLeft(t *testing.T) {
+	work := tempQuarantine(t)
+	a, b := filepath.Join(work, "a.txt"), filepath.Join(work, "b.txt")
+	os.WriteFile(a, []byte("a"), 0o644)
+	os.WriteFile(b, []byte("b"), 0o644)
+	s := newQuarantineSession("installer")
+	quarantinePath(s, a, 1)
+	quarantinePath(s, b, 1)
+
+	rs := groupSessions(loadKeptSessions(quarantineRoots()))[0]
+	if res := restoreItems(rs, 1, false); len(res) != 1 || res[0].Path != a || res[0].Status != "restored" {
+		t.Fatalf("first restore: %+v", res)
+	}
+	if n := len(rs.Items()); n != 1 {
+		t.Fatalf("Items() after one restore = %d, want 1", n)
+	}
+	res := restoreItems(rs, 0, false)
+	if len(res) != 1 || res[0].Path != b || res[0].Status != "restored" {
+		t.Fatalf("second restore must list only the item still kept: %+v", res)
+	}
+}
+
+func TestRestoreReportsBookkeepingFailures(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Getuid() == 0 {
+		t.Skip("needs POSIX folder permissions as a regular user")
+	}
+	tests := []struct {
+		name   string
+		item   int // 1 restores one of two items (manifest rewrite), 0 restores all (folder removal)
+		locked func(dir string) string
+		reason string
+	}{
+		{"manifest rewrite", 1, func(dir string) string { return dir }, "session record"},
+		{"folder removal", 0, filepath.Dir, "could not be removed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			work := tempQuarantine(t)
+			a, b := filepath.Join(work, "a.txt"), filepath.Join(work, "b.txt")
+			os.WriteFile(a, []byte("a"), 0o644)
+			os.WriteFile(b, []byte("b"), 0o644)
+			s := newQuarantineSession("installer")
+			quarantinePath(s, a, 1)
+			quarantinePath(s, b, 1)
+			rs := groupSessions(loadKeptSessions(quarantineRoots()))[0]
+
+			locked := tt.locked(rs.Parts[0].Dir)
+			if err := os.Chmod(locked, 0o500); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { os.Chmod(locked, 0o700) })
+
+			var failed []restoreResult
+			for _, r := range restoreItems(rs, tt.item, false) {
+				if r.Status == "failed" {
+					failed = append(failed, r)
+				}
+			}
+			if len(failed) != 1 || failed[0].Path != rs.Parts[0].Dir || !strings.Contains(failed[0].Reason, tt.reason) {
+				t.Fatalf("the bookkeeping failure was not reported: %+v", failed)
+			}
+		})
+	}
+}
+
+func TestEmptySessionsRefusesInvalidPath(t *testing.T) {
+	tempQuarantine(t)
+	rs := []restoreSession{{ID: "x", Parts: []keptSession{{Dir: "relative-dir"}}}}
+	if err := emptySessions(rs); err == nil {
+		t.Error("emptied a folder that fails the path check")
+	}
+}
+
+func TestKeptSessionSizeIsPerPart(t *testing.T) {
+	part := func(sizes ...int64) keptSession {
+		var items []quarantineItem
+		for _, n := range sizes {
+			items = append(items, quarantineItem{Size: n, State: "kept"})
+		}
+		return keptSession{Manifest: quarantineManifest{Items: items}}
+	}
+	r := restoreSession{Parts: []keptSession{part(1, 2), part(10)}}
+	r.Parts[0].Manifest.Items[1].State = "restored"
+	if r.Parts[0].size() != 1 || r.Parts[1].size() != 10 || r.Size() != 11 {
+		t.Errorf("sizes: %d %d %d", r.Parts[0].size(), r.Parts[1].size(), r.Size())
+	}
+}
+
+func TestGroupSessionsPrefersIntactPart(t *testing.T) {
+	now := time.Now()
+	got := groupSessions([]keptSession{
+		{Root: "C", Dir: "C/1-purge", Damaged: true, Created: now, Manifest: quarantineManifest{ID: "1-purge"}},
+		{Root: "D", Dir: "D/1-purge", Created: now.Add(-time.Hour), Manifest: quarantineManifest{ID: "1-purge", Command: "purge",
+			Created: now.Add(-time.Hour), Items: []quarantineItem{{Slot: 1, Size: 1, State: "kept"}}}},
+	})
+	if len(got) != 1 || got[0].Command != "purge" || !got[0].Created.Equal(now.Add(-time.Hour)) {
+		t.Fatalf("command/time must come from the intact part: %+v", got)
+	}
+}
+
+func TestLoadZeroCreatedIsDamaged(t *testing.T) {
+	work := tempQuarantine(t)
+	root, err := quarantineRoot(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(root, "1-purge")
+	os.MkdirAll(filepath.Join(dir, "1"), 0o700)
+	os.WriteFile(filepath.Join(dir, "1", "x"), []byte("x"), 0o644)
+	m := quarantineManifest{ID: "1-purge", Command: "purge", Items: []quarantineItem{{Slot: 1, Path: filepath.Join(work, "x"), State: "kept"}}}
+	if err := writeManifest(dir, &m); err != nil {
+		t.Fatal(err)
+	}
+	ks := loadKeptSessions([]string{root})
+	if len(ks) != 1 || !ks[0].Damaged || ks[0].Created.IsZero() {
+		t.Fatalf("a manifest without a creation time must be damaged and aged by its folder: %+v", ks)
 	}
 }

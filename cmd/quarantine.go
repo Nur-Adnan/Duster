@@ -183,7 +183,10 @@ func recycleOrQuarantine(s *quarantineSession, path string, size int64) (bool, e
 		return false, nil
 	}
 	if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
-		return false, nil // gone despite the error: the bin took it after all (its own dialog, or a lagging report), not something we did
+		// Gone although the bin reported an error (a Yes to Windows' prompt
+		// returns success, so it is not that): the operation completed behind a
+		// lagging report, or something else removed it. Nothing is left to keep.
+		return false, nil
 	}
 	if qerr := quarantinePath(s, path, size); qerr != nil {
 		return false, fmt.Errorf("%v; keeping it in Duster's quarantine also failed: %v", rerr, qerr)
@@ -220,7 +223,7 @@ type keptSession struct {
 	Root     string
 	Dir      string
 	Manifest quarantineManifest
-	Damaged  bool      // session.json missing or unreadable: aged by folder time, emptiable only
+	Damaged  bool      // session.json missing, unreadable or without a creation time: aged by folder time, emptiable only
 	Created  time.Time // manifest time, or the folder's when damaged
 }
 
@@ -249,7 +252,9 @@ func loadKeptSessions(roots []string) []keptSession {
 			}
 			k := keptSession{Root: root, Dir: dir}
 			b, err := readSmallFile(filepath.Join(dir, quarantineManifestName), 4<<20)
-			if err != nil || json.Unmarshal(b, &k.Manifest) != nil || k.Manifest.ID == "" {
+			// A manifest without a creation time cannot be aged, so it counts
+			// as damaged too and is aged by its folder.
+			if err != nil || json.Unmarshal(b, &k.Manifest) != nil || k.Manifest.ID == "" || k.Manifest.Created.IsZero() {
 				k.Damaged = true
 				if info, err := os.Lstat(dir); err == nil {
 					k.Created = info.ModTime()
@@ -306,12 +311,16 @@ type keptItemRef struct {
 	Item  quarantineItem
 }
 
-// Items lists the session's kept items in a stable order (numbered from 1 by `du restore`).
+// Items lists the session's kept items in a stable order (numbered from 1 by
+// `du restore`). Items already restored are left out, so restoring twice never
+// reports them again.
 func (r restoreSession) Items() []keptItemRef {
 	var out []keptItemRef
 	for p, k := range r.Parts {
 		for i, it := range k.Manifest.Items {
-			out = append(out, keptItemRef{Part: p, Index: i, Item: it})
+			if it.State == "kept" {
+				out = append(out, keptItemRef{Part: p, Index: i, Item: it})
+			}
 		}
 	}
 	return out
@@ -319,22 +328,41 @@ func (r restoreSession) Items() []keptItemRef {
 
 func (r restoreSession) Size() int64 {
 	var n int64
-	for _, ref := range r.Items() {
-		n += ref.Item.Size
+	for _, k := range r.Parts {
+		n += k.size()
 	}
 	return n
 }
 
-// groupSessions merges one run's folders from every volume, newest first.
+// size is what this session folder keeps (a damaged one reports 0: its
+// contents are unknown).
+func (k keptSession) size() int64 {
+	var n int64
+	for _, it := range k.Manifest.Items {
+		if it.State == "kept" {
+			n += it.Size
+		}
+	}
+	return n
+}
+
+// groupSessions merges one run's folders from every volume, newest first. The
+// command and time come from an intact part when there is one.
 func groupSessions(ks []keptSession) []restoreSession {
 	byID := map[string]*restoreSession{}
+	fromDamaged := map[string]bool{}
 	var order []string
 	for _, k := range ks {
-		r := byID[k.Manifest.ID]
+		id := k.Manifest.ID
+		r := byID[id]
 		if r == nil {
-			r = &restoreSession{ID: k.Manifest.ID, Command: k.Manifest.Command, Created: k.Created}
-			byID[k.Manifest.ID] = r
-			order = append(order, k.Manifest.ID)
+			r = &restoreSession{ID: id}
+			byID[id] = r
+			order = append(order, id)
+		}
+		if len(r.Parts) == 0 || (fromDamaged[id] && !k.Damaged) {
+			r.Command, r.Created = k.Manifest.Command, k.Created
+			fromDamaged[id] = k.Damaged
 		}
 		r.Parts = append(r.Parts, k)
 	}
@@ -352,34 +380,41 @@ type volSpace struct{ Free, Total int64 }
 
 // pickSweep decides which session folders to delete: every one older than
 // quarantineKeep, then on each volume below quarantineLowSpace the oldest
-// remaining ones until the volume would be back at or above it. Pure.
+// remaining ones until the volume would be back at or above it. Expired
+// sessions count as freed space first, so the low-space pass never deletes a
+// fresh session that the expired ones already made room for. Pure: vols is
+// not modified.
 func pickSweep(ks []keptSession, vols map[string]volSpace, now time.Time) []string {
+	space := make(map[string]volSpace, len(vols))
+	for r, v := range vols {
+		space[r] = v
+	}
 	sorted := append([]keptSession(nil), ks...)
 	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Created.Before(sorted[j].Created) })
 	var out []string
 	gone := map[string]bool{}
+	take := func(k keptSession) {
+		out = append(out, k.Dir)
+		gone[k.Dir] = true
+		if v, ok := space[k.Root]; ok {
+			v.Free += k.size()
+			space[k.Root] = v
+		}
+	}
 	for _, k := range sorted {
 		if now.Sub(k.Created) > quarantineKeep {
-			out = append(out, k.Dir)
-			gone[k.Dir] = true
+			take(k)
 		}
 	}
 	for _, k := range sorted {
 		if gone[k.Dir] {
 			continue
 		}
-		v, ok := vols[k.Root]
+		v, ok := space[k.Root]
 		if !ok || v.Total <= 0 || float64(v.Free)*100/float64(v.Total) >= quarantineLowSpace {
 			continue
 		}
-		out = append(out, k.Dir)
-		gone[k.Dir] = true
-		var size int64
-		for _, it := range k.Manifest.Items {
-			size += it.Size
-		}
-		v.Free += size
-		vols[k.Root] = v
+		take(k)
 	}
 	return out
 }
@@ -390,20 +425,34 @@ func sweepQuarantine(now time.Time) []error {
 	ks := loadKeptSessions(roots)
 	vols := map[string]volSpace{}
 	for _, r := range roots {
-		free, pct := getDiskFreeBytes(r), diskFreePercent(r)
-		if pct > 0 {
-			vols[r] = volSpace{Free: free, Total: int64(float64(free) * 100 / pct)}
+		// A volume that cannot be read is left to the age rule; a full one
+		// (free == 0) is exactly the one that needs the low-space pass.
+		if free, total, ok := diskSpace(r); ok {
+			vols[r] = volSpace{Free: free, Total: total}
 		}
+	}
+	sizes := map[string]int64{}
+	for _, k := range ks {
+		sizes[k.Dir] = k.size()
 	}
 	var errs []error
 	for _, dir := range pickSweep(ks, vols, now) {
-		err := removeAllSafe(dir)
-		logging.LogDestructiveOperation("restore", "expire", dir, 0, err == nil)
+		err := removeSessionDir(dir)
+		logging.LogDestructiveOperation("restore", "expire", dir, sizes[dir], err == nil)
 		if err != nil {
 			errs = append(errs, err)
 		}
 	}
 	return errs
+}
+
+// removeSessionDir deletes one session folder, after the same path check
+// every other delete passes.
+func removeSessionDir(dir string) error {
+	if !fs.IsValidPath(dir) {
+		return fmt.Errorf("%s: deleting system protected paths is blocked for safety", dir)
+	}
+	return removeAllSafe(dir)
 }
 
 type restoreResult struct {
@@ -450,12 +499,21 @@ func restoreItems(rs restoreSession, item int, dryRun bool) []restoreResult {
 		}
 		out = append(out, r)
 	}
-	for p := range touched {
+	for p := range rs.Parts {
+		if !touched[p] {
+			continue
+		}
 		k := rs.Parts[p]
 		if allRestored(k.Manifest.Items) {
-			_ = removeAllSafe(k.Dir) // nothing kept is left in it
-		} else {
-			_ = writeManifest(k.Dir, &rs.Parts[p].Manifest)
+			// Nothing kept is left in it. Every item is already back, so a
+			// leftover folder is only reported.
+			if err := removeSessionDir(k.Dir); err != nil {
+				out = append(out, restoreResult{Path: k.Dir, Status: "failed",
+					Reason: "the items are back, but the emptied quarantine folder could not be removed: " + err.Error()})
+			}
+		} else if err := writeManifest(k.Dir, &rs.Parts[p].Manifest); err != nil {
+			out = append(out, restoreResult{Path: k.Dir, Status: "failed",
+				Reason: "the items are back, but the session record could not be updated, so they may be listed again: " + err.Error()})
 		}
 	}
 	return out
@@ -480,8 +538,8 @@ func emptySessions(rs []restoreSession) error {
 	var errs []error
 	for _, r := range rs {
 		for _, k := range r.Parts {
-			err := removeAllSafe(k.Dir)
-			logging.LogDestructiveOperation("restore", "empty", k.Dir, r.Size(), err == nil)
+			err := removeSessionDir(k.Dir)
+			logging.LogDestructiveOperation("restore", "empty", k.Dir, k.size(), err == nil)
 			errs = append(errs, err)
 		}
 	}
