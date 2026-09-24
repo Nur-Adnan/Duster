@@ -26,7 +26,7 @@ type scheduleRecord struct {
 	LastClean *scheduleClean `json:"last_clean,omitempty"`
 	// LastSuccess is the last clean where at least one category did not fail.
 	// The cadence counts from it, so a run where everything failed retries.
-	LastSuccess time.Time `json:"last_success,omitempty"`
+	LastSuccess time.Time `json:"last_success,omitzero"`
 }
 
 type scheduleCheck struct {
@@ -335,12 +335,14 @@ func renderScheduleStatus(w io.Writer, st scheduleStatus) {
 		fmt.Fprintln(w, "Scheduled clean: OFF")
 	}
 	if st.DryRun || st.Enabled {
-		early := ""
-		if st.LowSpacePercent != nil {
-			early = fmt.Sprintf(", or early when %s has under %d%% free", drive, *st.LowSpacePercent)
+		if st.Every != "" {
+			early := ""
+			if st.LowSpacePercent != nil {
+				early = fmt.Sprintf(", or early when %s has under %d%% free", drive, *st.LowSpacePercent)
+			}
+			fmt.Fprintf(w, "  Cleans %s%s. Checks daily at %s.\n", st.Every, early, st.At)
+			fmt.Fprintf(w, "  Cleans: %s\n", scheduleCategoryList(st.Categories))
 		}
-		fmt.Fprintf(w, "  Cleans %s%s. Checks daily at %s.\n", st.Every, early, st.At)
-		fmt.Fprintf(w, "  Cleans: %s\n", scheduleCategoryList(st.Categories))
 		if st.NextCheck != nil {
 			fmt.Fprintf(w, "  Next check:  %s\n", st.NextCheck.Local().Format(scheduleTimeLayout))
 		}
@@ -468,7 +470,7 @@ func executeScheduleOn() {
 	}
 	duw := filepath.Join(filepath.Dir(exe), "duw.exe")
 	if info, err := os.Lstat(duw); err != nil || !info.Mode().IsRegular() {
-		scheduleFail(fmt.Errorf("duw.exe is missing from %s: run du update or reinstall Duster", filepath.Dir(exe)))
+		scheduleFail(fmt.Errorf("duw.exe is missing from %s: run du update --force (or reinstall Duster)", filepath.Dir(exe)))
 	}
 	name, u, err := currentScheduleTask()
 	if err != nil {
@@ -512,6 +514,13 @@ func executeScheduleOn() {
 		scheduleFail(err)
 	}
 	st := readScheduleStatus(name, rec, now)
+	if !st.Enabled {
+		// The re-query failed (schtasks flakiness, a slow registration): the
+		// task is there, Duster just could not read it back.
+		st.Enabled = true
+		st.TaskName = name
+		st.Warnings = append(st.Warnings, "the task was registered, but Duster could not read it back, so some details below may be missing")
+	}
 	st.Notes = notes
 	if elevation.IsAdmin() {
 		st.Warnings = append(st.Warnings, fmt.Sprintf("registered for %s; runs without administrator rights", u.Username))
@@ -544,18 +553,46 @@ func executeScheduleOff() {
 	if err != nil {
 		scheduleFail(err)
 	}
-	if _, found := queryScheduleTask(name); !found {
+	alreadyOff := false
+	if deleteErr := deleteScheduleTask(name); deleteErr != nil {
+		names, listErr := listScheduleTaskNames()
+		var ok bool
+		ok, err = offOutcome(deleteErr, names, listErr, name)
+		if err != nil {
+			scheduleFail(err)
+		}
+		alreadyOff = ok
+	}
+	if alreadyOff {
 		if !schedJSON {
 			fmt.Println("Scheduled clean is already off.")
 			return
 		}
-	} else if err := deleteScheduleTask(name); err != nil {
-		scheduleFail(err)
 	} else if !schedJSON {
 		fmt.Printf("Scheduled clean is off. The record of past runs stays in %s.\n", filepath.Join(logging.Dir(), scheduleRecordName))
 		return
 	}
 	printScheduleStatus(readScheduleStatus(name, loadScheduleRecord(logging.Dir()), time.Now()))
+}
+
+// offOutcome decides what executeScheduleOff reports after always attempting
+// to delete the task first, so a running task is never mistaken for one that
+// is already off. deleteErr is deleteScheduleTask's result; when it succeeds
+// the task is off and names/listErr are unused. When it fails, names and
+// listErr come from listScheduleTaskNames, consulted only then: if the list
+// succeeded and name is not in it, the task really was already gone (the
+// delete raced it, or schtasks reported a phantom failure) and that is not an
+// error. Any other case (the list failed too, or name is still there) keeps
+// the delete error, since parsing schtasks' localized "task not found" text
+// would be wrong on non-English Windows.
+func offOutcome(deleteErr error, names []string, listErr error, name string) (alreadyOff bool, err error) {
+	if deleteErr == nil {
+		return false, nil
+	}
+	if listErr == nil && !slices.Contains(names, name) {
+		return true, nil
+	}
+	return false, deleteErr
 }
 
 // removeScheduleAndLauncher deletes this account's scheduled clean and the

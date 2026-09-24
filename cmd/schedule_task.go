@@ -59,7 +59,7 @@ func buildTaskXML(cfg scheduleConfig, duw, userSID string, now time.Time) ([]byt
 		Version:      "1.2",
 		Author:       "Duster",
 		Description:  "Cleans caches on a schedule. Manage it with: du schedule",
-		Start:        now.Format("2006-01-02") + "T" + cfg.At + ":00",
+		Start:        nextScheduleCheck(now, cfg.At).Format("2006-01-02T15:04:05"),
 		TriggerOn:    true,
 		DaysInterval: 1,
 		Principal: taskPrincipal{
