@@ -556,6 +556,13 @@ jobs:
           $ErrorActionPreference = 'Continue'
           $du = '.\du.exe'
 
+          # Earlier steps (the concurrent purges in "Invalid input...", the
+          # desktop checks) now keep what they purge; empty those sessions
+          # first so this step's sessions.Count and restore 1 checks only see
+          # its own.
+          & $du restore --empty --yes --json | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "restore --empty at step start: exit=$LASTEXITCODE" }
+
           function NewProject($dir) {
             New-Item -ItemType Directory -Force "$dir\node_modules\x" | Out-Null
             Set-Content "$dir\package.json" '{}'
@@ -563,9 +570,20 @@ jobs:
           }
           function NewPw() { 'Du!' + [guid]::NewGuid().ToString('N').Substring(0, 8) + 'aA1' }
 
-          $p1 = Join-Path $env:RUNNER_TEMP 'undo\p1'
+          $p1 = Join-Path $env:USERPROFILE 'undo-smoke\p1'
           $p2 = 'D:\undo-smoke\p2'
           $pub = Join-Path $env:PUBLIC 'dundo'
+          $qdirC = Join-Path $env:LOCALAPPDATA 'Duster\quarantine'
+          function KeptNodeModules($root) {
+            @(Get-ChildItem -LiteralPath $root -Recurse -Force -Directory -Filter node_modules -ErrorAction SilentlyContinue).Count
+          }
+          # purge --yes --json reports kept bytes apart from freed ones:
+          # keeping frees nothing until the sweep.
+          function CheckKeptJson($j, $what) {
+            if (-not ($j.kept_bytes -gt 0)) { throw "${what}: kept_bytes=$($j.kept_bytes)" }
+            if ($j.failed -ne 0) { throw "${what}: failed=$($j.failed) errors=$($j.errors -join '; ')" }
+            if ($j.reclaimed -ne 0) { throw "${what}: reclaimed=$($j.reclaimed) for items that were only kept" }
+          }
 
           try {
             # 1. Purge keeps by default; du restore lists and brings it back,
@@ -573,15 +591,22 @@ jobs:
             NewProject $p1
             $j = & $du purge --path $p1 --yes --json | Out-String | ConvertFrom-Json
             if ($LASTEXITCODE -ne 0 -or $j.kept -lt 1) { throw "purge p1: kept=$($j.kept) exit=$LASTEXITCODE" }
+            CheckKeptJson $j 'purge p1'
             if ($j.undo -ne 'du restore 1') { throw "purge p1 undo hint: $($j.undo)" }
             if (Test-Path "$p1\node_modules") { throw 'purge left node_modules in place (p1)' }
+
+            # p1 sits under %USERPROFILE%, on the volume that holds
+            # %LOCALAPPDATA% (C:), so its kept item lives in the profile's own
+            # quarantine, not in a hidden per-volume one.
+            if ((KeptNodeModules $qdirC) -ne 1) { throw "the C: item is not kept under $qdirC" }
+            if (Test-Path 'C:\.duster-quarantine') { throw 'the C: item went to C:\.duster-quarantine instead of %LOCALAPPDATA%' }
 
             $r = & $du restore --json | Out-String | ConvertFrom-Json
             if ($LASTEXITCODE -ne 0 -or @($r.sessions).Count -ne 1) { throw "restore list after p1: $($r | ConvertTo-Json -Depth 6)" }
             if ($r.sessions[0].items[0].path -notlike '*\p1\node_modules') { throw "restore list item: $($r.sessions[0].items[0].path)" }
 
-            $res = @(& $du restore 1 --json | Out-String | ConvertFrom-Json)
-            if ($LASTEXITCODE -ne 0 -or $res[0].status -ne 'restored') { throw "restore 1 (p1): exit=$LASTEXITCODE $($res | ConvertTo-Json -Depth 5)" }
+            $res = & $du restore 1 --json | Out-String | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0 -or $res.results[0].status -ne 'restored') { throw "restore 1 (p1): exit=$LASTEXITCODE $($res | ConvertTo-Json -Depth 5)" }
             if (-not (Test-Path "$p1\node_modules\x\a.js")) { throw 'restore 1 did not bring node_modules back' }
 
             # 2. The same on D:, whose quarantine root is not %LOCALAPPDATA%
@@ -589,6 +614,7 @@ jobs:
             NewProject $p2
             $j = & $du purge --path $p2 --yes --json | Out-String | ConvertFrom-Json
             if ($LASTEXITCODE -ne 0 -or $j.kept -lt 1) { throw "purge p2: kept=$($j.kept) exit=$LASTEXITCODE" }
+            CheckKeptJson $j 'purge p2'
             if (Test-Path "$p2\node_modules") { throw 'purge left node_modules in place (p2)' }
 
             $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
@@ -596,6 +622,8 @@ jobs:
             $sidDir = Join-Path $qdir $sid
             if (-not (Test-Path $sidDir)) { throw "$sidDir was not created" }
             if (((Get-Item -Force $qdir).Attributes -band [IO.FileAttributes]::Hidden) -eq 0) { throw "$qdir is not hidden" }
+            if ((KeptNodeModules $sidDir) -ne 1) { throw "the D: item is not kept under $sidDir" }
+            if ((KeptNodeModules $qdirC) -ne 0) { throw "the D: item was kept under $qdirC (a cross-volume copy)" }
 
             $acl = icacls $sidDir
             if ($LASTEXITCODE -ne 0) { throw "icacls $sidDir failed: exit=$LASTEXITCODE" }
@@ -612,13 +640,14 @@ jobs:
             NewProject $p2
             $j = & $du purge --path $p2 --yes --json | Out-String | ConvertFrom-Json
             if ($LASTEXITCODE -ne 0 -or $j.kept -lt 1) { throw "second purge p2: kept=$($j.kept) exit=$LASTEXITCODE" }
+            CheckKeptJson $j 'second purge p2'
 
             NewProject $p2
             Set-Content "$p2\node_modules\x\newer.js" 'newer'
 
-            $res = @(& $du restore 1 --json | Out-String | ConvertFrom-Json)
+            $res = & $du restore 1 --json | Out-String | ConvertFrom-Json
             if ($LASTEXITCODE -ne 0) { throw "restore 1 (p2, conflict): exit=$LASTEXITCODE" }
-            if ($res[0].status -ne 'skipped' -or $res[0].reason -notlike '*newer*') { throw "restore over a newer item: $($res | ConvertTo-Json -Depth 5)" }
+            if ($res.results[0].status -ne 'skipped' -or $res.results[0].reason -notlike '*newer*') { throw "restore over a newer item: $($res | ConvertTo-Json -Depth 5)" }
             if (-not (Test-Path "$p2\node_modules\x\newer.js")) { throw 'restore replaced the newer node_modules' }
             $r = & $du restore --json | Out-String | ConvertFrom-Json
             if (@($r.sessions).Count -lt 1) { throw 'the skipped item did not stay kept' }
@@ -672,7 +701,7 @@ jobs:
           } finally {
             net user dundo1 /delete 2>&1 | Out-Null
             net user dundo2 /delete 2>&1 | Out-Null
-            Remove-Item -Recurse -Force $pub, 'D:\undo-smoke', (Join-Path $env:RUNNER_TEMP 'undo') -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -Force $pub, 'D:\undo-smoke', (Join-Path $env:USERPROFILE 'undo-smoke') -ErrorAction SilentlyContinue
           }
           exit 0
 
