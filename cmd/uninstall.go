@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/Nur-Adnan/duster/internal/logging"
@@ -140,6 +141,7 @@ type uninstallModel struct {
 	selectedApp  uninstall.InstalledApp
 	selectedSize int64
 	sweepSize    int64
+	kept         int
 	uninstErr    error
 	sweepSkipped bool // uninstaller failed or the app is still installed: nothing is swept
 	width        int
@@ -163,6 +165,7 @@ type scanLeftoversCompleteMsg struct {
 
 type sweepCompleteMsg struct {
 	reclaimed int64
+	kept      int
 }
 
 func initialUninstallModel() uninstallModel {
@@ -238,8 +241,8 @@ func scanLeftoversCmd(app uninstall.InstalledApp) tea.Cmd {
 		var list []leftoverItem
 		for _, f := range folders {
 			size := calculateDirSize(f)
-			// Nothing is pre-selected: leftovers are matched heuristically and
-			// deletion is permanent, so the user opts in per folder.
+			// Nothing is pre-selected: leftovers are matched heuristically, so
+			// the user opts in per folder.
 			list = append(list, leftoverItem{Path: f, Size: size})
 		}
 		return scanLeftoversCompleteMsg{items: list}
@@ -248,6 +251,11 @@ func scanLeftoversCmd(app uninstall.InstalledApp) tea.Cmd {
 
 func runSweepCmd(items []leftoverItem, dry bool) tea.Cmd {
 	return func() tea.Msg {
+		var s *quarantineSession
+		if !dry {
+			sweepQuarantine(time.Now())
+			s = newQuarantineSession("uninstall")
+		}
 		var reclaimed int64
 		for _, item := range items {
 			if !item.Selected {
@@ -256,18 +264,22 @@ func runSweepCmd(items []leftoverItem, dry bool) tea.Cmd {
 
 			var err error
 			if !dry {
-				err = removeAllSafe(item.Path)
+				err = quarantinePath(s, item.Path, item.Size)
 			}
 
 			success := err == nil
 			if !dry { // a dry run deleted nothing, so there is nothing to log
-				logUninstOperation("sweep", item.Path, item.Size, success)
+				logUninstOperation("quarantine", item.Path, item.Size, success)
 			}
 			if success {
 				reclaimed += item.Size
 			}
 		}
-		return sweepCompleteMsg{reclaimed: reclaimed}
+		var kept int
+		if s != nil {
+			kept = s.Kept()
+		}
+		return sweepCompleteMsg{reclaimed: reclaimed, kept: kept}
 	}
 }
 
@@ -445,6 +457,7 @@ func (m uninstallModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case sweepCompleteMsg:
 		m.selectedSize = msg.reclaimed
+		m.kept = msg.kept
 		m.state = uninstStateFinished
 		return m, nil
 	}
@@ -691,7 +704,7 @@ func (m uninstallModel) View() string {
 	case stateConfirmingLeftovers:
 		var confSweepBox strings.Builder
 		confSweepBox.WriteString("⚠️  " + uninstFailStyle.Render("CONFIRM SYSTEM SWEEP TRANSACTION") + "\n\n")
-		confSweepBox.WriteString(fmt.Sprintf("  You are about to permanently destroy %d selected leftovers.\n", countSelectedLeftovers(m.leftovers)))
+		confSweepBox.WriteString(fmt.Sprintf("  This moves %d selected leftovers to Duster's quarantine (restorable for 7 days with du restore).\n", countSelectedLeftovers(m.leftovers)))
 		confSweepBox.WriteString(fmt.Sprintf("  Total space to reclaim: %s\n\n", uninstSuccessStyle.Render(formatBytes(m.sweepSize))))
 		confSweepBox.WriteString("  This operation will bypass the Recycle Bin. Proceed? [y to Sweep / n to Cancel]")
 		boxLayout = uninstLeftBoxStyle.Width(83).Render(confSweepBox.String())
@@ -719,6 +732,9 @@ func (m uninstallModel) View() string {
 		} else {
 			finBox.WriteString(fmt.Sprintf("  Status      : %s\n", uninstSuccessStyle.Render("UNINSTALLED & SWEPT")))
 			finBox.WriteString(fmt.Sprintf("  Reclaimed   : %s of leftovers cleared\n\n", uninstSuccessStyle.Render(formatBytes(m.selectedSize))))
+			if m.kept > 0 {
+				finBox.WriteString("  Kept for 7 days: du restore lists it, du restore 1 puts it back.\n\n")
+			}
 		}
 		finBox.WriteString("  Press [q] or [esc] to return to the CLI shell.")
 		boxLayout = uninstLeftBoxStyle.Width(83).Render(finBox.String())
