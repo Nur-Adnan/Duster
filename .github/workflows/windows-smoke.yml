@@ -544,6 +544,138 @@ jobs:
           }
           exit 0
 
+      # Undo window: purge keeps instead of deleting, du restore brings it
+      # back, and the quarantine on a non-profile drive is a hidden,
+      # per-user protected folder that a second user cannot list.
+      - name: Undo window (purge keeps, restore brings back, quarantine privacy)
+        timeout-minutes: 10
+        run: |
+          # See the "Scheduled clean" step above for why 'Continue' is needed
+          # before reading $LASTEXITCODE, and why net user passwords stay at
+          # 14 characters or fewer.
+          $ErrorActionPreference = 'Continue'
+          $du = '.\du.exe'
+
+          function NewProject($dir) {
+            New-Item -ItemType Directory -Force "$dir\node_modules\x" | Out-Null
+            Set-Content "$dir\package.json" '{}'
+            Set-Content "$dir\node_modules\x\a.js" 'x'
+          }
+          function NewPw() { 'Du!' + [guid]::NewGuid().ToString('N').Substring(0, 8) + 'aA1' }
+
+          $p1 = Join-Path $env:RUNNER_TEMP 'undo\p1'
+          $p2 = 'D:\undo-smoke\p2'
+          $pub = Join-Path $env:PUBLIC 'dundo'
+
+          try {
+            # 1. Purge keeps by default; du restore lists and brings it back,
+            # on the volume that holds %LOCALAPPDATA%.
+            NewProject $p1
+            $j = & $du purge --path $p1 --yes --json | Out-String | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0 -or $j.kept -lt 1) { throw "purge p1: kept=$($j.kept) exit=$LASTEXITCODE" }
+            if ($j.undo -ne 'du restore 1') { throw "purge p1 undo hint: $($j.undo)" }
+            if (Test-Path "$p1\node_modules") { throw 'purge left node_modules in place (p1)' }
+
+            $r = & $du restore --json | Out-String | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0 -or @($r.sessions).Count -ne 1) { throw "restore list after p1: $($r | ConvertTo-Json -Depth 6)" }
+            if ($r.sessions[0].items[0].path -notlike '*\p1\node_modules') { throw "restore list item: $($r.sessions[0].items[0].path)" }
+
+            $res = @(& $du restore 1 --json | Out-String | ConvertFrom-Json)
+            if ($LASTEXITCODE -ne 0 -or $res[0].status -ne 'restored') { throw "restore 1 (p1): exit=$LASTEXITCODE $($res | ConvertTo-Json -Depth 5)" }
+            if (-not (Test-Path "$p1\node_modules\x\a.js")) { throw 'restore 1 did not bring node_modules back' }
+
+            # 2. The same on D:, whose quarantine root is not %LOCALAPPDATA%
+            # but a hidden, per-user protected folder.
+            NewProject $p2
+            $j = & $du purge --path $p2 --yes --json | Out-String | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0 -or $j.kept -lt 1) { throw "purge p2: kept=$($j.kept) exit=$LASTEXITCODE" }
+            if (Test-Path "$p2\node_modules") { throw 'purge left node_modules in place (p2)' }
+
+            $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+            $qdir = 'D:\.duster-quarantine'
+            $sidDir = Join-Path $qdir $sid
+            if (-not (Test-Path $sidDir)) { throw "$sidDir was not created" }
+            if (((Get-Item -Force $qdir).Attributes -band [IO.FileAttributes]::Hidden) -eq 0) { throw "$qdir is not hidden" }
+
+            $acl = icacls $sidDir
+            if ($LASTEXITCODE -ne 0) { throw "icacls $sidDir failed: exit=$LASTEXITCODE" }
+            $idents = $acl | Where-Object { $_ -match ':\(' } | ForEach-Object {
+              (($_ -replace [regex]::Escape($sidDir), '').Split(':')[0]).Trim()
+            } | Sort-Object -Unique
+            $me = "$env:USERDOMAIN\$env:USERNAME"
+            $others = $idents | Where-Object { $_ -ne $me -and $_ -ne 'NT AUTHORITY\SYSTEM' }
+            if ($others) { throw "icacls on $sidDir lists more than the user and SYSTEM: $($idents -join ', ')" }
+
+            # Purge again, so a second, newer session exists for the same
+            # path, then the user recreates node_modules before restoring:
+            # the restore must skip it rather than overwrite it.
+            NewProject $p2
+            $j = & $du purge --path $p2 --yes --json | Out-String | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0 -or $j.kept -lt 1) { throw "second purge p2: kept=$($j.kept) exit=$LASTEXITCODE" }
+
+            NewProject $p2
+            Set-Content "$p2\node_modules\x\newer.js" 'newer'
+
+            $res = @(& $du restore 1 --json | Out-String | ConvertFrom-Json)
+            if ($LASTEXITCODE -ne 0) { throw "restore 1 (p2, conflict): exit=$LASTEXITCODE" }
+            if ($res[0].status -ne 'skipped' -or $res[0].reason -notlike '*newer*') { throw "restore over a newer item: $($res | ConvertTo-Json -Depth 5)" }
+            if (-not (Test-Path "$p2\node_modules\x\newer.js")) { throw 'restore replaced the newer node_modules' }
+            $r = & $du restore --json | Out-String | ConvertFrom-Json
+            if (@($r.sessions).Count -lt 1) { throw 'the skipped item did not stay kept' }
+
+            # 3. A standard user's D: quarantine folder is unreadable to a
+            # second standard user (the Start-Process -Credential pattern
+            # from the "Scheduled clean" step above).
+            $pw1 = NewPw
+            $pw2 = NewPw
+            net user dundo1 $pw1 /add | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw 'net user dundo1 /add failed' }
+            net user dundo2 $pw2 /add | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw 'net user dundo2 /add failed' }
+
+            $cred1 = New-Object PSCredential('dundo1', (ConvertTo-SecureString $pw1 -AsPlainText -Force))
+            $cred2 = New-Object PSCredential('dundo2', (ConvertTo-SecureString $pw2 -AsPlainText -Force))
+            New-Item -ItemType Directory -Force $pub | Out-Null
+            Copy-Item du.exe "$pub\du.exe"
+
+            function AsUser($cred, $exe, $argList) {
+              $p = Start-Process $exe -Credential $cred -LoadUserProfile -ArgumentList $argList -Wait -PassThru `
+                -WorkingDirectory $pub -RedirectStandardOutput "$pub\out.txt" -RedirectStandardError "$pub\err.txt"
+              [pscustomobject]@{ Exit = $p.ExitCode; Out = (Get-Content "$pub\out.txt" -Raw -ErrorAction SilentlyContinue); Err = (Get-Content "$pub\err.txt" -Raw -ErrorAction SilentlyContinue) }
+            }
+
+            $u1dir = 'D:\undo-smoke\u1\proj'
+            NewProject $u1dir
+            icacls 'D:\undo-smoke\u1' /grant 'dundo1:(OI)(CI)F' | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw 'icacls grant to dundo1 failed' }
+
+            $r = AsUser $cred1 "$pub\du.exe" @('purge', '--path', $u1dir, '--yes', '--json')
+            if ($r.Exit -ne 0) { throw "dundo1 purge: $($r.Out) $($r.Err)" }
+            $j1 = $r.Out | ConvertFrom-Json
+            if ($j1.kept -lt 1) { throw "dundo1 purge kept nothing: $($r.Out)" }
+
+            $sid1 = (New-Object Security.Principal.NTAccount('dundo1')).Translate([Security.Principal.SecurityIdentifier]).Value
+            $sidDir1 = Join-Path 'D:\.duster-quarantine' $sid1
+
+            $r = AsUser $cred1 'powershell.exe' @('-NoProfile', '-Command', "if (Test-Path -LiteralPath '$sidDir1') { 'EXISTS' } else { 'MISSING' }")
+            if ($r.Exit -ne 0 -or $r.Out.Trim() -ne 'EXISTS') { throw "dundo1 cannot see its own quarantine folder: $($r.Out) $($r.Err)" }
+
+            $r = AsUser $cred2 'powershell.exe' @('-NoProfile', '-Command', "Get-ChildItem -LiteralPath '$sidDir1' -ErrorAction Stop")
+            if ($r.Exit -eq 0) { throw 'a second standard user was able to list the first user''s quarantine folder' }
+            if ($r.Err -notmatch 'denied') { throw "expected access denied, got: $($r.Err)" }
+
+            # 4. Empty everything this account can still see.
+            $j = & $du restore --empty --yes --json | Out-String | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0) { throw "restore --empty: exit=$LASTEXITCODE $($j | ConvertTo-Json -Depth 5)" }
+            $r = & $du restore --json | Out-String | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0 -or @($r.sessions).Count -ne 0) { throw "sessions remain after --empty: $($r | ConvertTo-Json -Depth 6)" }
+          } finally {
+            net user dundo1 /delete 2>&1 | Out-Null
+            net user dundo2 /delete 2>&1 | Out-Null
+            Remove-Item -Recurse -Force $pub, 'D:\undo-smoke', (Join-Path $env:RUNNER_TEMP 'undo') -ErrorAction SilentlyContinue
+          }
+          exit 0
+
       - name: Remove (self-uninstall)
         run: |
           $dir = Join-Path $env:LOCALAPPDATA 'Duster'

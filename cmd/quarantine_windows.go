@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"unsafe"
 
 	"github.com/Nur-Adnan/duster/internal/logging"
@@ -33,9 +34,36 @@ import (
 // Network drives and volumes mounted in a folder get no quarantine: the item
 // stays where it was and the caller reports errNoQuarantine.
 
+// extendedPath gives a long absolute path the `\\?\` prefix (`\\?\UNC\` for a
+// share) so raw Win32 calls accept it past MAX_PATH, as Go's os package does
+// internally. Like Go, it leaves paths under 248 characters alone: they keep
+// Win32's normal parsing (trailing dots and spaces), which is what os.Lstat
+// and the fs path checks saw. Relative and already-prefixed paths pass through.
+func extendedPath(p string) string {
+	if len(p) < 248 || strings.HasPrefix(p, `\\?\`) || strings.HasPrefix(p, `\\.\`) || !filepath.IsAbs(p) {
+		return p
+	}
+	p = filepath.Clean(p) // `\\?\` turns off Win32's own ".." and "/" handling
+	if strings.HasPrefix(p, `\\`) {
+		return `\\?\UNC\` + p[2:]
+	}
+	return `\\?\` + p
+}
+
+// plainPath undoes extendedPath's prefix on a path Windows returned.
+func plainPath(p string) string {
+	switch {
+	case strings.HasPrefix(p, `\\?\UNC\`):
+		return `\\` + p[len(`\\?\UNC\`):]
+	case strings.HasPrefix(p, `\\?\`) && len(p) >= 6 && p[5] == ':':
+		return p[len(`\\?\`):]
+	}
+	return p
+}
+
 // volumeRoot returns the root of the volume holding path, such as `D:\`.
 func volumeRoot(path string) (string, error) {
-	p, err := windows.UTF16PtrFromString(path)
+	p, err := windows.UTF16PtrFromString(extendedPath(path))
 	if err != nil {
 		return "", err
 	}
@@ -43,7 +71,7 @@ func volumeRoot(path string) (string, error) {
 	if err := windows.GetVolumePathName(p, &root[0], uint32(len(root))); err != nil {
 		return "", fmt.Errorf("volume of %s: %w", path, err)
 	}
-	return windows.UTF16ToString(root), nil
+	return plainPath(windows.UTF16ToString(root)), nil
 }
 
 // isDriveLetterRoot reports whether a volume root is a drive letter (`D:\`).
@@ -125,7 +153,7 @@ func createPrivateDir(path, sid string) error {
 	if err != nil {
 		return fmt.Errorf("security descriptor for %s: %w", sid, err)
 	}
-	p, err := windows.UTF16PtrFromString(path)
+	p, err := windows.UTF16PtrFromString(extendedPath(path))
 	if err != nil {
 		return err
 	}
@@ -141,7 +169,7 @@ func createPrivateDir(path, sid string) error {
 
 // dirOwner returns the SID string of path's owner.
 func dirOwner(path string) (string, error) {
-	sd, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION)
+	sd, err := windows.GetNamedSecurityInfo(extendedPath(path), windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION)
 	if err != nil {
 		return "", fmt.Errorf("owner of %s: %w", path, err)
 	}
@@ -180,10 +208,126 @@ func checkOwnQuarantine(dir, volRoot, sid string) error {
 	return nil
 }
 
+// pinnedQuarantines holds an open handle to each X:\.duster-quarantine\<SID>
+// folder this process verified, for the rest of the process. See
+// pinQuarantineDir.
+var (
+	pinnedMu          sync.Mutex
+	pinnedQuarantines = map[string]windows.Handle{}
+)
+
+func pinKey(dir string) string { return strings.ToLower(filepath.Clean(dir)) }
+
+// quarantinePinned reports whether dir is already pinned by this process.
+func quarantinePinned(dir string) bool {
+	pinnedMu.Lock()
+	defer pinnedMu.Unlock()
+	_, ok := pinnedQuarantines[pinKey(dir)]
+	return ok
+}
+
+// pinQuarantineDir opens dir and keeps the handle open for the rest of the
+// process, then verifies through that handle what checkOwnQuarantine checked
+// by path: a directory, not a reparse point, at exactly dir (no junction on
+// the way), owned by sid on a volume that keeps ACLs.
+//
+// The handle does not share delete access, so while it is open Windows refuses
+// to rename or delete dir, and refuses to rename any folder above it. Another
+// user who owns X:\.duster-quarantine therefore cannot swap the verified
+// folder for a junction or a folder of their own between the check and the
+// moves: kept items and session.json always land in the folder that was
+// verified. A second call for the same dir reuses the handle.
+func pinQuarantineDir(dir, volRoot, sid string) error {
+	pinnedMu.Lock()
+	defer pinnedMu.Unlock()
+	key := pinKey(dir)
+	if _, ok := pinnedQuarantines[key]; ok {
+		return nil
+	}
+	p, err := windows.UTF16PtrFromString(extendedPath(dir))
+	if err != nil {
+		return err
+	}
+	h, err := windows.CreateFile(p,
+		windows.FILE_READ_ATTRIBUTES|windows.READ_CONTROL,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, // no FILE_SHARE_DELETE: that is the pin
+		nil, windows.OPEN_EXISTING,
+		windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
+	if err != nil {
+		return &os.PathError{Op: "open", Path: dir, Err: err}
+	}
+	if err := verifyPinnedDir(h, dir, volRoot, sid); err != nil {
+		windows.CloseHandle(h)
+		return err
+	}
+	pinnedQuarantines[key] = h
+	return nil
+}
+
+func verifyPinnedDir(h windows.Handle, dir, volRoot, sid string) error {
+	var info windows.ByHandleFileInformation
+	if err := windows.GetFileInformationByHandle(h, &info); err != nil {
+		return &os.PathError{Op: "stat", Path: dir, Err: err}
+	}
+	if info.FileAttributes&windows.FILE_ATTRIBUTE_DIRECTORY == 0 || info.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+		return fmt.Errorf("%s is not a plain folder, so Duster will not keep items there", dir)
+	}
+	buf := make([]uint16, windows.MAX_PATH+1)
+	for {
+		// Flags 0: FILE_NAME_NORMALIZED | VOLUME_NAME_DOS, a `\\?\X:\...` path.
+		n, err := windows.GetFinalPathNameByHandle(h, &buf[0], uint32(len(buf)), 0)
+		if err != nil {
+			return &os.PathError{Op: "resolve", Path: dir, Err: err}
+		}
+		if int(n) < len(buf) {
+			if final := plainPath(windows.UTF16ToString(buf[:n])); !strings.EqualFold(final, filepath.Clean(dir)) {
+				return fmt.Errorf("%s leads to %s, so Duster will not keep items there", dir, final)
+			}
+			break
+		}
+		buf = make([]uint16, n)
+	}
+	acls, err := persistentACLs(volRoot)
+	if err != nil {
+		return err
+	}
+	if !acls {
+		return nil
+	}
+	sd, err := windows.GetSecurityInfo(h, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION)
+	if err != nil {
+		return fmt.Errorf("owner of %s: %w", dir, err)
+	}
+	owner, _, err := sd.Owner()
+	if err != nil {
+		return fmt.Errorf("owner of %s: %w", dir, err)
+	}
+	if owner == nil {
+		return fmt.Errorf("%s has no owner", dir)
+	}
+	if !strings.EqualFold(owner.String(), sid) {
+		return fmt.Errorf("%s belongs to someone else (%s), so Duster will not keep items there", dir, owner)
+	}
+	return nil
+}
+
+// unpinQuarantineDir closes a pin. Only tests use it: in the product a pin
+// lasts until the process exits.
+func unpinQuarantineDir(dir string) {
+	pinnedMu.Lock()
+	defer pinnedMu.Unlock()
+	if h, ok := pinnedQuarantines[pinKey(dir)]; ok {
+		windows.CloseHandle(h)
+		delete(pinnedQuarantines, pinKey(dir))
+	}
+}
+
 // quarantineRoot returns the quarantine folder on path's volume, creating it
 // when needed. It returns errNoQuarantine for network drives and volumes
 // mounted in a folder, and an error for a root that is a link or that another
-// user owns. The caller then leaves the item in place.
+// user owns. The caller then leaves the item in place. A folder on another
+// drive is pinned (pinQuarantineDir) before it is returned, so it cannot be
+// swapped while this process uses it.
 func quarantineRoot(path string) (string, error) {
 	vr, err := volumeRoot(path)
 	if err != nil {
@@ -212,14 +356,20 @@ func quarantineRoot(path string) (string, error) {
 		return "", err
 	}
 	base := filepath.Join(vr, quarantineDirName)
+	dir := filepath.Join(base, sid)
+	if quarantinePinned(dir) {
+		return dir, nil
+	}
 	if err := ensureRealDir(base); err != nil {
 		return "", err
 	}
 	if p, err := windows.UTF16PtrFromString(base); err == nil {
-		_ = windows.SetFileAttributes(p, windows.FILE_ATTRIBUTE_HIDDEN) // best effort: hiding is cosmetic
+		// Best effort, hiding is cosmetic. Add the bit, keep the others.
+		if attrs, err := windows.GetFileAttributes(p); err == nil && attrs&windows.FILE_ATTRIBUTE_HIDDEN == 0 {
+			_ = windows.SetFileAttributes(p, attrs|windows.FILE_ATTRIBUTE_HIDDEN)
+		}
 	}
 
-	dir := filepath.Join(base, sid)
 	if _, err := os.Lstat(dir); errors.Is(err, os.ErrNotExist) {
 		// ERROR_ALREADY_EXISTS means another Duster won the race; the checks
 		// below decide whether that folder is ours.
@@ -232,6 +382,9 @@ func quarantineRoot(path string) (string, error) {
 	if err := checkOwnQuarantine(dir, vr, sid); err != nil {
 		return "", err
 	}
+	if err := pinQuarantineDir(dir, vr, sid); err != nil {
+		return "", err
+	}
 	return dir, nil
 }
 
@@ -242,7 +395,7 @@ func quarantineRoot(path string) (string, error) {
 func quarantineRoots() []string {
 	var roots []string
 	if d := logging.Dir(); d != "" {
-		if q := filepath.Join(d, "quarantine"); realDir(q) {
+		if q := filepath.Join(d, "quarantine"); realDir(d) && realDir(q) {
 			roots = append(roots, q)
 		}
 	}
@@ -279,12 +432,13 @@ func quarantineRoots() []string {
 // passes it) and without MOVEFILE_COPY_ALLOWED, so an existing target and a
 // cross-volume move both fail and leave from where it was. A link is moved as
 // the link itself. An existing target satisfies errors.Is(err, os.ErrExist).
+// Paths past MAX_PATH work (extendedPath).
 func moveNoReplace(from, to string) error {
-	f, err := windows.UTF16PtrFromString(fs.LongPath(from))
+	f, err := windows.UTF16PtrFromString(extendedPath(fs.LongPath(from)))
 	if err != nil {
 		return &os.LinkError{Op: "move", Old: from, New: to, Err: err}
 	}
-	t, err := windows.UTF16PtrFromString(fs.LongPath(to))
+	t, err := windows.UTF16PtrFromString(extendedPath(fs.LongPath(to)))
 	if err != nil {
 		return &os.LinkError{Op: "move", Old: from, New: to, Err: err}
 	}

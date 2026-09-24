@@ -51,17 +51,17 @@ Windows `$Recycle.Bin\<SID>`, and gomi. None of them overwrites on restore.
 
   ```json
   {"id":"...","command":"purge","created":"<RFC3339>",
-   "items":[{"slot":1,"path":"D:\\proj\\node_modules","size":123,"files":456,
+   "items":[{"slot":1,"path":"D:\\proj\\node_modules","size":123,
              "dir":true,"state":"kept","at":"<RFC3339>"}]}
   ```
 
-  `state` is one of `pending`, `kept`, `restored` or `expired`.
+  `state` is one of `pending`, `kept`, `restored` or `expired`. The manifest records each item's size, not its file count: a caller that already knows the size (every call site does) passes it, and nothing walks the tree again just to count files.
 - **Crash safety.** An item is written `pending` before its move and `kept` after. On load:
   - a `pending` item whose slot exists is treated as `kept`;
   - a `pending` item whose slot is missing is treated as never moved.
 
   `session.json` is written atomically (temp file plus rename, as analyze history does).
-- **Safety.** Before a move, the source passes every existing delete check: `fs.IsValidPath`, `Lstat` with no link following (a link is moved as the link itself), and OneDrive placeholders skipped via `fs.IsOfflineInfo`. A path inside any quarantine root is never quarantined again, and clean categories never walk into one. Every move is logged via `logging.LogDestructiveOperation(<command>, "quarantine", ...)`.
+- **Safety.** Before a move, the source passes every existing delete check: `fs.IsValidPath`, `Lstat` with no link following (a link is moved as the link itself), and OneDrive placeholders skipped via `fs.IsOfflineInfo`. A path inside any quarantine root is never quarantined again, and clean categories never walk into one. Every move is logged via `logging.LogDestructiveOperation(<command>, "quarantine", ...)`, once per action, at the call site that already logs today, not inside `quarantinePath` itself: that keeps one log line per user-visible action instead of one per helper call, matching every other destructive path in `CLAUDE.md`. Restore, expire and empty are logged the same way, from inside `quarantine.go`, with command `restore`.
 
 ## 3. Commands
 
@@ -69,12 +69,14 @@ Windows `$Recycle.Bin\<SID>`, and gomi. None of them overwrites on restore.
 
 | Form | Effect |
 |---|---|
-| `du restore` | Lists sessions from the last 7 days, newest first: number, time, command, item count, size, expiry, and "not connected" when the volume is absent. The footer shows the total held per drive |
+| `du restore` | Lists sessions from the last 7 days, newest first: number, time, command, item count, size and expiry. The footer shows the total held per drive |
 | `du restore <n>` | Restores every kept item in session `n` |
 | `du restore <n> --item <k>` | Restores one item |
 | `--dry-run` | Shows what would come back and what would be skipped |
 | `--json` | Works with every form |
 | `du restore --empty [<n>]` | Deletes kept items now. Asks first; needs `--yes` when not interactive |
+
+A session on a drive that isn't currently attached (an unplugged USB drive) is not listed as "not connected": finding it without reading every removable drive's quarantine on every `du restore` would need a central index that has to be kept in sync with drives that come and go, which is more machinery than the case is worth. The listing shows only sessions on drives Duster can currently reach; plugging the drive back in makes them reappear (§7 covers this in the release checklist).
 
 Restore rules:
 - The item's original path must pass `fs.IsValidPath`. Missing parent folders are created.
