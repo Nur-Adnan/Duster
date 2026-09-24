@@ -127,6 +127,37 @@ func TestRunScheduledCleanAllFailedRetries(t *testing.T) {
 	}
 }
 
+func TestOffOutcome(t *testing.T) {
+	name := "Duster Scheduled Clean (alice)"
+	deleteErr := errors.New("schtasks could not delete")
+	listErr := errors.New("schtasks could not list tasks")
+
+	t.Run("delete succeeds", func(t *testing.T) {
+		alreadyOff, err := offOutcome(nil, nil, nil, name)
+		if alreadyOff || err != nil {
+			t.Errorf("got (%v, %v), want (false, nil)", alreadyOff, err)
+		}
+	})
+	t.Run("delete fails, list succeeds, name absent: really off", func(t *testing.T) {
+		alreadyOff, err := offOutcome(deleteErr, []string{"Duster Scheduled Clean (bob)"}, nil, name)
+		if !alreadyOff || err != nil {
+			t.Errorf("got (%v, %v), want (true, nil)", alreadyOff, err)
+		}
+	})
+	t.Run("delete fails, list succeeds, name present: real failure", func(t *testing.T) {
+		alreadyOff, err := offOutcome(deleteErr, []string{name}, nil, name)
+		if alreadyOff || !errors.Is(err, deleteErr) {
+			t.Errorf("got (%v, %v), want (false, %v)", alreadyOff, err, deleteErr)
+		}
+	})
+	t.Run("delete fails, list fails: real failure", func(t *testing.T) {
+		alreadyOff, err := offOutcome(deleteErr, nil, listErr, name)
+		if alreadyOff || !errors.Is(err, deleteErr) {
+			t.Errorf("got (%v, %v), want (false, %v)", alreadyOff, err, deleteErr)
+		}
+	})
+}
+
 func TestScheduleRecordFile(t *testing.T) {
 	t.Run("damaged file reads as no history", func(t *testing.T) {
 		dir := t.TempDir()
@@ -236,6 +267,22 @@ func TestStatusFromDoc(t *testing.T) {
 		b, _ := json.Marshal(st)
 		if !strings.Contains(string(b), `"low_space_percent":null`) {
 			t.Errorf("json: %s", b)
+		}
+	})
+	t.Run("changed outside Duster", func(t *testing.T) {
+		doc := docFor(t, cfg, duw)
+		doc.Actions.Arguments = "clean --yes"
+		st := statusFromDoc(scheduleStatus{}, doc, now)
+		if st.Every != "" {
+			t.Errorf("Every = %q, want empty", st.Every)
+		}
+		if len(st.Warnings) == 0 || !strings.Contains(st.Warnings[0], "changed outside Duster") {
+			t.Errorf("warnings: %v", st.Warnings)
+		}
+		var rendered bytes.Buffer
+		renderScheduleStatus(&rendered, st)
+		if strings.Contains(rendered.String(), "Cleans . Checks") {
+			t.Errorf("rendered the empty-Every line:\n%s", rendered.String())
 		}
 	})
 }

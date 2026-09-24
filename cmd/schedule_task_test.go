@@ -66,6 +66,24 @@ func TestBuildTaskXML(t *testing.T) {
 	if doc.Settings.Enabled == nil || !*doc.Settings.Enabled {
 		t.Error("Settings.Enabled must round-trip as true")
 	}
+
+	t.Run("today's at already passed rolls to tomorrow", func(t *testing.T) {
+		// With StartWhenAvailable, a StartBoundary already in the past can run
+		// a clean moments after `on`. The trigger must start at the next
+		// occurrence of --at, not today's.
+		now := time.Date(2026, 9, 24, 20, 0, 0, 0, time.Local)
+		b, err := buildTaskXML(cfg, duw, "S-1-5-21-1-2-3-1001", now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		doc, err := parseTaskXML(b)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if doc.Start != "2026-09-25T19:00:00" {
+			t.Errorf("StartBoundary = %s, want 2026-09-25T19:00:00", doc.Start)
+		}
+	})
 }
 
 func TestParseTaskXMLAcceptsWindowsEncodings(t *testing.T) {
