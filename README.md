@@ -60,7 +60,7 @@ du analyze .   # Interactive disk explorer
 
 > `du optimize` also reports the space that only you can reclaim: a previous Windows installation (`Windows.old`) and the hibernation file. Duster measures them and tells you how to remove them, but never touches either.
 
-> `du purge`, the uninstall leftover sweep and the `installer` sweep no longer delete for good: they keep what they remove in a quarantine on the same drive, so no copy is made and a nearly full drive still gets its space back. `du restore` lists what's kept, `du restore <n>` brings a session back, and it never overwrites a file or folder that already exists at the original path, skipping it instead. Kept items are swept away after 7 days, sooner and oldest first if a drive runs low on space. `--permanent` on `purge` deletes for good right away, when you're sure and want the space now.
+> `du purge`, the uninstall leftover sweep and the `installer` sweep no longer delete for good: they keep what they remove in a quarantine on the same drive, so no copy is made. Kept items still use their space until they expire after 7 days, or sooner, oldest first, when their drive drops below 10% free; the summary says how much was kept, not freed. `du restore` lists what's kept, `du restore <n>` brings a session back, and it never overwrites a file or folder that already exists at the original path, skipping it instead. `--permanent` on `purge` deletes for good and frees the space now, when you're sure.
 
 > Most commands support `--json` for scripting. `clean`, `purge`, `installer`, `optimize`, `vdisk`, `uninstall`, `remove`, `restore` and `schedule on` support `--dry-run` for safe previews.
 
