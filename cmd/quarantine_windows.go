@@ -104,7 +104,7 @@ func localQuarantineVolume() string {
 	return vr
 }
 
-// createPrivateDir creates path so that only sid and SYSTEM can open it: the
+// createPrivateDir creates path so that only sid and SYSTEM can list it: the
 // DACL is protected (nothing inherited from the parent) and sid is the owner.
 // The owner is set explicitly because an elevated administrator's objects are
 // otherwise owned by the Administrators group. On a volume without persistent
@@ -158,7 +158,7 @@ func dirOwner(path string) (string, error) {
 // checkOwnQuarantine refuses dir unless it is a plain folder (no link or
 // junction) and, on a volume that keeps ACLs, owned by sid. Without the owner
 // check another user could pre-create a folder under our SID that they can
-// read, and everything kept there would be theirs to see.
+// list and open, and everything kept there would be theirs to see.
 func checkOwnQuarantine(dir, volRoot, sid string) error {
 	if !realDir(dir) {
 		return fmt.Errorf("%s is not a plain folder, so Duster will not keep items there", dir)
