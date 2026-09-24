@@ -83,3 +83,10 @@ func wslDistroEntries() []wslDistro { return nil }
 func fileDiskUsage(string) (int64, bool, bool, bool) { return 0, false, false, false }
 
 func shortPathName(string) string { return "" }
+
+var errScheduleNeedsWindows = errors.New("scheduled cleaning needs Windows")
+
+func registerScheduleTask(string, []byte) error { return errScheduleNeedsWindows }
+func queryScheduleTask(string) ([]byte, bool)   { return nil, false }
+func deleteScheduleTask(string) error           { return errScheduleNeedsWindows }
+func listScheduleTaskNames() ([]string, error)  { return nil, errScheduleNeedsWindows }
