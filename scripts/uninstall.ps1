@@ -5,7 +5,8 @@
 
 .DESCRIPTION
     Removes Duster from the system:
-    - Deletes the du.exe binary
+    - Turns off the scheduled clean, then deletes the du.exe binary
+    - Removes the duw.exe launcher
     - Removes the install directory (if empty after removal)
     - Removes the install directory from user PATH
     - Cleans up registry keys written during installation
@@ -66,10 +67,35 @@ Write-Step "Removing binary..."
 
 $ExePath = Join-Path $InstallDir "du.exe"
 if (Test-Path $ExePath) {
+    # Delete the scheduled clean before the binary is gone: du.exe is what
+    # knows how to find and remove its own Task Scheduler task. Best-effort -
+    # a task left behind only fails to start, so errors here are ignored.
+    $PrevErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & $ExePath schedule off 2>&1 | Out-Null
+    } catch {
+    } finally {
+        $ErrorActionPreference = $PrevErrorActionPreference
+        # Best-effort: an older du.exe without "schedule", or a failed turn-off,
+        # exits non-zero, which must not become this script's exit code.
+        $global:LASTEXITCODE = 0
+    }
+
     Remove-Item $ExePath -Force
     Write-OK "Removed: $ExePath"
 } else {
     Write-Info "Binary not found at $ExePath - already removed or different install dir."
+}
+
+$LauncherPath = Join-Path $InstallDir "duw.exe"
+if (Test-Path -LiteralPath $LauncherPath) {
+    Remove-Item -LiteralPath $LauncherPath -Force -ErrorAction SilentlyContinue
+    if (-not (Test-Path -LiteralPath $LauncherPath)) {
+        Write-OK "Removed: $LauncherPath"
+    } else {
+        Write-Info "Could not remove $LauncherPath (in use by a scheduled clean?). Delete it later."
+    }
 }
 
 # Remove install directory if now empty

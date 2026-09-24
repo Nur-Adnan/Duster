@@ -519,6 +519,7 @@ if (-not $ChecksumVerified) {
 }
 
 # == 6. Extract & Install ==============================================
+$TempLauncher = $null
 if ($DownloadMethod -eq "zip") {
     Write-Step "Extracting release files..."
     try {
@@ -535,6 +536,9 @@ if ($DownloadMethod -eq "zip") {
         Write-Fail "Failed to find 'du.exe' inside extracted archive."
     }
     $DownloadedExePath = $TempExe.FullName
+
+    # duw.exe (scheduled cleans) sits beside du.exe in releases that have it.
+    $TempLauncher = Join-Path $TempExe.DirectoryName "duw.exe"
 }
 
 Write-Step "Installing to $InstallDir..."
@@ -544,6 +548,14 @@ try {
     Copy-Item -Path $DownloadedExePath -Destination $ExePath -Force
 } catch {
     Write-Fail "Could not write to $InstallDir. Try a different -InstallDir or run as Admin."
+}
+
+if ($TempLauncher -and (Test-Path -LiteralPath $TempLauncher)) {
+    try {
+        Copy-Item -LiteralPath $TempLauncher -Destination (Join-Path $InstallDir "duw.exe") -Force
+    } catch {
+        Write-Warn "Could not copy duw.exe (needed for du schedule). Run 'du update --force' later."
+    }
 }
 
 Write-OK "Installed: $ExePath"

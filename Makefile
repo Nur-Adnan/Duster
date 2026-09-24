@@ -17,6 +17,10 @@ LDFLAGS     = -ldflags="-s -w \
 	-X main.BuildDate=$(BUILD_DATE) \
 	-X main.Commit=$(COMMIT)"
 
+# duw.exe is the windowless launcher for scheduled cleans (launcher/duw):
+# -H=windowsgui so Windows never gives it a console.
+LAUNCHER_LDFLAGS = -ldflags="-s -w -H=windowsgui"
+
 # Environment
 export CGO_ENABLED = 0
 
@@ -75,18 +79,24 @@ build: resources
 	@echo "Building Duster $(VERSION) for Windows AMD64..."
 	GOOS=windows GOARCH=amd64 $(GO) build $(GOFLAGS) $(LDFLAGS) -o $(BINARY_NAME) .
 	@echo "✓ Built: $(BINARY_NAME)"
+	GOOS=windows GOARCH=amd64 $(GO) build $(GOFLAGS) $(LAUNCHER_LDFLAGS) -o duw.exe ./launcher/duw
+	@echo "✓ Built: duw.exe"
 
 build-amd64: resources
 	@mkdir -p $(DIST_DIR)
 	@echo "Building Duster $(VERSION) for Windows AMD64..."
 	GOOS=windows GOARCH=amd64 $(GO) build $(GOFLAGS) $(LDFLAGS) -o $(DIST_DIR)/duster-windows-amd64.exe .
 	@echo "✓ Built: $(DIST_DIR)/duster-windows-amd64.exe"
+	GOOS=windows GOARCH=amd64 $(GO) build $(GOFLAGS) $(LAUNCHER_LDFLAGS) -o $(DIST_DIR)/duw-windows-amd64.exe ./launcher/duw
+	@echo "✓ Built: $(DIST_DIR)/duw-windows-amd64.exe"
 
 build-arm64: resources
 	@mkdir -p $(DIST_DIR)
 	@echo "Building Duster $(VERSION) for Windows ARM64..."
 	GOOS=windows GOARCH=arm64 $(GO) build $(GOFLAGS) $(LDFLAGS) -o $(DIST_DIR)/duster-windows-arm64.exe .
 	@echo "✓ Built: $(DIST_DIR)/duster-windows-arm64.exe"
+	GOOS=windows GOARCH=arm64 $(GO) build $(GOFLAGS) $(LAUNCHER_LDFLAGS) -o $(DIST_DIR)/duw-windows-arm64.exe ./launcher/duw
+	@echo "✓ Built: $(DIST_DIR)/duw-windows-arm64.exe"
 
 build-all: build-amd64 build-arm64
 	@echo "✓ All architectures built."
@@ -137,6 +147,8 @@ portable: build-all
 	@mkdir -p $(DIST_DIR)/portable/Duster-$(VERSION)-Portable-arm64
 	@cp $(DIST_DIR)/duster-windows-amd64.exe $(DIST_DIR)/portable/Duster-$(VERSION)-Portable-x64/du.exe
 	@cp $(DIST_DIR)/duster-windows-arm64.exe $(DIST_DIR)/portable/Duster-$(VERSION)-Portable-arm64/du.exe
+	@cp $(DIST_DIR)/duw-windows-amd64.exe $(DIST_DIR)/portable/Duster-$(VERSION)-Portable-x64/duw.exe
+	@cp $(DIST_DIR)/duw-windows-arm64.exe $(DIST_DIR)/portable/Duster-$(VERSION)-Portable-arm64/duw.exe
 	@cp README.md LICENSE SECURITY.md $(DIST_DIR)/portable/Duster-$(VERSION)-Portable-x64/ 2>/dev/null || true
 	@cp README.md LICENSE SECURITY.md $(DIST_DIR)/portable/Duster-$(VERSION)-Portable-arm64/ 2>/dev/null || true
 	@printf '@echo off\ntitle Duster\n"%%~dp0du.exe" --version\ncmd /K\n' > $(DIST_DIR)/portable/Duster-$(VERSION)-Portable-x64/Launch-Duster.bat
@@ -149,6 +161,7 @@ installer: build-amd64
 	@echo "Staging installer artifacts..."
 	@mkdir -p $(DIST_DIR)/installer
 	@cp $(DIST_DIR)/duster-windows-amd64.exe $(DIST_DIR)/installer/
+	@cp $(DIST_DIR)/duw-windows-amd64.exe $(DIST_DIR)/installer/
 	@echo "✓ Installer artifacts staged in $(DIST_DIR)/installer/"
 	@echo "  → Open installer/duster-setup.iss in Inno Setup to compile the .exe installer."
 
@@ -162,6 +175,7 @@ checksums:
 clean:
 	@echo "Cleaning build artifacts..."
 	@rm -f $(BINARY_NAME)
+	@rm -f duw.exe
 	@rm -f resource_windows_*.syso
 	@rm -rf $(DIST_DIR)
 	@$(GO) clean

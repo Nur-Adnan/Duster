@@ -44,6 +44,7 @@ du analyze .   # Interactive disk explorer
 | `du uninstall` | App uninstaller + leftover AppData sweeper |
 | `du installer` | Detects bulky old `.exe`/`.msi` installers in Downloads |
 | `du vdisk` | Shrinks the WSL and Docker virtual disks (`.vhdx`) that grow but never shrink (admin) |
+| `du schedule` | Cleans caches automatically: weekly (or daily/monthly) and early when the system drive runs low; never as administrator |
 | `du optimize` | Flushes DNS, clears the Delivery Optimization cache, optimizes drives (SSD TRIM, admin); reports big reclaimable space; `--deep` cleans the component store (WinSxS) |
 | `du doctor` | System diagnostics (UAC, Defender, filesystem policies) |
 | `du benchmark` | Disk I/O throughput & memory profiling |
@@ -54,9 +55,11 @@ du analyze .   # Interactive disk explorer
 
 > `du vdisk` is for developer machines: a WSL 2 distribution and Docker Desktop each keep a virtual disk that grows as you work and never shrinks when you delete, which routinely costs 20 to 100 GB. It finds those disks, shows what they hold, and compacts them in place. Nothing inside a disk is read, changed or deleted, but compacting stops every running distribution and container first, so it asks before it starts.
 
+> `du schedule` keeps caches tidy without you ever opening Duster: a daily Task Scheduler check, running as you and never as administrator, cleans a safe set (temp files, browser caches, never cookies, history or sessions, thumbnails, error reports, crash dumps, GPU shader caches) on your chosen interval (weekly by default) or early once the system drive runs low on space. `--add npm,gradle,docker` and other developer or app caches opt in, since the next build or launch just downloads them again. The Recycle Bin, Recent files, Spotify's offline downloads and anything needing administrator rights are never scheduled, each refused with its reason. It runs silently through a separate windowless launcher, `duw.exe`, so no console or terminal window ever appears; `du schedule` shows what the last run did, and `du schedule off` turns it off.
+
 > `du optimize` also reports the space that only you can reclaim: a previous Windows installation (`Windows.old`) and the hibernation file. Duster measures them and tells you how to remove them, but never touches either.
 
-> Most commands support `--json` for scripting. `clean`, `purge`, `installer`, `optimize`, `vdisk`, `uninstall` and `remove` support `--dry-run` for safe previews.
+> Most commands support `--json` for scripting. `clean`, `purge`, `installer`, `optimize`, `vdisk`, `uninstall`, `remove` and `schedule on` support `--dry-run` for safe previews.
 
 ---
 

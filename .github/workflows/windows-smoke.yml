@@ -47,6 +47,8 @@ jobs:
           # A real Inno Setup app for the uninstall checks.
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item du.exe dist\duster-windows-amd64.exe
+          go build -ldflags "-H=windowsgui" -o dist\duw-windows-amd64.exe .\launcher\duw
+          if ($LASTEXITCODE) { throw 'go build (duw) failed' }
           & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' /Q installer\duster-setup.iss
           if ($LASTEXITCODE) { throw 'ISCC failed' }
 
@@ -454,6 +456,92 @@ jobs:
           if ($bad.Count) { $script:failures += "operations.log has malformed lines: $($bad -join ' // ')" }
 
           if ($script:failures) { $script:failures | ForEach-Object { Write-Host "FAIL: $_" }; exit 1 }
+          exit 0
+
+      # Scheduled cleaning for real: register, let Task Scheduler start
+      # duw.exe, which runs `du schedule run`, then turn it off; and a
+      # standard (non-admin) user managing their own task.
+      - name: Scheduled clean (register, run, turn off, standard user)
+        timeout-minutes: 10
+        run: |
+          # Windows PowerShell 5.1's $ErrorActionPreference defaults to 'Stop'
+          # (this job's shell), under which redirecting a native command's
+          # stderr (2>$null below) turns an expected non-zero exit into a
+          # terminating error. 'Continue' lets these checks read $LASTEXITCODE
+          # themselves; throw still stops the script.
+          $ErrorActionPreference = 'Continue'
+          $dir = Join-Path $env:RUNNER_TEMP 'sched dir'
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          Copy-Item du.exe "$dir\du.exe"
+          Copy-Item dist\duw-windows-amd64.exe "$dir\duw.exe"
+          $du = "$dir\du.exe"
+          $data = Join-Path $env:LOCALAPPDATA 'Duster'
+          $rec = Join-Path $data 'schedule.json'
+          Remove-Item $rec -ErrorAction SilentlyContinue
+
+          $j = & $du schedule on --dry-run --json | Out-String | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or -not $j.dry_run -or -not $j.would_clean) { throw "dry run: exit=$LASTEXITCODE" }
+          $name = $j.task_name
+          schtasks /Query /TN $name 2>$null | Out-Null
+          if ($LASTEXITCODE -eq 0) { throw '--dry-run registered a task' }
+
+          & $du schedule on --add recycle 2>$null | Out-Null
+          if ($LASTEXITCODE -ne 1) { throw 'recycle was accepted' }
+
+          $j = & $du schedule on --every daily --at 03:00 --add npm --json | Out-String | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or -not $j.enabled -or $j.every -ne 'daily' -or $j.categories -notcontains 'npm') { throw "on: $($j | ConvertTo-Json -Depth 5)" }
+
+          # Prove the scheduled path actually deletes something: earlier steps
+          # have already emptied the caches npm would otherwise clean, so
+          # plant our own file in %TEMP% for the temp category to sweep.
+          $probe = Join-Path $env:TEMP 'duster-schedule-probe'
+          New-Item -ItemType Directory -Force $probe | Out-Null
+          fsutil file createnew "$probe\probe.bin" 1048576 | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "fsutil createnew failed: exit=$LASTEXITCODE" }
+
+          schtasks /Run /TN $name | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "schtasks /Run failed: exit=$LASTEXITCODE" }
+          for ($i = 0; $i -lt 180 -and -not (Test-Path $rec); $i++) { Start-Sleep 1 }
+          Get-Content (Join-Path $data 'schedule.log') -ErrorAction SilentlyContinue | Write-Host
+          if (-not (Test-Path $rec)) { throw 'the task did not record a run' }
+          $j = & $du schedule --json | Out-String | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $j.last_check.result -ne 'cleaned' -or -not $j.last_clean) { throw "after the run: $($j | ConvertTo-Json -Depth 6)" }
+          if (Test-Path $probe) { throw 'the scheduled clean left the probe in %TEMP%' }
+          if ([int64]$j.last_clean.freed -lt 1048576) { throw "the scheduled clean freed only $($j.last_clean.freed) bytes" }
+          $tempCat = $j.last_clean.categories | Where-Object { $_.id -eq 'temp' }
+          if (-not $tempCat -or ($tempCat.status -ne 'cleaned' -and $tempCat.status -ne 'partial')) { throw "temp category: $($tempCat | ConvertTo-Json -Depth 5)" }
+
+          $j = & $du schedule off --json | Out-String | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $j.enabled) { throw 'off' }
+          schtasks /Query /TN $name 2>$null | Out-Null
+          if ($LASTEXITCODE -eq 0) { throw 'off left the task' }
+          & $du schedule off | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'a second off failed' }
+
+          # A standard user turns it on and off for themselves. The account
+          # is always deleted afterwards, even if an assertion throws.
+          $pw = 'Du!' + [guid]::NewGuid().ToString('N').Substring(0, 8) + 'aA1'   # net user prompts (Y/N) above 14 characters
+          net user dsched $pw /add | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'net user /add failed' }
+          try {
+            $cred = New-Object PSCredential('dsched', (ConvertTo-SecureString $pw -AsPlainText -Force))
+            $pub = Join-Path $env:PUBLIC 'dsched'
+            New-Item -ItemType Directory -Force $pub | Out-Null
+            Copy-Item "$dir\du.exe", "$dir\duw.exe" $pub
+            function AsUser($argList) {
+              $p = Start-Process "$pub\du.exe" -Credential $cred -LoadUserProfile -ArgumentList $argList -Wait -PassThru `
+                -WorkingDirectory $pub -RedirectStandardOutput "$pub\out.txt" -RedirectStandardError "$pub\err.txt"
+              [pscustomobject]@{ Exit = $p.ExitCode; Out = (Get-Content "$pub\out.txt" -Raw); Err = (Get-Content "$pub\err.txt" -Raw) }
+            }
+            $r = AsUser @('schedule', 'on', '--json')
+            if ($r.Exit -ne 0) { throw "standard user on: $($r.Out) $($r.Err)" }
+            $r = AsUser @('schedule', '--json')
+            if (-not ($r.Out | ConvertFrom-Json).enabled) { throw "standard user status: $($r.Out) $($r.Err)" }
+            $r = AsUser @('schedule', 'off', '--json')
+            if ($r.Exit -ne 0) { throw "standard user off: $($r.Out) $($r.Err)" }
+          } finally {
+            net user dsched /delete 2>&1 | Out-Null
+          }
           exit 0
 
       - name: Remove (self-uninstall)
