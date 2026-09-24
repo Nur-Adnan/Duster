@@ -34,6 +34,10 @@ const (
 // sweep or empty a developer's real kept items on another drive.
 var otherDriveQuarantines = true
 
+// quarantineMove is moveNoReplace, swappable by tests that need a move to
+// fail in a particular way.
+var quarantineMove = moveNoReplace
+
 var errNoQuarantine = errors.New("this drive has no Duster quarantine (network drive?), so the item was left in place")
 
 type quarantineItem struct {
@@ -162,18 +166,28 @@ func quarantinePath(s *quarantineSession, path string, size int64) error {
 		return err
 	}
 	dest := filepath.Join(slotDir, filepath.Base(path))
-	if err := moveNoReplace(path, dest); err != nil {
-		if _, statErr := os.Lstat(dest); statErr == nil {
+	if err := quarantineMove(path, dest); err != nil {
+		_, statErr := os.Lstat(dest)
+		switch {
+		case statErr == nil:
 			// The move actually landed despite the reported error (seen on
 			// network shares and behind AV filters that lag the metadata
 			// update). Leave the item pending rather than undo it: load
 			// treats a pending item whose slot is filled as kept.
 			s.kept++
 			return nil
+		case errors.Is(statErr, os.ErrNotExist):
+			// Certainly not moved: the item is still in place, so the empty
+			// slot and its record can go.
+			os.Remove(slotDir)
+			cleanup()
+			return fmt.Errorf("could not move %s into Duster's quarantine, so it was left in place: %w", path, err)
+		default:
+			// Cannot tell whether it landed. Never remove a folder the item
+			// may be in: the record stays pending, and load lists it as kept
+			// if its slot turns out to be filled.
+			return fmt.Errorf("could not move %s into Duster's quarantine (%v), and could not check whether it got there (%v); if it is not in place, du restore lists it", path, err, statErr)
 		}
-		os.Remove(slotDir)
-		cleanup()
-		return fmt.Errorf("could not move %s into Duster's quarantine, so it was left in place: %w", path, err)
 	}
 	m.Items[len(m.Items)-1].State = "kept"
 	_ = writeManifest(dir, m) // on failure the item stays pending with its slot filled: load treats that as kept
