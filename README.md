@@ -33,6 +33,10 @@ du analyze .   # Interactive disk explorer
 
 ---
 
+<p align="center">
+  <img src="assets/readme/workflow.svg" width="880" alt="How Duster cleans: Scan (du analyze), Review (--dry-run), Clean (du clean, du purge), Undo (du restore, 7 days, for purge, uninstall and installer).">
+</p>
+
 ## Commands
 
 | Command | What it does |
@@ -68,12 +72,12 @@ du analyze .   # Interactive disk explorer
 
 | Group | Categories |
 |:---|:---|
-| ⚙ System Core | Temp, Windows Update cache, Prefetch *(admin)*, Error reports, Recycle Bin, DNS cache, Delivery Optimization, Memory dumps, Log files, Recent files, Font cache |
-| 🌐 Web Browsers | Chrome, Edge, Firefox, Brave (all profiles), Opera |
-| 🛠 Developer Tools | npm, pnpm, Yarn, Bun, pip, Cargo, Gradle, NuGet, Docker, VS Code, JetBrains |
-| 📦 Applications | Discord, Spotify, Slack, Teams, Steam, Epic, Adobe |
-| 🎮 GPU & Graphics | Shader caches (DirectX, NVIDIA), Explorer thumbnails |
-| 🔍 Crash Data | Crash dumps |
+| <img src="assets/readme/cat-system.svg" width="28" height="28" alt="" align="center"> **System Core** | Temp, Windows Update cache, Prefetch *(admin)*, Error reports, Recycle Bin, DNS cache, Delivery Optimization, Memory dumps, Log files, Recent files, Font cache |
+| <img src="assets/readme/cat-browsers.svg" width="28" height="28" alt="" align="center"> **Web Browsers** | Chrome, Edge, Firefox, Brave (all profiles), Opera |
+| <img src="assets/readme/cat-dev.svg" width="28" height="28" alt="" align="center"> **Developer Tools** | npm, pnpm, Yarn, Bun, pip, Cargo, Gradle, NuGet, Docker, VS Code, JetBrains |
+| <img src="assets/readme/cat-apps.svg" width="28" height="28" alt="" align="center"> **Applications** | Discord, Spotify, Slack, Teams, Steam, Epic, Adobe |
+| <img src="assets/readme/cat-gpu.svg" width="28" height="28" alt="" align="center"> **GPU & Graphics** | Shader caches (DirectX, NVIDIA), Explorer thumbnails |
+| <img src="assets/readme/cat-crash.svg" width="28" height="28" alt="" align="center"> **Crash Data** | Crash dumps |
 
 `du clean --dry-run` shows what each would free. `--whitelist npm,browsers` skips categories.
 

@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="252" viewBox="0 0 880 252" role="img" aria-labelledby="t d">
+  <title id="t">How Duster cleans</title>
+  <desc id="d">Four steps: scan with du analyze, review with --dry-run, clean, and undo with du restore within 7 days (purge, uninstall and installer only; cleaned caches are deleted for good).</desc>
+  <!-- Icons: Lucide (search, list-checks, sparkles, rotate-ccw), ISC license. Palette: landing/app/globals.css -->
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="0%" r="70%">
+      <stop offset="0" stop-color="#2563eb" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#2563eb" stop-opacity="0"/>
+    </radialGradient>
+    <style>
+      .h { font: 600 11px ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace; letter-spacing: 2px; fill: #7a8395; }
+      .s { font: 400 13px "Segoe UI", -apple-system, system-ui, sans-serif; fill: #9ca5b7; }
+      .n { font: 600 16px "Segoe UI", -apple-system, system-ui, sans-serif; fill: #e7eaf0; }
+      .f { font: 400 11px "Segoe UI", -apple-system, system-ui, sans-serif; fill: #7a8395; }
+      .c { font: 400 12px ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace; fill: #7fb0ff; }
+      .tile { fill: #171b23; stroke: #ffffff; stroke-opacity: 0.16; }
+      .i { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+      .pulse { fill: #7fb0ff; animation: travel 3.2s cubic-bezier(.4,0,.2,1) infinite; }
+      .p2 { animation-delay: 0.8s; } .p3 { animation-delay: 1.6s; }
+      @keyframes travel { 0% { transform: translateX(0); opacity: 0; } 15% { opacity: 1; } 55% { transform: translateX(111px); opacity: 1; } 70%, 100% { transform: translateX(111px); opacity: 0; } }
+      @media (prefers-reduced-motion: reduce) { .pulse { animation: none; opacity: 0; } }
+    </style>
+  </defs>
+
+  <rect x="0.5" y="0.5" width="879" height="251" rx="16" fill="#0b0d12" stroke="#ffffff" stroke-opacity="0.09"/>
+  <rect x="0.5" y="0.5" width="879" height="251" rx="16" fill="url(#glow)"/>
+
+  <text class="h" x="32" y="40">HOW DUSTER CLEANS</text>
+  <text class="s" x="848" y="40" text-anchor="end">You see everything before it goes.</text>
+
+  <!-- connectors: tile edges at 162/305, 369/511, 575/718 -->
+  <g stroke="#7fb0ff" stroke-opacity="0.35" stroke-width="2" stroke-dasharray="2 6" stroke-linecap="round">
+    <line x1="176" y1="116" x2="291" y2="116"/>
+    <line x1="383" y1="116" x2="497" y2="116"/>
+    <line x1="589" y1="116" x2="704" y2="116"/>
+  </g>
+  <circle class="pulse" cx="178" cy="116" r="3"/>
+  <circle class="pulse p2" cx="385" cy="116" r="3"/>
+  <circle class="pulse p3" cx="591" cy="116" r="3"/>
+
+  <!-- 1 Scan -->
+  <rect class="tile" x="98.5" y="84.5" width="63" height="63" rx="16"/>
+  <g class="i" stroke="#38bdf8" transform="translate(114 100) scale(1.333)"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></g>
+  <text class="n" x="130" y="182" text-anchor="middle">Scan</text>
+  <text class="c" x="130" y="204" text-anchor="middle">du analyze</text>
+
+  <!-- 2 Review -->
+  <rect class="tile" x="305.5" y="84.5" width="63" height="63" rx="16"/>
+  <g class="i" stroke="#818cf8" transform="translate(321 100) scale(1.333)"><path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/><path d="M13 6h8"/><path d="M13 12h8"/><path d="M13 18h8"/></g>
+  <text class="n" x="337" y="182" text-anchor="middle">Review</text>
+  <text class="c" x="337" y="204" text-anchor="middle">--dry-run</text>
+
+  <!-- 3 Clean -->
+  <rect class="tile" x="511.5" y="84.5" width="63" height="63" rx="16"/>
+  <g class="i" stroke="#2dd4bf" transform="translate(527 100) scale(1.333)"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/></g>
+  <text class="n" x="543" y="182" text-anchor="middle">Clean</text>
+  <text class="c" x="543" y="204" text-anchor="middle">du clean · du purge</text>
+  <text class="f" x="543" y="224" text-anchor="middle">du clean has no undo</text>
+
+  <!-- 4 Undo -->
+  <rect class="tile" x="718.5" y="84.5" width="63" height="63" rx="16"/>
+  <g class="i" stroke="#34d399" transform="translate(734 100) scale(1.333)"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></g>
+  <text class="n" x="750" y="182" text-anchor="middle">Undo</text>
+  <text class="c" x="750" y="204" text-anchor="middle">du restore · 7 days</text>
+  <text class="f" x="750" y="224" text-anchor="middle">purge, uninstall, installer</text>
+</svg>

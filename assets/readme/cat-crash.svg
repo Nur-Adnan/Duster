@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" role="img" aria-label="Crash Data">
+<!-- Icon: Lucide (triangle-alert), ISC license -->
+<rect x="0.5" y="0.5" width="31" height="31" rx="8" fill="#171b23" stroke="#ffffff" stroke-opacity="0.16"/>
+<g transform="translate(7 7) scale(0.75)" fill="none" stroke="#fbbf24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></g>
+</svg>
