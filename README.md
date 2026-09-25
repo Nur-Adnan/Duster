@@ -1,7 +1,7 @@
 <div align="center">
   <h1>Duster</h1>
   <p><strong>Windows-native deep cleaner & system optimization CLI</strong></p>
-  <p>A single-binary, zero-dependency terminal utility that cleans caches, analyzes disk usage, monitors system health, and purges developer artifacts — all from your terminal.</p>
+  <p>A single-binary, zero-dependency terminal utility that cleans caches, analyzes disk usage, monitors system health, and purges developer artifacts, with a 7-day undo for what it removes.</p>
 </div>
 
 <p align="center">
@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <img width="1448" height="1086" alt="ChatGPT Image May 21, 2026, 12_01_51 PM" src="https://github.com/user-attachments/assets/259dfe0e-fdb9-4501-a4d6-880ff26d1ca0" />
+  <img width="1448" height="1086" alt="Duster" src="https://github.com/user-attachments/assets/259dfe0e-fdb9-4501-a4d6-880ff26d1ca0" />
 </p>
 
 ---
@@ -25,6 +25,7 @@
 irm https://raw.githubusercontent.com/Nur-Adnan/Duster/main/scripts/install.ps1 | iex
 
 # Run
+du             # Menu with system overview
 du status      # Live system dashboard
 du clean       # Deep cache cleanup
 du analyze .   # Interactive disk explorer
@@ -32,108 +33,61 @@ du analyze .   # Interactive disk explorer
 
 ---
 
-## Features
+## Commands
 
 | Command | What it does |
 |:---|:---|
-| `du` | Interactive landing screen with system overview |
-| `du clean` | Scans & cleans 34 cache categories (temp, browsers, dev tools, GPU shaders) |
-| `du status` | Real-time CPU (usage, temperature), RAM, disk, network, battery dashboard (1s refresh) |
-| `du analyze [path]` | Drill-down disk usage explorer with delete & open actions; shows what grew since the last scan of the same folder |
-| `du purge` | Finds `node_modules`, `target`, `dist`, `.gradle`, `vendor` and keeps them, restorable for 7 days |
-| `du restore` | Lists and brings back what `purge`, `uninstall` and `installer` kept |
-| `du uninstall` | App uninstaller + leftover AppData sweeper |
-| `du installer` | Detects bulky old `.exe`/`.msi` installers in Downloads |
-| `du vdisk` | Shrinks the WSL and Docker virtual disks (`.vhdx`) that grow but never shrink (admin) |
-| `du schedule` | Cleans caches automatically: weekly (or daily/monthly) and early when the system drive runs low; never as administrator |
-| `du optimize` | Flushes DNS, clears the Delivery Optimization cache, optimizes drives (SSD TRIM, admin); reports big reclaimable space; `--deep` cleans the component store (WinSxS) |
-| `du doctor` | System diagnostics (UAC, Defender, filesystem policies) |
-| `du benchmark` | Disk I/O throughput & memory profiling |
-| `du update` | Self-update with SHA-256 verification |
-| `du remove` | Uninstall Duster and delete all its config/logs |
+| `du` | Interactive menu: overview, drivers, startup apps, network, security |
+| `du clean` | Scans and cleans 34 cache categories ([list](#cleanup-categories)) |
+| `du status` | Live CPU (usage, temperature), RAM, disk, network and battery dashboard |
+| `du analyze [path]` | Disk usage explorer; shows what grew since the last scan of the same folder |
+| `du purge` | Removes `node_modules`, `target`, `dist`, `.gradle`, `vendor` and other build output |
+| `du restore` | Lists and brings back what `purge`, `uninstall` and `installer` removed (7 days) |
+| `du uninstall` | Runs an app's uninstaller, then sweeps its leftovers |
+| `du installer` | Finds old `.exe` / `.msi` installers in Downloads |
+| `du vdisk` | Shrinks WSL and Docker virtual disks (`.vhdx`) that grow but never shrink *(admin)* |
+| `du schedule` | Cleans safe caches automatically (weekly by default, or when the drive runs low), never as admin |
+| `du optimize` | Flushes DNS, clears Delivery Optimization, optimizes drives *(admin)*; `--deep` cleans WinSxS via DISM |
+| `du doctor` | Environment, privilege and terminal diagnostics |
+| `du benchmark` | Scan, delete, memory and JSON engine benchmarks |
+| `du verify` | Self-tests: protected paths, link guards, dry runs, registry safety |
+| `du update` | Self-update with SHA-256 verification and rollback |
+| `du remove` | Uninstalls Duster and deletes its data |
 
-> `du analyze` answers "where did my space go?". Each scan keeps a small snapshot of the folder's largest items, and the next scan of the same folder says what changed: `Change: +6.9 GB since Sep 7 (17 days ago)`. Press `c` for the explanation, for example `Downloads\ubuntu.iso +5.7 GB new` or `Videos\old -900 MB gone`, and Enter to jump straight to the item. It names the most specific folders or files behind the change rather than every parent folder. `--since 7d` compares with an older scan, `--no-history` turns it off, and `--json` includes it as `changes`. Snapshots stay on this PC in `%LOCALAPPDATA%\Duster\history`: they hold the names and sizes of the biggest folders and files, never their contents, and `du remove` deletes them.
+`--json` works on most commands for scripting. Every command that deletes has `--dry-run`, and none deletes without asking unless you pass `--yes`. Details per release: [CHANGELOG.md](CHANGELOG.md).
 
-> `du vdisk` is for developer machines: a WSL 2 distribution and Docker Desktop each keep a virtual disk that grows as you work and never shrinks when you delete, which routinely costs 20 to 100 GB. It finds those disks, shows what they hold, and compacts them in place. Nothing inside a disk is read, changed or deleted, but compacting stops every running distribution and container first, so it asks before it starts.
+**Undo.** `purge`, the uninstall leftover sweep and `installer` move what they remove into a quarantine on the same drive (no copy) for 7 days, or less if the drive drops below 10% free. `du restore <n>` brings a session back and never overwrites. `purge --permanent` deletes for good right away.
 
-> `du schedule` keeps caches tidy without you ever opening Duster: a daily Task Scheduler check, running as you and never as administrator, cleans a safe set (temp files, browser caches, never cookies, history or sessions, thumbnails, error reports, crash dumps, GPU shader caches) on your chosen interval (weekly by default) or early once the system drive runs low on space. `--add npm,gradle,docker` and other developer or app caches opt in, since the next build or launch just downloads them again. The Recycle Bin, Recent files, Spotify's offline downloads and anything needing administrator rights are never scheduled, each refused with its reason. It runs silently through a separate windowless launcher, `duw.exe`, so no console or terminal window ever appears; `du schedule` shows what the last run did, and `du schedule off` turns it off.
+**Scheduled cleaning** runs through `duw.exe`, a windowless launcher next to `du.exe`, so no console window appears. It cleans only caches that rebuild themselves (temp, browser caches but never cookies or history, thumbnails, error reports, crash dumps, shader caches); `--add npm,gradle,...` opts developer and app caches in.
 
-> `du optimize` also reports the space that only you can reclaim: a previous Windows installation (`Windows.old`) and the hibernation file. Duster measures them and tells you how to remove them, but never touches either.
-
-> `du purge`, the uninstall leftover sweep and the `installer` sweep no longer delete for good: they keep what they remove in a quarantine on the same drive, so no copy is made. Kept items still use their space until they expire after 7 days, or sooner, oldest first, when their drive drops below 10% free (the next purge, uninstall, installer sweep or scheduled clean does that and says so; `du restore` itself only removes what is past 7 days); the summary says how much was kept, not freed. `du restore` lists what's kept, `du restore <n>` brings a session back, and it never overwrites a file or folder that already exists at the original path, skipping it instead. `--permanent` on `purge` deletes for good and frees the space now, when you're sure.
-
-> Most commands support `--json` for scripting. `clean`, `purge`, `installer`, `optimize`, `vdisk`, `uninstall`, `remove`, `restore` and `schedule on` support `--dry-run` for safe previews.
+**What Duster reports but never deletes:** `Windows.old` and the hibernation file (`du optimize` shows their size and how to remove them), and the WSL sparse-disk setting (`du vdisk`).
 
 ---
 
 ## Cleanup Categories
 
-Duster cleans **34 categories**. The main groups (run `du clean --dry-run` for the full list):
-
-<details>
-<summary><strong>💻 System & Windows</strong> (9 categories)</summary>
-
-| Category | Target |
+| Group | Categories |
 |:---|:---|
-| Temp Files | `%TEMP%`, `C:\Windows\Temp` |
-| Update Cache | `SoftwareDistribution\Download` |
-| Prefetch | Windows prefetch binaries *(admin)* |
-| Thumbnails | Explorer `thumbcache_*.db` files |
-| Error Reports | Windows Error Reporting dumps |
-| Recycle Bin | Native Recycle Bin cleanup |
-| DNS Cache | Flush local DNS resolver |
-| Delivery Optimization | Peer-to-peer update cache |
-| Crash Dumps | Minidumps and crash logs |
+| ⚙ System Core | Temp, Windows Update cache, Prefetch *(admin)*, Error reports, Recycle Bin, DNS cache, Delivery Optimization, Memory dumps, Log files, Recent files, Font cache |
+| 🌐 Web Browsers | Chrome, Edge, Firefox, Brave (all profiles), Opera |
+| 🛠 Developer Tools | npm, pnpm, Yarn, Bun, pip, Cargo, Gradle, NuGet, Docker, VS Code, JetBrains |
+| 📦 Applications | Discord, Spotify, Slack, Teams, Steam, Epic, Adobe |
+| 🎮 GPU & Graphics | Shader caches (DirectX, NVIDIA), Explorer thumbnails |
+| 🔍 Crash Data | Crash dumps |
 
-</details>
-
-<details>
-<summary><strong>🚀 Developer Tools</strong> (10 categories)</summary>
-
-| Category | Target |
-|:---|:---|
-| npm | Global npm cache |
-| pnpm | Content-addressable store |
-| Yarn | Downloaded package tarballs |
-| Bun | JS runtime cache |
-| pip | Python package metadata |
-| Cargo | Rust crate indexes |
-| Gradle | Java/Kotlin build cache |
-| NuGet | .NET assembly cache |
-| Docker | Desktop build artifacts |
-| VS Code | Extension logs & language server cache |
-
-</details>
-
-<details>
-<summary><strong>🌐 Browsers</strong> (1 multi-profile scanner)</summary>
-
-Clears cache from **Chrome**, **Edge**, **Firefox**, and **Brave** across all user profiles.
-
-</details>
-
-<details>
-<summary><strong>🎮 GPU & Shaders</strong> (1 category)</summary>
-
-Purges DirectX, OpenGL, and NVIDIA compiled shader caches to fix micro-stuttering.
-
-</details>
+`du clean --dry-run` shows what each would free. `--whitelist npm,browsers` skips categories.
 
 ---
 
 ## Installation
 
-### PowerShell (Recommended)
-
-```powershell
-irm https://raw.githubusercontent.com/Nur-Adnan/Duster/main/scripts/install.ps1 | iex
-```
+The PowerShell one-liner in [Quick Start](#quick-start) is the recommended way.
 
 <details>
-<summary>Advanced options</summary>
+<summary>Installer options</summary>
 
 ```powershell
-.\install.ps1 -Version "1.0.2"        # Specific version
+.\install.ps1 -Version "1.3.0"        # Specific version
 .\install.ps1 -InstallDir "C:\Tools"   # Custom directory
 .\install.ps1 -Silent                  # No output (CI/automation)
 .\install.ps1 -Force                   # Reinstall same version
@@ -141,29 +95,17 @@ irm https://raw.githubusercontent.com/Nur-Adnan/Duster/main/scripts/install.ps1 
 
 </details>
 
-### CMD
+**From CMD:**
 
 ```cmd
 powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/Nur-Adnan/Duster/main/scripts/install.ps1 | iex"
 ```
 
-### Scoop / winget
+**Setup exe or portable zip:** download `Duster-Setup-<version>-x64.exe` or `Duster-<version>-Portable-<arch>.zip` from [Releases](https://github.com/Nur-Adnan/Duster/releases/latest). Keep `du.exe` and `duw.exe` in the same folder, on your PATH.
 
-> Not yet published — the Scoop bucket and winget package are planned.
-> Manifests are staged in [scripts/manifests/](scripts/manifests/).
-> Use the PowerShell one-liner above until then.
+**Scoop / winget:** not published yet; manifests are staged in [scripts/manifests/](scripts/manifests/).
 
-### Manual Download
-
-Download from [Releases](https://github.com/Nur-Adnan/Duster/releases/latest), rename to `du.exe`, and add to PATH.
-
-### Verify
-
-```powershell
-du --version
-```
-
-### Uninstall
+**Uninstall:** `du remove`, or
 
 ```powershell
 irm https://raw.githubusercontent.com/Nur-Adnan/Duster/main/scripts/uninstall.ps1 | iex
@@ -171,33 +113,33 @@ irm https://raw.githubusercontent.com/Nur-Adnan/Duster/main/scripts/uninstall.ps
 
 ---
 
-## Keyboard Shortcuts
+## Keys in `du analyze`
 
 | Key | Action |
 |:---|:---|
-| `↑↓` / `jk` | Navigate lists |
-| `Enter` / `→` | Drill into folder |
-| `Esc` / `←` / `⌫` | Go back |
-| `O` | Open in Explorer |
-| `D` | Delete to Recycle Bin (asks first) |
-| `L` | Toggle large files view |
-| `Space` | Toggle selection |
-| `Q` | Quit |
+| `↑↓` / `jk` | Navigate |
+| `Enter` / `→` / `l` | Open folder |
+| `⌫` / `←` / `h` | Back |
+| `c` | What changed since the last scan (Enter jumps to the item) |
+| `o` | Open in Explorer |
+| `d` | Send to Recycle Bin (asks first) |
+| `L` | Largest files view |
+| `q` | Quit |
 
 ---
 
-## Security
+## Safety
 
 | Protection | How |
 |:---|:---|
-| **UAC Elevation** | Prompts for admin only when needed (prefetch, defrag) |
-| **Path Safety** | System folders resolved via Win32 API, not env vars |
-| **Junction Protection** | Detects NTFS reparse points to prevent infinite recursion |
-| **OneDrive Shield** | Skips `FILE_ATTRIBUTE_OFFLINE` files to prevent cloud sync |
-| **Process Isolation** | Subprocesses run in separate process groups for clean exit |
-| **Audit Log** | All deletions logged to `%LOCALAPPDATA%\Duster\operations.log` |
+| **Protected paths** | System folders and `Windows.old` are never deleted; system dirs resolve via Win32, not env vars |
+| **Links** | Never follows symlinks, junctions or reparse points |
+| **OneDrive** | Skips cloud-only files, so a scan never downloads them |
+| **Undo** | User-facing deletes go to the quarantine or Recycle Bin first (`du restore`) |
+| **Admin only when needed** | Asks for elevation only for tasks that need it (Windows caches, defrag, vdisk, DISM); scheduled cleans never elevate |
+| **Audit log** | Every delete is logged to `%LOCALAPPDATA%\Duster\operations.log` (`DU_NO_OPLOG=1` disables) |
 
-> Disable logging: `set DU_NO_OPLOG=1`
+Report a vulnerability: [SECURITY.md](SECURITY.md).
 
 ---
 
@@ -213,8 +155,11 @@ Free code signing provided by [SignPath.io](https://about.signpath.io/), certifi
 git clone https://github.com/Nur-Adnan/Duster.git
 cd Duster
 go build -trimpath -ldflags="-s -w" -o du.exe .
+go build -trimpath -ldflags="-s -w -H=windowsgui" -o duw.exe ./launcher/duw
 go test ./...
 ```
+
+Release builds: `make build`.
 
 ---
 
@@ -222,23 +167,23 @@ go test ./...
 
 ```
 Duster/
-├── cmd/              # CLI commands, Bubble Tea TUIs, Lipgloss styles
+├── main.go           # Entry point (cobra root `du`)
+├── cmd/              # One file per command, Bubble Tea TUIs
+├── launcher/duw/     # duw.exe, windowless launcher for scheduled cleans
 ├── lib/
-│   ├── elevation/    # UAC privilege escalation
-│   ├── fs/           # Safe path resolution & NTFS checks
-│   ├── sysinfo/      # Win32 system queries (gopsutil)
-│   └── uninstall/    # Registry-based app discovery
-├── internal/
-│   ├── config/       # Configuration management
-│   ├── logging/      # Structured operation logging
-│   └── security/     # Security policy enforcement
-├── scripts/          # Install/uninstall scripts (PS1, CMD, batch)
-├── installer/        # Inno Setup configuration
-└── main.go           # Entry point
+│   ├── elevation/    # UAC elevation
+│   ├── fs/           # Path safety checks
+│   ├── sysinfo/      # System stats, CPU temperature
+│   └── uninstall/    # Installed apps from the registry
+├── internal/logging/ # Operation log
+├── e2e/              # Windows end-to-end tests (real du.exe in a console)
+├── installer/        # Inno Setup script
+├── scripts/          # install / uninstall scripts, package manifests
+└── landing/          # Project website (Next.js)
 ```
 
 ---
 
 ## License
 
-MIT License — Copyright © 2026 [Nur Adnan](https://github.com/Nur-Adnan)
+MIT License. Copyright © 2026 [Nur Adnan](https://github.com/Nur-Adnan)
