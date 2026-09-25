@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <img width="1448" height="1086" alt="Duster" src="https://github.com/user-attachments/assets/259dfe0e-fdb9-4501-a4d6-880ff26d1ca0" />
+  <img src="assets/readme/hero.svg" width="880" alt="du clean --dry-run in Windows Terminal: lists what each cache category would free, then SCAN COMPLETE, 11.48 GB reclaimable. Preview only, pass --yes to actually delete.">
 </p>
 
 ---
