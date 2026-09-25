@@ -3,7 +3,7 @@ $ErrorActionPreference = 'Stop'
 # Downloads the release named by the package version and checks its SHA-256.
 # After each release, set $checksum64 to duster-windows-amd64.exe's line in
 # checksums-sha256.txt (docs/release-checklist.md, step 5).
-$checksum64 = '95b358cd0323fc6b1218caf7c122381cece4d7f5ee947d1bde3b88f84893971c'
+$checksum64 = '66852e73cf21a8e84ed0868daf3c5a43967dcbf2fbf8832ace1fe7831f2e1b16'
 $toolsDir   = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $url64      = "https://github.com/Nur-Adnan/Duster/releases/download/v$($env:ChocolateyPackageVersion)/duster-windows-amd64.exe"
 
