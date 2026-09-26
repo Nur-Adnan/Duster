@@ -90,19 +90,16 @@ public sealed class ViewModelTests
     public async Task RestoreListsRestoresAndEmptiesOnlyAfterConfirming()
     {
         var session = new RestoreSession { Id = "s1", Command = "purge", Size = 10, Items = [new() { Number = 1, Path = "/p", Size = 10 }] };
-        var engine = new FakeEngine
-        {
-            Connected = true,
-            Sessions = [session],
-            Restored = new() { Results = [new() { Status = "restored", Size = 6 }, new() { Status = "skipped" }] },
-        };
+        var engine = new FakeEngine { Connected = true };
+        engine.Replies["restore.list"] = new RestoreSessionList { Sessions = [session] };
+        engine.Replies["restore.run"] = new RestoreRunResult { Results = [new() { Status = "restored", Size = 6 }, new() { Status = "skipped" }] };
         var host = new FakeHost { Confirm = false };
         var vm = new RestoreViewModel(engine, host);
         await vm.RefreshCommand.ExecuteAsync(null);
         Assert.AreEqual(session, vm.SelectedSession);
 
         await vm.RestoreSessionCommand.ExecuteAsync(null);
-        Assert.AreEqual(("s1", 0), engine.RestoreCall);
+        Assert.AreEqual("""{"id":"s1","item":0,"dry_run":false}""", engine.Sent("restore.run"));
         StringAssert.StartsWith(vm.Status, "Restored 1 item (6 B); skipped 1");
 
         await vm.EmptySessionCommand.ExecuteAsync(null);
@@ -140,80 +137,5 @@ public sealed class ViewModelTests
         Assert.AreEqual(3, engine.RecycledId);
         StringAssert.Contains(vm.Status, "kept it for 7 days");
         Assert.IsFalse(vm.Status.Contains("freed", StringComparison.OrdinalIgnoreCase));
-    }
-
-    private sealed class FakeHost : IAppHost
-    {
-        public bool Confirm { get; set; } = true;
-        public bool Elevate { get; init; } = true;
-        public string LastMessage { get; private set; } = "";
-
-        public Task<bool> ConfirmAsync(string title, string message, string confirmLabel)
-        {
-            LastMessage = message;
-            return Task.FromResult(Confirm);
-        }
-
-        public bool RestartAsAdministrator() => Elevate;
-
-        public Task<string?> PickFolderAsync() => Task.FromResult<string?>(null);
-    }
-
-    private sealed class FakeEngine : IEngineClient
-    {
-        public bool Connected { get; init; }
-        public CleanResult Scan { get; init; } = new();
-        public CleanResult CleanResult { get; init; } = new();
-        public IReadOnlyList<RestoreSession> Sessions { get; init; } = [];
-        public RestoreRunResult Restored { get; init; } = new();
-        public AnalyzeResult Analysis { get; init; } = new();
-        public Dictionary<long, AnalyzeFolder> Folders { get; } = [];
-        public RecycleResult Recycled { get; init; } = new();
-
-        public IReadOnlyCollection<string>? CleanedIds { get; private set; }
-        public (string, int)? RestoreCall { get; private set; }
-        public IReadOnlyCollection<string>? EmptiedIds { get; private set; }
-        public long? RecycledId { get; private set; }
-
-        public EngineState State => Connected ? EngineState.Connected : EngineState.Stopped;
-        public EngineException? Fault => null;
-        public EngineHello? Hello => null;
-        public event EventHandler? StateChanged { add { } remove { } }
-
-        public Task StartAsync(CancellationToken ct = default) => Task.CompletedTask;
-        public Task<SystemStats> GetStatusAsync(CancellationToken ct = default) => Task.FromResult(new SystemStats());
-        public Task<DoctorSnapshot> RunDoctorAsync(CancellationToken ct = default) => Task.FromResult(new DoctorSnapshot());
-        public Task<CleanResult> ScanCleanAsync(IProgress<CleanProgress>? progress, CancellationToken ct = default) => Task.FromResult(Scan);
-
-        public Task<CleanResult> RunCleanAsync(IReadOnlyCollection<string> ids, IProgress<CleanProgress>? progress, CancellationToken ct = default)
-        {
-            CleanedIds = ids;
-            return Task.FromResult(CleanResult);
-        }
-
-        public Task<IReadOnlyList<RestoreSession>> ListRestoreAsync(CancellationToken ct = default) => Task.FromResult(Sessions);
-
-        public Task<RestoreRunResult> RestoreAsync(string sessionId, int item, CancellationToken ct = default)
-        {
-            RestoreCall = (sessionId, item);
-            return Task.FromResult(Restored);
-        }
-
-        public Task<RestoreEmptyResult> EmptyRestoreAsync(IReadOnlyCollection<string> sessionIds, CancellationToken ct = default)
-        {
-            EmptiedIds = sessionIds;
-            return Task.FromResult(new RestoreEmptyResult { Emptied = sessionIds.Count });
-        }
-
-        public Task<AnalyzeResult> AnalyzeAsync(string path, IProgress<AnalyzeProgress>? progress, CancellationToken ct = default) => Task.FromResult(Analysis);
-        public Task<AnalyzeFolder> AnalyzeChildrenAsync(long id, CancellationToken ct = default) => Task.FromResult(Folders[id]);
-
-        public Task<RecycleResult> RecycleAsync(long id, CancellationToken ct = default)
-        {
-            RecycledId = id;
-            return Task.FromResult(Recycled);
-        }
-
-        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }

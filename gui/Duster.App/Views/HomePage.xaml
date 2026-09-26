@@ -9,7 +9,7 @@
     <ScrollViewer>
         <StackPanel MaxWidth="960" Padding="{StaticResource PagePadding}" HorizontalAlignment="Stretch">
             <TextBlock Style="{StaticResource PageTitleStyle}" Text="Home" />
-            <TextBlock Style="{StaticResource SecondaryTextStyle}" Text="Free up disk space, bring back what Duster set aside, and see where space goes." />
+            <TextBlock Style="{StaticResource SecondaryTextStyle}" Text="This PC at a glance. Duster loads it when you open Home; turn on Live to follow it." />
 
             <Grid Margin="0,16,0,8" ColumnSpacing="8">
                 <Grid.ColumnDefinitions>
@@ -17,8 +17,18 @@
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <TextBlock VerticalAlignment="Center" Style="{StaticResource BodyStrongTextBlockStyle}" Text="This PC" />
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                <ToggleSwitch
+                    MinWidth="0"
+                    IsOn="{x:Bind ViewModel.IsLive, Mode=TwoWay}"
+                    OffContent="Live"
+                    OnContent="Live"
+                    AutomationProperties.AutomationId="HomeLive"
+                    AutomationProperties.Name="Live refresh every 2 seconds" />
+                <Button Command="{x:Bind ViewModel.CopyReportCommand}" ToolTipService.ToolTip="Copy report" AutomationProperties.Name="Copy report" AutomationProperties.AutomationId="HomeCopy">
+                    <FontIcon FontSize="14" Glyph="&#xE8C8;" />
+                </Button>
                 <Button
-                    Grid.Column="1"
                     Command="{x:Bind ViewModel.RefreshCommand}"
                     IsEnabled="{x:Bind ViewModel.IsConnected, Mode=OneWay}"
                     ToolTipService.ToolTip="Refresh"
@@ -26,6 +36,7 @@
                     AutomationProperties.AutomationId="HomeRefresh">
                     <FontIcon FontSize="14" Glyph="&#xE72C;" />
                 </Button>
+                </StackPanel>
             </Grid>
             <Border Style="{StaticResource SectionPanelStyle}">
                 <StackPanel Spacing="12">
@@ -76,6 +87,55 @@
                                         Value="{x:Bind UsedPercent}"
                                         AutomationProperties.Name="{x:Bind Summary}" />
                                     <TextBlock Grid.Column="2" Style="{StaticResource SecondaryTextStyle}" Text="{x:Bind Summary}" />
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <ItemsControl ItemsSource="{x:Bind ViewModel.Details}" AutomationProperties.Name="System details">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:StatRow">
+                                <Grid Padding="0,2" ColumnSpacing="24">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="140" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Style="{StaticResource SecondaryTextStyle}" Text="{x:Bind Label}" />
+                                    <TextBlock Grid.Column="1" Text="{x:Bind Value}" TextWrapping="Wrap" />
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+
+            <Grid Margin="0,16,0,8">
+                <TextBlock VerticalAlignment="Center" Style="{StaticResource BodyStrongTextBlockStyle}" Text="Top processes" />
+                <Button
+                    HorizontalAlignment="Right"
+                    Command="{x:Bind ViewModel.LoadProcessesCommand}"
+                    Content="Sample now"
+                    IsEnabled="{x:Bind ViewModel.IsConnected, Mode=OneWay}"
+                    AutomationProperties.AutomationId="HomeProcesses" />
+            </Grid>
+            <Border Style="{StaticResource SectionPanelStyle}">
+                <StackPanel Spacing="8">
+                    <TextBlock Style="{StaticResource SecondaryTextStyle}" Text="{x:Bind ViewModel.ProcessesStatus, Mode=OneWay}" Visibility="{x:Bind local:Ui.VisibleIfText(ViewModel.ProcessesStatus), Mode=OneWay}" AutomationProperties.LiveSetting="Polite" />
+                    <TextBlock Style="{StaticResource SecondaryTextStyle}" Text="The busiest processes over one second. Sampled only when you ask." />
+                    <ItemsControl ItemsSource="{x:Bind ViewModel.Processes}" AutomationProperties.Name="Top processes">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:ProcessRow">
+                                <Grid Padding="0,2" ColumnSpacing="16">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="80" />
+                                        <ColumnDefinition Width="80" />
+                                        <ColumnDefinition Width="80" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{x:Bind Name}" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Grid.Column="1" Style="{StaticResource SecondaryTextStyle}" Text="{x:Bind Pid}" />
+                                    <TextBlock Grid.Column="2" HorizontalAlignment="Right" Text="{x:Bind Cpu}" />
+                                    <TextBlock Grid.Column="3" HorizontalAlignment="Right" Text="{x:Bind Memory}" />
                                 </Grid>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>

@@ -86,22 +86,18 @@ public sealed class EngineClient(string appDirectory, string fileName, Action<st
         }
     }
 
-    public async Task<IReadOnlyList<RestoreSession>> ListRestoreAsync(CancellationToken ct = default) =>
-        Read(await Channel.RequestAsync("restore.list", null, null, ct).ConfigureAwait(false), EngineJson.Default.RestoreSessionList).Sessions;
-
-    public async Task<RestoreRunResult> RestoreAsync(string sessionId, int item, CancellationToken ct = default) =>
-        Read(await Channel.RequestAsync("restore.run", w =>
-        {
-            w.WriteString("id", sessionId);
-            w.WriteNumber("item", item);
-        }, null, ct).ConfigureAwait(false), EngineJson.Default.RestoreRunResult);
-
     public async Task<RestoreEmptyResult> EmptyRestoreAsync(IReadOnlyCollection<string> sessionIds, CancellationToken ct = default) =>
         Read(await Channel.RequestAsync("restore.empty", w => WriteStrings(w, "ids", sessionIds), null, ct).ConfigureAwait(false),
             EngineJson.Default.RestoreEmptyResult);
 
-    public async Task<AnalyzeResult> AnalyzeAsync(string path, IProgress<AnalyzeProgress>? progress, CancellationToken ct = default) =>
-        Read(await Channel.RequestAsync("analyze.scan", w => w.WriteString("path", path),
+    public async Task<AnalyzeResult> AnalyzeAsync(
+        string path, string since, bool noHistory, IProgress<AnalyzeProgress>? progress, CancellationToken ct = default) =>
+        Read(await Channel.RequestAsync("analyze.scan", w =>
+            {
+                w.WriteString("path", path);
+                w.WriteString("since", since);
+                w.WriteBoolean("no_history", noHistory);
+            },
             progress is null ? null : data => progress.Report(Read(data, EngineJson.Default.AnalyzeProgress)), ct).ConfigureAwait(false),
             EngineJson.Default.AnalyzeResult);
 
@@ -112,6 +108,11 @@ public sealed class EngineClient(string appDirectory, string fileName, Action<st
     public async Task<RecycleResult> RecycleAsync(long id, CancellationToken ct = default) =>
         Read(await Channel.RequestAsync("analyze.recycle", w => w.WriteNumber("id", id), null, ct).ConfigureAwait(false),
             EngineJson.Default.RecycleResult);
+
+    public async Task<T> CallAsync<T>(EngineCall<T> call, IProgress<ItemProgress>? progress = null, CancellationToken ct = default) =>
+        Read(await Channel.RequestAsync(call.Method, call.Params,
+            progress is null ? null : data => progress.Report(Read(data, EngineJson.Default.ItemProgress)), ct).ConfigureAwait(false),
+            call.Result);
 
     private static void WriteStrings(Utf8JsonWriter w, string name, IEnumerable<string> values)
     {

@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="Duster.App.Views.SettingsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:Duster.App">
+
+    <ScrollViewer>
+        <StackPanel MaxWidth="960" Padding="{StaticResource PagePadding}" HorizontalAlignment="Stretch" Spacing="12">
+            <StackPanel>
+                <TextBlock Style="{StaticResource PageTitleStyle}" Text="Settings" />
+                <TextBlock Style="{StaticResource SecondaryTextStyle}" Text="Duster follows your Windows theme and keeps no settings file; scheduled cleaning has its own page." />
+            </StackPanel>
+
+            <TextBlock Style="{StaticResource SectionTitleStyle}" Text="About" />
+            <Border Style="{StaticResource SectionPanelStyle}">
+                <Grid ColumnSpacing="24" RowSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <TextBlock Style="{StaticResource SecondaryTextStyle}" Text="Duster" />
+                    <TextBlock Grid.Column="1" IsTextSelectionEnabled="True" Text="{x:Bind ViewModel.AppVersion}" />
+                    <TextBlock Grid.Row="1" Style="{StaticResource SecondaryTextStyle}" Text="Engine (du.exe)" />
+                    <TextBlock Grid.Row="1" Grid.Column="1" IsTextSelectionEnabled="True" Text="{x:Bind ViewModel.EngineVersion, Mode=OneWay}" />
+                    <TextBlock Grid.Row="2" Style="{StaticResource SecondaryTextStyle}" Text="Installed in" />
+                    <TextBlock Grid.Row="2" Grid.Column="1" IsTextSelectionEnabled="True" Text="{x:Bind ViewModel.InstallFolder, Mode=OneWay}" TextWrapping="Wrap" />
+                    <TextBlock Grid.Row="3" Style="{StaticResource SecondaryTextStyle}" Text="Data and logs" />
+                    <TextBlock Grid.Row="3" Grid.Column="1" IsTextSelectionEnabled="True" Text="{x:Bind ViewModel.DataFolder, Mode=OneWay}" TextWrapping="Wrap" />
+                </Grid>
+            </Border>
+
+            <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Updates" />
+            <Border Style="{StaticResource SectionPanelStyle}">
+                <StackPanel Spacing="12">
+                    <TextBlock Text="{x:Bind ViewModel.UpdateText, Mode=OneWay}" TextWrapping="Wrap" AutomationProperties.AutomationId="SettingsUpdateText" AutomationProperties.LiveSetting="Polite" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button Command="{x:Bind ViewModel.CheckCommand}" Content="Check for updates" AutomationProperties.AutomationId="SettingsCheck" />
+                        <Button Command="{x:Bind ViewModel.InstallUpdateCommand}" Content="Install update…" Style="{StaticResource AccentButtonStyle}" AutomationProperties.AutomationId="SettingsInstall" />
+                        <Button Command="{x:Bind ViewModel.RestartCommand}" Content="Restart Duster" Visibility="{x:Bind local:Ui.Visible(ViewModel.RestartNeeded), Mode=OneWay}" AutomationProperties.AutomationId="SettingsRestart" />
+                    </StackPanel>
+                    <HyperlinkButton Command="{x:Bind ViewModel.ReinstallCommand}" Content="Reinstall this version (repairs a missing file)" AutomationProperties.AutomationId="SettingsReinstall" />
+                </StackPanel>
+            </Border>
+
+            <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Remove Duster" />
+            <Border Style="{StaticResource SectionPanelStyle}">
+                <StackPanel Spacing="12">
+                    <TextBlock Style="{StaticResource SecondaryTextStyle}" Text="{x:Bind ViewModel.RemoveText, Mode=OneWay}" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button Command="{x:Bind ViewModel.OpenAppsSettingsCommand}" Content="Open Installed apps" Visibility="{x:Bind local:Ui.Visible(ViewModel.SetupInstalled), Mode=OneWay}" AutomationProperties.AutomationId="SettingsOpenApps" />
+                        <Button Command="{x:Bind ViewModel.RemoveCommand}" Content="Remove Duster…" AutomationProperties.AutomationId="SettingsRemove" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <ProgressBar IsIndeterminate="True" Visibility="{x:Bind local:Ui.Visible(ViewModel.IsBusy), Mode=OneWay}" AutomationProperties.Name="Working" />
+            <TextBlock Style="{StaticResource SecondaryTextStyle}" Text="{x:Bind ViewModel.Status, Mode=OneWay}" AutomationProperties.AutomationId="SettingsStatus" AutomationProperties.LiveSetting="Polite" />
+        </StackPanel>
+    </ScrollViewer>
+</Page>

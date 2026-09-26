@@ -61,23 +61,24 @@ public interface IEngineClient : IAsyncDisposable
     /// </summary>
     Task<CleanResult> RunCleanAsync(IReadOnlyCollection<string> ids, IProgress<CleanProgress>? progress, CancellationToken ct = default);
 
-    /// <summary>Quarantine sessions Duster kept (purge, uninstall leftovers, installers, analyze).</summary>
-    Task<IReadOnlyList<RestoreSession>> ListRestoreAsync(CancellationToken ct = default);
-
-    /// <summary>Puts a listed session back (<paramref name="item"/> 0 = all). Never overwrites.</summary>
-    Task<RestoreRunResult> RestoreAsync(string sessionId, int item, CancellationToken ct = default);
-
     /// <summary>Deletes listed sessions for good.</summary>
     Task<RestoreEmptyResult> EmptyRestoreAsync(IReadOnlyCollection<string> sessionIds, CancellationToken ct = default);
 
-    /// <summary>Read-only size scan of a folder (also records history for "changes since").</summary>
-    Task<AnalyzeResult> AnalyzeAsync(string path, IProgress<AnalyzeProgress>? progress, CancellationToken ct = default);
+    /// <summary>
+    /// Read-only size scan of a folder. History as <c>du analyze</c>: compared with the previous
+    /// scan, or with one at least <paramref name="since"/> old (<c>--since</c>); <paramref name="noHistory"/>
+    /// neither compares nor saves (<c>--no-history</c>).
+    /// </summary>
+    Task<AnalyzeResult> AnalyzeAsync(string path, string since, bool noHistory, IProgress<AnalyzeProgress>? progress, CancellationToken ct = default);
 
     /// <summary>A folder from the latest scan, by its item ID.</summary>
     Task<AnalyzeFolder> AnalyzeChildrenAsync(long id, CancellationToken ct = default);
 
     /// <summary>Sends a scanned item to the Recycle Bin (or quarantine when the bin refuses).</summary>
     Task<RecycleResult> RecycleAsync(long id, CancellationToken ct = default);
+
+    /// <summary>Any other engine method (<see cref="Calls"/>). Progress events arrive as <see cref="ItemProgress"/>.</summary>
+    Task<T> CallAsync<T>(EngineCall<T> call, IProgress<ItemProgress>? progress = null, CancellationToken ct = default);
 }
 
 /// <summary>What ViewModels need from the window: dialogs, elevation, pickers.</summary>
@@ -91,4 +92,16 @@ public interface IAppHost
 
     /// <summary>A folder the user picked, or null.</summary>
     Task<string?> PickFolderAsync();
+
+    /// <summary>Puts text on the clipboard (Copy report).</summary>
+    void CopyText(string text);
+
+    /// <summary>Opens Windows Settings > Apps > Installed apps.</summary>
+    void OpenAppsSettings();
+
+    /// <summary>Closes Duster (after Remove Duster).</summary>
+    void Exit();
+
+    /// <summary>Starts Duster.exe again from its own path and closes this instance (after an update).</summary>
+    void Restart();
 }

@@ -15,4 +15,12 @@ public static class Format
         }
         return unit == 0 ? $"{bytes:0} B" : $"{bytes:0.#} {Units[unit]}";
     }
+
+    public static string Plural(int n, string one, string many) => $"{n:N0} {(n == 1 ? one : many)}";
+
+    public static string Rate(double bytesPerSecond) => Bytes(bytesPerSecond) + "/s";
+
+    /// <summary>"3 d 4 h", "5 h 12 min", "7 min".</summary>
+    public static string Duration(TimeSpan t) =>
+        t.TotalDays >= 1 ? $"{(int)t.TotalDays} d {t.Hours} h" : t.TotalHours >= 1 ? $"{(int)t.TotalHours} h {t.Minutes} min" : $"{Math.Max(0, t.Minutes)} min";
 }
