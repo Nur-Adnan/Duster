@@ -1,0 +1,8 @@
+<Solution>
+  <Project Path="Duster.App/Duster.App.csproj">
+    <Platform Project="x64" />
+  </Project>
+  <Project Path="Duster.Core/Duster.Core.csproj" />
+  <Project Path="Duster.Infrastructure/Duster.Infrastructure.csproj" />
+  <Project Path="Duster.Tests/Duster.Tests.csproj" />
+</Solution>

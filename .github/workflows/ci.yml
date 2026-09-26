@@ -206,6 +206,63 @@ jobs:
           if (Test-Path "$env:ChocolateyInstall\bin\du.exe") { throw 'choco uninstall left the du shim' }
 
   # ── Step 4: Build Verification ─────────────────────────────────────────
+  # ── Windows GUI (gui/, openspec/changes/add-windows-gui) ───────────────
+  # WinUI 3 compiles only on Windows; the protocol, lifecycle and ViewModel
+  # tests are plain .NET and also run on Linux against a Linux-built engine.
+  gui:
+    name: GUI build (${{ matrix.platform }})
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        platform: [x64, ARM64]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build GUI (XAML compile, warnings as errors)
+        run: dotnet build gui/Duster.App -c Release -p:Platform=${{ matrix.platform }}
+
+  gui-tests:
+    name: GUI tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build engine
+        shell: bash
+        env:
+          CGO_ENABLED: 0
+        run: go build -o "$RUNNER_TEMP/engine/du$([ "$RUNNER_OS" = Windows ] && echo .exe)" .
+
+      - name: Test (real engine)
+        shell: bash
+        env:
+          DU_NO_OPLOG: "1"
+        run: |
+          export DUSTER_ENGINE="$RUNNER_TEMP/engine/du$([ "$RUNNER_OS" = Windows ] && echo .exe)"
+          dotnet test --project gui/Duster.Tests
+
   build-verification:
     name: Compiler & Cross-Build Verification
     runs-on: ubuntu-latest
