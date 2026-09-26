@@ -38,10 +38,13 @@ public sealed class EngineClientTests
     public void OmittedFieldsKeepTheirDefaults()
     {
         // Go omits empty fields (omitempty); a missing string must read as "", never null.
+        var clean = JsonSerializer.Deserialize("""{"categories":[{"id":"temp","bytes":5}],"bytes":5}""", EngineJson.Default.CleanResult)!;
+        Assert.AreEqual("", clean.Categories[0].Error, "CleanCategory.Error: the clean page reads its Length");
+        Assert.AreEqual("", clean.Categories[0].Description);
+        var restored = JsonSerializer.Deserialize("""{"results":[{"path":"/p","status":"restored"}]}""", EngineJson.Default.RestoreRunResult)!;
+        Assert.AreEqual("", restored.Results[0].Reason);
         var r = JsonSerializer.Deserialize("""{"freed":1}""", EngineJson.Default.PurgeResult)!;
         Assert.AreEqual("", r.Notice, "PurgeResult.Notice");
-        var c = JsonSerializer.Deserialize("""{"id":"temp"}""", EngineJson.Default.CleanResult.Options.GetTypeInfo(typeof(CleanCategory)));
-        Assert.AreEqual("", ((CleanCategory)c!).Error, "CleanCategory.Error");
     }
 
     [TestMethod]
