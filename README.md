@@ -110,15 +110,25 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubus
 
 ### Desktop app (GUI)
 
-`Duster.exe` is a native Windows app (WinUI 3) for Windows 10 1809 or later and Windows 11, x64 or ARM64. It ships in every install method from v1.4.0, beside `du.exe`, and uses `du.exe` as its engine, so both must stay in the same folder.
+`Duster.exe` is a native Windows app (WinUI 3) for Windows 10 1809 or later and Windows 11, x64 or ARM64. It ships from v1.4.0 inside every install method below, beside `du.exe`, and uses `du.exe` as its engine, so keep both in the same folder. There is no separate `Duster.exe` download on the Releases page: it comes inside the setup exe and the portable zip.
 
-| How you installed | How to open the app |
-|---|---|
-| PowerShell one-liner | Run `Duster` in a terminal, or open `%LOCALAPPDATA%\Duster\Duster.exe` |
-| Setup exe | Start menu > **Duster** (the CLI is **Duster Command Line**); the setup can open it for you when it finishes |
-| Portable zip | Double-click `Duster.exe` in the extracted folder |
+**1. Install it (pick one):**
 
-Already on an older version? `du update` adds `Duster.exe`.
+| Method | What to do | Where `Duster.exe` ends up |
+|---|---|---|
+| PowerShell one-liner | Run the command from [Quick Start](#quick-start) | `%LOCALAPPDATA%\Duster\Duster.exe` (or `C:\Program Files\Duster` if Windows blocks apps in AppData; the installer tells you) |
+| Setup exe (x64) | From [Releases](https://github.com/Nur-Adnan/Duster/releases/latest), download `Duster-Setup-<version>-x64.exe` and run it | `C:\Program Files\Duster\Duster.exe`, or `%LOCALAPPDATA%\Programs\Duster\Duster.exe` if you install for yourself only |
+| Portable zip (x64 or ARM64) | From [Releases](https://github.com/Nur-Adnan/Duster/releases/latest), download `Duster-<version>-Portable-x64.zip` (or `-arm64.zip`), right-click > **Extract All** | `Duster-<version>-Portable-<arch>\Duster.exe` in the folder you extracted to |
+
+Not sure which zip? Settings > System > About > **System type**: "x64-based processor" means x64, "ARM-based processor" means ARM64.
+
+**2. Open it:**
+
+- **Start menu:** search for **Duster** (setup installs; the CLI shortcut is **Duster Command Line**). The setup can also add a desktop icon.
+- **Terminal:** run `Duster` (the one-liner and the setup put its folder on your PATH; open a new terminal after installing).
+- **File Explorer:** paste the folder from the table above into the address bar and double-click `Duster.exe`.
+
+**Can't find it?** In PowerShell, `Get-Command Duster.exe` prints its full path. If it prints nothing, run `du update` (it adds `Duster.exe` to installs from before v1.4.0), or reinstall.
 
 Pages: **Home** (system overview), **Clean**, **Restore** and **Analyze**. Everything else is still in the CLI for now. The app runs without administrator rights; for categories that need them (Prefetch), use **Restart as administrator** on the Clean page. Every delete asks first, and Restore brings back what Duster kept for 7 days. Windows may show a SmartScreen prompt the first time, because the binaries are not code-signed yet (see [Code signing policy](#code-signing-policy)).
 
