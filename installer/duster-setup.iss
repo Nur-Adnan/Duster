@@ -17,7 +17,7 @@
 
 #define MyAppName "Duster"
 #ifndef MyAppVersion
-  #define MyAppVersion "1.3.0"
+  #define MyAppVersion "1.4.0"
 #endif
 #define MyAppPublisher "Nur Adnan"
 #define MyAppURL "https://github.com/Nur-Adnan/Duster"
