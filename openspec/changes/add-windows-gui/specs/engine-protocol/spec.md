@@ -87,3 +87,37 @@ State-changing methods SHALL accept only targets the engine itself returned from
 #### Scenario: Cheap poll
 - **WHEN** the client calls `status.get` without `top_processes`
 - **THEN** the reply omits the process list and returns without the one-second sample
+
+### Requirement: Restore methods
+`restore.list` SHALL return the kept quarantine sessions in the same shape as `du restore --json`. `restore.run` SHALL take a session ID from the latest `restore.list` and an optional 1-based item number (0 = whole session), SHALL never overwrite an existing file or folder, and SHALL report each item as restored, skipped, or failed. `restore.empty` SHALL delete the named listed sessions for good. A session that is no longer kept when the request arrives SHALL be refused, never guessed at.
+
+#### Scenario: Something newer is at the original location
+- **WHEN** the client restores a session whose original path now exists
+- **THEN** that item is reported skipped and stays kept
+
+#### Scenario: Session not from the latest list
+- **WHEN** `restore.run` names a session ID the latest `restore.list` did not return
+- **THEN** the engine replies `bad_request` and moves nothing
+
+#### Scenario: Session gone since the list
+- **WHEN** a listed session was restored or emptied elsewhere before `restore.run` arrives
+- **THEN** the request fails and nothing is moved
+
+### Requirement: Analyze methods
+`analyze.scan` SHALL take an absolute folder path, SHALL only read, SHALL stream progress at most every 100 ms, SHALL stop mid-walk when canceled, and SHALL return the folder's largest entries (at most 500, with a count of the rest), its largest files, and what changed since the previous scan of that folder (null on the first). Items SHALL carry IDs; `analyze.children` SHALL list a scanned folder by ID; `analyze.recycle` SHALL send one scanned item (never the scanned folder itself) to the Recycle Bin through the CLI's safety checks, falling back to Duster's quarantine when the bin refuses it and reporting that it was kept, not freed.
+
+#### Scenario: Relative path
+- **WHEN** `analyze.scan` gets a relative path
+- **THEN** the engine replies `bad_request`
+
+#### Scenario: Recycle bin refuses the item
+- **WHEN** the Recycle Bin cannot take a recycled item
+- **THEN** the item is kept in the quarantine, the reply says `kept: true`, and later listings no longer include it
+
+#### Scenario: Recycling the scanned folder
+- **WHEN** `analyze.recycle` names the scanned folder itself
+- **THEN** the engine replies `bad_request` and nothing moves
+
+#### Scenario: Second scan
+- **WHEN** the same folder is scanned again after something under it was removed
+- **THEN** the reply's changes report the shrink

@@ -10,4 +10,11 @@ namespace Duster.Infrastructure;
 [JsonSerializable(typeof(DoctorSnapshot))]
 [JsonSerializable(typeof(CleanResult))]
 [JsonSerializable(typeof(CleanProgress))]
+[JsonSerializable(typeof(RestoreSessionList))]
+[JsonSerializable(typeof(RestoreRunResult))]
+[JsonSerializable(typeof(RestoreEmptyResult))]
+[JsonSerializable(typeof(AnalyzeResult))]
+[JsonSerializable(typeof(AnalyzeFolder))]
+[JsonSerializable(typeof(AnalyzeProgress))]
+[JsonSerializable(typeof(RecycleResult))]
 internal sealed partial class EngineJson : JsonSerializerContext;

@@ -117,6 +117,51 @@ public sealed class EngineClientTests
         Assert.AreEqual(EngineErrorKind.Exited, ex.Kind);
     }
 
+    [TestMethod]
+    public async Task RealEngineAnalyzeRecycleAndRestoreRoundTrip()
+    {
+        // The engine inherits these: its quarantine, history and log go to a temp profile.
+        var profile = Directory.CreateTempSubdirectory().FullName;
+        var saved = (Environment.GetEnvironmentVariable("LOCALAPPDATA"), Environment.GetEnvironmentVariable("DU_NO_OPLOG"));
+        Environment.SetEnvironmentVariable("LOCALAPPDATA", profile);
+        Environment.SetEnvironmentVariable("DU_NO_OPLOG", "1");
+        try
+        {
+            await using var client = RealEngine();
+            await client.StartAsync(TestContext.CancellationToken);
+            var root = Directory.CreateTempSubdirectory().FullName;
+            Directory.CreateDirectory(Path.Combine(root, "sub"));
+            var victim = Path.Combine(root, "sub", "big.bin");
+            File.WriteAllBytes(victim, new byte[4096]);
+            File.WriteAllBytes(Path.Combine(root, "small.bin"), new byte[16]);
+
+            var scan = await client.AnalyzeAsync(root, null, TestContext.CancellationToken);
+            Assert.AreEqual(4112, scan.Root.Size);
+            Assert.IsNull(scan.Changes, "first scan has nothing to compare with");
+            var sub = await client.AnalyzeChildrenAsync(scan.Root.Entries.Single(e => e.IsDir).Id, TestContext.CancellationToken);
+            var file = sub.Entries.Single();
+
+            var recycled = await client.RecycleAsync(file.Id, TestContext.CancellationToken);
+            Assert.AreEqual(4096, recycled.Bytes);
+            Assert.IsFalse(File.Exists(victim));
+            if (!recycled.Kept)
+            {
+                Assert.Inconclusive("the Recycle Bin took the file, so there is no quarantine session to restore");
+            }
+
+            var session = (await client.ListRestoreAsync(TestContext.CancellationToken)).Single();
+            Assert.AreEqual("analyze", session.Command);
+            var restored = await client.RestoreAsync(session.Id, 0, TestContext.CancellationToken);
+            Assert.AreEqual("restored", restored.Results.Single().Status);
+            Assert.IsTrue(File.Exists(victim));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LOCALAPPDATA", saved.Item1);
+            Environment.SetEnvironmentVariable("DU_NO_OPLOG", saved.Item2);
+        }
+    }
+
     /// <summary>The real `du engine`: set DUSTER_ENGINE to a built du binary (du.exe on Windows).</summary>
     private static EngineClient RealEngine()
     {

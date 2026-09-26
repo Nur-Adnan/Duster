@@ -4,7 +4,7 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:local="using:Duster.App"
-    xmlns:vm="using:Duster.App.ViewModels">
+    xmlns:vm="using:Duster.Core.ViewModels">
 
     <ScrollViewer>
         <StackPanel MaxWidth="960" Padding="{StaticResource PagePadding}" HorizontalAlignment="Stretch">

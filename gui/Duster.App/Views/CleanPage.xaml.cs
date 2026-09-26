@@ -1,4 +1,4 @@
-using Duster.App.ViewModels;
+using Duster.Core.ViewModels;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Navigation;
 
@@ -17,6 +17,8 @@ public sealed partial class CleanPage : Page
     protected override void OnNavigatedTo(NavigationEventArgs e)
     {
         ViewModel = (CleanViewModel)e.Parameter;
+        GroupedCategories.Source = ViewModel.Groups;
+        CategoryList.ItemsSource = GroupedCategories.View;
         Bindings.Update();
         base.OnNavigatedTo(e);
     }

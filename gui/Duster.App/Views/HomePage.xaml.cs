@@ -1,4 +1,4 @@
-using Duster.App.ViewModels;
+using Duster.Core.ViewModels;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Navigation;
 

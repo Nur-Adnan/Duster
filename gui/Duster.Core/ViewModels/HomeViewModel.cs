@@ -3,7 +3,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Duster.Core;
 
-namespace Duster.App.ViewModels;
+namespace Duster.Core.ViewModels;
 
 public sealed record DriveRow(string Drive, string Summary, double UsedPercent);
 

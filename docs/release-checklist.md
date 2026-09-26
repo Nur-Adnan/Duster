@@ -18,6 +18,8 @@ The steps below touch real user data, UAC or the Recycle Bin. The Windows Smoke 
 
 ## 2. Smoke test
 
+Windows GUI (`Duster.exe`): run [gui-windows-verification.md](gui-windows-verification.md) on a real PC first; hosted runners only compile it.
+
 Run **Windows Smoke Test** (Actions tab > Run workflow, or push a `smoke/**` branch). On a real Windows runner it checks:
 - `--version`, the `verify` and `doctor` exit codes, and `analyze`
 - `clean` against a junction root and a locked file

@@ -1,11 +1,14 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -305,5 +308,192 @@ func TestEngineStdinEOFStopsSafely(t *testing.T) {
 	<-te.done
 	if len(ran) != 1 {
 		t.Fatalf("ran %v after stdin closed, want only the in-flight npm", ran)
+	}
+}
+
+func TestEngineRestoreListRunEmpty(t *testing.T) {
+	work := tempQuarantine(t)
+	keep := func(name string) string {
+		target := filepath.Join(work, name)
+		writeTree(t, target)
+		if err := quarantinePath(newQuarantineSession("purge"), target, 5); err != nil {
+			t.Fatal(err)
+		}
+		return target
+	}
+	first, second := keep("one"), keep("two")
+	te := startTestEngine(t, nil)
+
+	te.send(`{"id":1,"method":"restore.run","params":{"id":"nope"}}`)
+	if m := te.reply(1); m.Error == nil || m.Error.Code != "bad_request" {
+		t.Fatalf("restore.run before a list: %+v", m)
+	}
+
+	te.send(`{"id":2,"method":"restore.list"}`)
+	var list struct {
+		Sessions []restoreSessionJSON `json:"sessions"`
+	}
+	if m := te.reply(2); m.Error != nil || json.Unmarshal(m.Result, &list) != nil || len(list.Sessions) != 2 {
+		t.Fatalf("restore.list: %+v", list)
+	}
+	idOf := func(path string) string {
+		for _, s := range list.Sessions {
+			if s.Items[0].Path == path {
+				return s.ID
+			}
+		}
+		t.Fatalf("no session keeps %s", path)
+		return ""
+	}
+
+	// A newer item at the original location is never overwritten.
+	if err := os.MkdirAll(first, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	te.send(`{"id":3,"method":"restore.run","params":{"id":"` + idOf(first) + `"}}`)
+	var run struct {
+		Results []restoreResult `json:"results"`
+		Failed  bool            `json:"failed"`
+	}
+	if m := te.reply(3); m.Error != nil || json.Unmarshal(m.Result, &run) != nil || len(run.Results) != 1 || run.Results[0].Status != "skipped" {
+		t.Fatalf("restore over an existing target: %+v", run)
+	}
+	os.Remove(first)
+	te.send(`{"id":4,"method":"restore.run","params":{"id":"` + idOf(first) + `","item":1}}`)
+	if m := te.reply(4); m.Error != nil || json.Unmarshal(m.Result, &run) != nil || run.Results[0].Status != "restored" {
+		t.Fatalf("restore.run: %+v", run)
+	}
+	if _, err := os.Stat(filepath.Join(first, "sub", "a.txt")); err != nil {
+		t.Fatal("restored file missing")
+	}
+
+	// The restored session is gone now; running it again is refused, not guessed at.
+	te.send(`{"id":5,"method":"restore.run","params":{"id":"` + idOf(first) + `"}}`)
+	if m := te.reply(5); m.Error == nil {
+		t.Fatal("restoring a session that is no longer kept succeeded")
+	}
+
+	te.send(`{"id":6,"method":"restore.empty","params":{"ids":["` + idOf(second) + `"]}}`)
+	var empty struct {
+		Emptied int `json:"emptied"`
+	}
+	if m := te.reply(6); m.Error != nil || json.Unmarshal(m.Result, &empty) != nil || empty.Emptied != 1 {
+		t.Fatalf("restore.empty: %+v", m)
+	}
+	if left := groupSessions(loadKeptSessions(quarantineRoots())); len(left) != 0 {
+		t.Fatalf("sessions left after empty: %+v", left)
+	}
+}
+
+func TestEngineAnalyzeScanChildrenRecycle(t *testing.T) {
+	work := tempQuarantine(t) // also isolates LOCALAPPDATA (history) from the real profile
+	root := filepath.Join(work, "root")
+	for path, size := range map[string]int{"big/a.bin": 300, "big/deep/b.bin": 200, "small.txt": 10} {
+		full := filepath.Join(root, path)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, make([]byte, size), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	te := startTestEngine(t, nil)
+
+	te.send(`{"id":1,"method":"analyze.scan","params":{"path":"relative/dir"}}`)
+	if m := te.reply(1); m.Error == nil || m.Error.Code != "bad_request" {
+		t.Fatalf("relative path: %+v", m)
+	}
+
+	type folder struct {
+		ID      int64               `json:"id"`
+		Size    int64               `json:"size"`
+		Entries []engineAnalyzeItem `json:"entries"`
+		Largest []engineAnalyzeItem `json:"largest"`
+	}
+	var scan struct {
+		Root    folder        `json:"root"`
+		Files   int           `json:"files"`
+		Changes *changeReport `json:"changes"`
+	}
+	rootJSON, _ := json.Marshal(root)
+	te.send(`{"id":2,"method":"analyze.scan","params":{"path":` + string(rootJSON) + `}}`)
+	if m := te.reply(2); m.Error != nil || json.Unmarshal(m.Result, &scan) != nil {
+		t.Fatalf("analyze.scan: %+v", m)
+	}
+	if scan.Root.Size != 510 || scan.Files != 3 || len(scan.Root.Entries) != 2 || scan.Root.Entries[0].Name != "big" || scan.Changes != nil {
+		t.Fatalf("first scan = %+v", scan)
+	}
+	if scan.Root.Largest[0].Size != 300 {
+		t.Fatalf("largest = %+v", scan.Root.Largest)
+	}
+
+	big := scan.Root.Entries[0]
+	te.send(`{"id":3,"method":"analyze.children","params":{"id":` + strconv.FormatInt(big.ID, 10) + `}}`)
+	var children folder
+	if m := te.reply(3); m.Error != nil || json.Unmarshal(m.Result, &children) != nil || children.Size != 500 || len(children.Entries) != 2 {
+		t.Fatalf("children = %+v", children)
+	}
+	te.send(`{"id":4,"method":"analyze.children","params":{"id":` + strconv.FormatInt(scan.Root.Largest[0].ID, 10) + `}}`)
+	if m := te.reply(4); m.Error == nil || m.Error.Code != "bad_request" {
+		t.Fatalf("children of a file: %+v", m)
+	}
+	te.send(`{"id":5,"method":"analyze.recycle","params":{"id":` + strconv.FormatInt(scan.Root.ID, 10) + `}}`)
+	if m := te.reply(5); m.Error == nil || m.Error.Code != "bad_request" {
+		t.Fatalf("recycling the scan root: %+v", m)
+	}
+
+	var deep engineAnalyzeItem
+	for _, en := range children.Entries {
+		if en.IsDir {
+			deep = en
+		}
+	}
+	te.send(`{"id":6,"method":"analyze.recycle","params":{"id":` + strconv.FormatInt(deep.ID, 10) + `}}`)
+	var recycled struct {
+		Bytes int64 `json:"bytes"`
+	}
+	if m := te.reply(6); m.Error != nil || json.Unmarshal(m.Result, &recycled) != nil || recycled.Bytes != 200 {
+		t.Fatalf("analyze.recycle: %+v", m)
+	}
+	if _, err := os.Stat(filepath.Join(root, "big", "deep")); !os.IsNotExist(err) {
+		t.Fatal("recycled folder is still in place")
+	}
+	te.send(`{"id":7,"method":"analyze.children","params":{"id":` + strconv.FormatInt(big.ID, 10) + `}}`)
+	if m := te.reply(7); m.Error != nil || json.Unmarshal(m.Result, &children) != nil || children.Size != 300 || len(children.Entries) != 1 {
+		t.Fatalf("after recycle, big = %+v", children)
+	}
+	// Going back up must not show the root's cached, pre-recycle listing.
+	te.send(`{"id":12,"method":"analyze.children","params":{"id":` + strconv.FormatInt(scan.Root.ID, 10) + `}}`)
+	if m := te.reply(12); m.Error != nil || json.Unmarshal(m.Result, &children) != nil || children.Entries[0].Size != 300 {
+		t.Fatalf("root listing after a deep recycle = %+v", children.Entries)
+	}
+	te.send(`{"id":8,"method":"analyze.recycle","params":{"id":` + strconv.FormatInt(deep.ID, 10) + `}}`)
+	if m := te.reply(8); m.Error == nil || m.Error.Code != "bad_request" {
+		t.Fatalf("recycling the same item twice: %+v", m)
+	}
+
+	// big's ID predates the recycle below it: its live size (300), not the
+	// issued one (500), is what moves and what the ancestors lose.
+	te.send(`{"id":10,"method":"analyze.recycle","params":{"id":` + strconv.FormatInt(big.ID, 10) + `}}`)
+	if m := te.reply(10); m.Error != nil || json.Unmarshal(m.Result, &recycled) != nil || recycled.Bytes != 300 {
+		t.Fatalf("recycling big after its child: %+v (bytes %d)", m, recycled.Bytes)
+	}
+	te.send(`{"id":11,"method":"analyze.children","params":{"id":` + strconv.FormatInt(scan.Root.ID, 10) + `}}`)
+	if m := te.reply(11); m.Error != nil || json.Unmarshal(m.Result, &children) != nil || children.Size != 10 {
+		t.Fatalf("root after both recycles = %+v", children)
+	}
+
+	// The second scan of the same root compares with the first.
+	te.send(`{"id":9,"method":"analyze.scan","params":{"path":` + string(rootJSON) + `}}`)
+	if m := te.reply(9); m.Error != nil || json.Unmarshal(m.Result, &scan) != nil || scan.Changes == nil || scan.Changes.Delta != -500 {
+		t.Fatalf("second scan changes = %+v", scan.Changes)
+	}
+}
+
+func TestScanDirectoryCtxStopsWhenCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, _, err := scanDirectoryCtx(ctx, t.TempDir(), make(chan scanProgressInfo, 1)); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
 	}
 }

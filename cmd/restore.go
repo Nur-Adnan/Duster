@@ -206,6 +206,13 @@ type restoreSessionJSON struct {
 }
 
 func printRestoreListJSON(rs []restoreSession) {
+	b, _ := json.MarshalIndent(map[string][]restoreSessionJSON{"sessions": restoreListJSON(rs)}, "", "  ")
+	fmt.Println(string(b))
+}
+
+// restoreListJSON is the session list shared by `du restore --json` and the
+// GUI engine's restore.list.
+func restoreListJSON(rs []restoreSession) []restoreSessionJSON {
 	sessions := make([]restoreSessionJSON, 0, len(rs))
 	for i, r := range rs {
 		items := make([]restoreItemJSON, 0, len(r.Items()))
@@ -217,8 +224,7 @@ func printRestoreListJSON(rs []restoreSession) {
 			Expires: r.Created.Add(quarantineKeep), Items: items, Size: r.Size(), Damaged: r.damaged(),
 		})
 	}
-	b, _ := json.MarshalIndent(map[string][]restoreSessionJSON{"sessions": sessions}, "", "  ")
-	fmt.Println(string(b))
+	return sessions
 }
 
 // executeRestoreSession runs du restore <n> [--item k] [--dry-run] [--json].

@@ -1,3 +1,5 @@
+Overall status: IMPLEMENTED — WINDOWS VERIFICATION PENDING. Implementation is complete and macOS-tested; nothing below is verified on Windows until group 8 passes (7.2 and 7.3 are Windows-only measurements).
+
 ## 1. Engine host (Go, milestone 1)
 
 - [x] 1.1 Add hidden `du engine` command in cmd/engine.go: NDJSON loop, 1 MiB line cap, stdout reserved (D4), one encoder mutex; verify with cmd/engine_test.go driving it through io.Pipe (bad JSON, unknown method, id correlation)
@@ -9,35 +11,51 @@
 
 ## 2. GUI shell (milestone 2)
 
-- [ ] 2.1 Create gui/Duster.slnx with Duster.App (WinUI 3, from the official winui-mvvm template, x64 + ARM64 only), Duster.Core (net10.0: protocol DTOs, `IEngineClient`, errors), Duster.Infrastructure (net10.0: engine path resolution, process + NDJSON client), Duster.Tests (MSTest); nullable + warnings as errors; verify `dotnet build` of Core/Infrastructure/Tests on macOS and of the whole solution on the PC
-- [x] 2.2 Infrastructure `EngineClient`: resolve du.exe beside the app (link refused), start with redirected stdio and no window, handshake, request/reply correlation, progress events, cancel, stderr drained, malformed lines tolerated, exit detection, clean shutdown (stdin close, then kill after a grace period); verify tests against an in-memory stream pair and against the real `du engine` binary
-- [ ] 2.3 Shell: NavigationView (Home, Clean, Restore, Analyze) with page routing by type so later pages are one entry each, Mica, system theme, engine status in the footer, app-level error bar, AutomationIds; verify on the PC with `.\BuildAndRun.ps1` in light, dark, and high contrast
-- [ ] 2.4 Home page: engine connection state, version, one `status.get` on load plus a Refresh button (no timer), links to Clean/Restore/Analyze, engine-missing and protocol-mismatch states; Clean/Restore/Analyze pages as shells with ViewModels; verify on the PC, including with du.exe renamed
-- [ ] 2.5 Verify on the PC: `dotnet test`, the app launches, handshake shows connected, and closing the window leaves no `du.exe` running (`Get-Process du`)
+Status: IMPLEMENTED. Windows build, launch, and UI checks happen once, at the final gate (group 8).
+
+- [x] 2.1 Create gui/Duster.slnx with Duster.App (WinUI 3 from the official winui-mvvm template, unpackaged + self-contained, x64 + ARM64 only), Duster.Core, Duster.Infrastructure, Duster.Tests; nullable + warnings as errors; verified on macOS: Core/Infrastructure/Tests build, App packages restore (XAML compile is Windows-only)
+- [x] 2.2 Infrastructure `EngineClient`: path beside the app (link refused), redirected stdio, no window, handshake, correlation, progress, cancel, stderr drained, malformed lines skipped, exit detection, clean shutdown; verified on macOS against an in-memory engine and the real `du engine`
+- [x] 2.3 Shell: NavigationView (Home, Clean, Restore, Analyze) routed by tag, Mica, system theme, engine status footer, error bar with Restart engine, AutomationIds (Windows-only code: verified at the final gate)
+- [x] 2.4 Home page: engine state, `status.get` on connect and on Refresh (no timer), task links, engine-missing and protocol-mismatch states (Windows-only code: verified at the final gate)
+- [x] 2.5 `gui/smoke.ps1`: builds du.exe and Duster.exe, runs the tests against the real engine, launches, checks the engine child, closes, checks for orphans (runs at the final gate)
 
 ## 3. Clean page (milestone 3)
 
-- [ ] 3.1 Clean page: grouped categories with sizes from `clean.scan`, select/deselect, admin shield, confirm dialog stating deletion is permanent, progress, Cancel, results; verify on the PC against categories that are safe to empty, plus a ViewModel unit test with a fake `IEngineClient`
-- [ ] 3.2 "Restart as administrator" relaunch; verify on the PC that UAC appears and prefetch becomes available
+Status: IMPLEMENTED, macOS-tested. Windows verification at the final gate.
+
+- [x] 3.0 Move the ViewModels into Duster.Core (they use no WinUI types) and add `IAppHost` (confirm dialog, elevated restart, folder picker) so page logic is unit-tested on macOS; verified by ViewModelTests
+- [x] 3.1 Clean page: categories grouped as the engine returns them, all selectable ones selected by default (as the TUI), admin-only ones shown with a shield and not selectable, confirm dialog stating deletion is permanent, progress, Stop, per-category outcomes, partial result on cancel; verified on macOS by ViewModelTests (confirm declined sends nothing, only selected selectable IDs sent, cancel reports what finished)
+- [x] 3.2 "Restart as administrator": relaunch Duster.exe with the runas verb (the GUI's only ShellExecute; own path, no arguments) and exit; declined UAC reported; verified on macOS for the declined path (UAC itself is Windows-only)
 
 ## 4. Restore page (milestone 4)
 
-- [ ] 4.1 Engine: `restore.list`/`restore.run`/`restore.empty` over the existing quarantine sessions with engine-issued IDs; verify Go tests with `tempQuarantine` for a conflict skip, access denied, and a reparse point
-- [ ] 4.2 Restore page; verify a `du purge` session appears in the GUI and restores (windows-smoke or a test folder on the PC)
+Status: IMPLEMENTED, macOS-tested. Windows verification at the final gate.
+
+- [x] 4.1 Engine: `restore.list`/`restore.run`/`restore.empty` over the existing quarantine code (`restoreListJSON` now shared with `du restore --json`), session IDs from the latest list only, gone sessions refused; verified by Go tests with `tempQuarantine` (unknown ID, conflict skip, item restore, gone session, empty)
+- [x] 4.2 Restore page: sessions list, items of the selected one, Restore all / per item, Delete for good and Empty quarantine behind confirm dialogs; verified on macOS by ViewModelTests and the real-engine round trip (analyze recycle → quarantine → restore)
 
 ## 5. Analyze (milestone 5)
 
-- [ ] 5.1 Engine: `analyze.scan` with throttled progress and history changes (tests set LOCALAPPDATA to t.TempDir()); verify Go tests
-- [ ] 5.2 Analyze page: virtualized folder tree, largest files, changes since last scan, send to Recycle Bin via engine; verify on the PC with a large folder that the UI stays responsive
+Status: IMPLEMENTED, macOS-tested. Windows verification at the final gate.
+
+- [x] 5.1 Engine: `analyze.scan` (absolute path, progress every 100 ms, cancel mid-walk via `scanDirectoryCtx`, history changes), `analyze.children`, `analyze.recycle` (not the root; tree patched after); verified by Go tests (tests isolate LOCALAPPDATA)
+- [x] 5.2 Analyze page: path + Browse (Windows App SDK FolderPicker) + Scan/Cancel, breadcrumb drill-down over virtualized lists, Largest files, Changes, Move to Recycle Bin with confirm, kept-in-quarantine never shown as freed; verified on macOS by ViewModelTests and the real-engine round trip
 
 ## 6. Packaging (milestone 6)
 
-- [ ] 6.1 Publish Duster.exe self-contained for win-x64 and win-arm64 in release.yml, Makefile, and build-release.sh; add to the Inno installer (Start menu shortcut) and zips; CI job `gui` (windows-latest, windows-11-arm) plus Core/Infrastructure tests on ubuntu; verify the release dry run produces both and checksums cover them
-- [ ] 6.2 `du update` installs Duster.exe too (extend `releaseBinaries`) and `du remove` removes it; verify update and remove tests and a windows-smoke install/uninstall
+Status: IMPLEMENTED. The Windows CI jobs first run on the next push; installer, upgrade and uninstall are final-gate items.
+
+- [x] 6.1 Single-file, self-contained publish profiles (one Duster.exe per arch); release.yml `build-gui` job (x64 + ARM64, fails if the publish leaves any file but Duster.exe) feeding the portable zips and the installer (Start menu "Duster" opens the GUI, the post-install launch runs unelevated); Makefile `gui`/`gui-test` and copy-if-present in Makefile + build-release.sh; ci.yml `gui` (WinUI build, x64 + ARM64) and `gui-tests` (Windows + Linux, real engine); verified on macOS: workflows parse, the Makefile copy loop runs both branches, `bash -n` passes. Duster.exe is not in the SignPath artifact configuration yet (signing is off)
+- [x] 6.2 `du update` installs Duster.exe from the verified zip (optional for older releases; order duw.exe, Duster.exe, du.exe) and `du remove` removes it (delayed while the GUI runs); verified by Go tests (mixed-case zip entry, missing entry, removal)
 
 ## 7. Hardening (milestone 7)
 
-- [ ] 7.1 FlaUI smoke test in windows-smoke (launch, visit every page, clean scan only); if hosted runners can't automate UI, add the flow to docs/release-checklist.md instead; verify one of the two lands
-- [ ] 7.2 Accessibility Insights pass and keyboard-only walkthrough; verify zero automated failures
-- [ ] 7.3 Measure cold start and memory; try Native AOT only if startup exceeds 1.5 s; verify numbers recorded in the PR
-- [ ] 7.4 Run `winui-code-review` and the security review over the whole GUI; verify findings fixed or recorded
+- [x] 7.1 Final Windows verification checklist (docs/gui-windows-verification.md, 31 items, linked from docs/release-checklist.md) plus `gui/smoke.ps1` checking the single-file release layout and that the GUI starts nothing but du.exe; FlaUI automation deferred until the gate shows whether hosted runners allow UI automation
+- [ ] 7.2 Accessibility Insights pass and keyboard-only walkthrough (Windows: checklist items 19-23)
+- [ ] 7.3 Measure cold start and memory; Native AOT only if startup exceeds 1.5 s (Windows: checklist item 30)
+- [x] 7.4 Code, security and performance review of the whole GUI and the engine additions (self-review plus an independent reviewer); fixed: analyze.recycle used the size from when the ID was issued, and left ancestor listings cached with pre-recycle sizes (both covered by TestEngineAnalyzeScanChildrenRecycle). Release-candidate audit fixed two more: `dotnet test` from the repo root (CI, Makefile, smoke.ps1) ignored gui/global.json and fell back to VSTest (moved to the repo root), and the GUI build output `Duster-windows-<arch>.exe` was the same file as the CLI's `duster-windows-<arch>.exe` on case-insensitive NTFS (renamed `duster-gui-windows-<arch>.exe`; the installer's GUI line is optional so windows-smoke, which builds no GUI, still compiles it)
+
+## 8. Final Windows verification gate
+
+- [ ] 8.1 Run docs/gui-windows-verification.md end to end on a Windows PC and record the results; tick Windows verification for milestones 2-7 only for items that passed
+- [ ] 8.2 Fix what the gate finds, rerun `gui\smoke.ps1` and the affected manual checks

@@ -1,4 +1,4 @@
-using Duster.App.ViewModels;
+using Duster.Core.ViewModels;
 using Duster.App.Views;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -15,12 +15,13 @@ public sealed partial class MainWindow : Window
     public MainWindow(ShellViewModel viewModel)
     {
         ViewModel = viewModel;
+        var host = new WindowsAppHost(this);
         _pages = new()
         {
             ["home"] = (typeof(HomePage), new HomeViewModel(viewModel.Engine, Navigate)),
-            ["clean"] = (typeof(CleanPage), new CleanViewModel(viewModel.Engine)),
-            ["restore"] = (typeof(RestorePage), new RestoreViewModel()),
-            ["analyze"] = (typeof(AnalyzePage), new AnalyzeViewModel()),
+            ["clean"] = (typeof(CleanPage), new CleanViewModel(viewModel.Engine, host)),
+            ["restore"] = (typeof(RestorePage), new RestoreViewModel(viewModel.Engine, host)),
+            ["analyze"] = (typeof(AnalyzePage), new AnalyzeViewModel(viewModel.Engine, host)),
         };
         InitializeComponent();
 

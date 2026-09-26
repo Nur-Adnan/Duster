@@ -1,7 +1,11 @@
 package cmd
 
 import (
+	"archive/zip"
+	"bytes"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -206,4 +210,40 @@ func TestUpdateModelErrorHandling(t *testing.T) {
 	if !strings.Contains(upM.statusMsg, "Error checking updates") {
 		t.Errorf("Expected error status message, got: %q", upM.statusMsg)
 	}
+}
+
+func TestReleaseArchiveCarriesTheGUI(t *testing.T) {
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for _, name := range []string{"Duster-9.9.9-Portable-x64/du.exe", "Duster-9.9.9-Portable-x64/Duster.exe"} {
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		w.Write([]byte("MZ" + name))
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// Entry names are compared lower-cased, so the GUI's mixed-case name must be too.
+	gui, err := extractFileFromZip(buf.Bytes(), strings.ToLower(guiExeName))
+	if err != nil || !strings.HasSuffix(string(gui), "Duster.exe") {
+		t.Fatalf("gui = %q, %v", gui, err)
+	}
+	if _, err := extractFileFromZip(buf.Bytes(), "duw.exe"); !errors.Is(err, errNotInArchive) {
+		t.Fatalf("a release without duw.exe: err = %v, want errNotInArchive", err)
+	}
+}
+
+func TestRemoveGUIDeletesDusterExeBesideDu(t *testing.T) {
+	dir := t.TempDir()
+	gui := filepath.Join(dir, guiExeName)
+	if err := os.WriteFile(gui, []byte("MZ"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	removeGUI(filepath.Join(dir, "du.exe"))
+	if _, err := os.Stat(gui); !os.IsNotExist(err) {
+		t.Fatal("Duster.exe survived removeGUI")
+	}
+	removeGUI(filepath.Join(dir, "du.exe")) // already gone: no error, nothing scheduled
 }

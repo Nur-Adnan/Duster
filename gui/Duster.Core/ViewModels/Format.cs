@@ -1,4 +1,4 @@
-namespace Duster.App.ViewModels;
+namespace Duster.Core.ViewModels;
 
 public static class Format
 {
