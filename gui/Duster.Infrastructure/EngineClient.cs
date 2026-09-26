@@ -192,7 +192,8 @@ public sealed class EngineClient(string appDirectory, string fileName, Action<st
                 .WaitAsync(HandshakeTimeout, ct).ConfigureAwait(false);
             hello = Read(reply, EngineJson.Default.EngineHello);
         }
-        catch (Exception ex) when (ex is TimeoutException or EngineException { Kind: not EngineErrorKind.Canceled })
+        // IOException: the program exited before reading the request (broken pipe).
+        catch (Exception ex) when (ex is TimeoutException or IOException or EngineException { Kind: not EngineErrorKind.Canceled })
         {
             throw new EngineException(EngineErrorKind.HandshakeFailed,
                 $"{fileName} did not answer as the Duster engine. Reinstall Duster.", inner: ex);

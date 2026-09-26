@@ -5,8 +5,8 @@ Duster is CLI/TUI only, which keeps out users who never open a terminal. A nativ
 ## What Changes
 
 - New hidden subcommand `du engine`: a long-lived process that speaks versioned NDJSON over stdin/stdout, calls the existing engine functions, streams progress, and supports cancellation. No network or named-pipe endpoint.
-- New `gui/` tree: `Duster.exe`, a WinUI 3 (Windows App SDK 2.x, C#, .NET 10) app that starts `du.exe engine` from its own folder and drives it. **V1 pages: Home, Clean, Restore, Analyze.** Purge, Uninstall, Installers, Optimize, Virtual disks, and Schedule stay CLI-only for now (see design.md, Future work); the shell adds a page with one navigation entry, so they need no redesign later.
-- Engine methods for the V1 pages only: status, doctor, clean (done), restore, analyze. No refactor of CLI code paths is needed for V1.
+- New `gui/` tree: `Duster.exe`, a WinUI 3 (Windows App SDK 2.x, C#, .NET 10) app that starts `du.exe engine` from its own folder and drives it. **V1 pages: Home, Clean, Restore, Analyze.** Doctor, Purge, Uninstall, Installers, Optimize, Virtual disks, Schedule and the other deferred features stay CLI-only for now (see design.md, "Scope: V1, deferred, and CLI-only", which also lists the features that stay CLI-only for good); the shell adds a page with one navigation entry, so they need no redesign later.
+- Engine methods for the V1 pages only: status, doctor, clean (done), restore, analyze. `doctor.run` is in the engine and client but no V1 page shows it (deferred). No refactor of CLI code paths is needed for V1.
 - Packaging: `Duster.exe` (self-contained, unpackaged, x64 + ARM64) ships beside `du.exe` and `duw.exe` in the Inno installer and the portable zips; `du update` and `du remove` learn about it.
 - CLI behavior and output are unchanged.
 
