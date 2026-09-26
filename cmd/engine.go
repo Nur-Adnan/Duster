@@ -7,6 +7,9 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -75,6 +78,14 @@ var engineMethods = map[string]engineMethod{
 	"doctor.run": {run: engineDoctor},
 	"clean.scan": {run: engineCleanScan},
 	"clean.run":  {mutates: true, run: engineCleanRun},
+
+	"restore.list":  {run: engineRestoreList},
+	"restore.run":   {mutates: true, run: engineRestoreRun},
+	"restore.empty": {mutates: true, run: engineRestoreEmpty},
+
+	"analyze.scan":     {run: engineAnalyzeScan},
+	"analyze.children": {run: engineAnalyzeChildren},
+	"analyze.recycle":  {mutates: true, run: engineAnalyzeRecycle},
 }
 
 type engine struct {
@@ -89,6 +100,10 @@ type engine struct {
 	// scanned holds the category IDs the latest clean.scan returned;
 	// clean.run accepts nothing else.
 	scanned map[string]bool
+	// restoreIDs holds the session IDs the latest restore.list returned.
+	restoreIDs map[string]bool
+	// analysis is the latest analyze.scan: its tree and the item IDs handed out.
+	analysis *engineAnalysis
 }
 
 func newEngine(w io.Writer) *engine {
@@ -351,4 +366,350 @@ func engineCleanRun(e *engine, ctx context.Context, id int64, raw json.RawMessag
 		}
 	}
 	return e.runCleanCategories(ctx, id, cats, false)
+}
+
+func engineRestoreList(e *engine, _ context.Context, _ int64, _ json.RawMessage) (any, error) {
+	// ponytail: no expiry sweep here, unlike `du restore`: listing stays
+	// read-only, and purge/installer/schedule runs still apply retention.
+	rs := groupSessions(loadKeptSessions(quarantineRoots()))
+	ids := map[string]bool{}
+	for _, r := range rs {
+		ids[r.ID] = true
+	}
+	e.state.Lock()
+	e.restoreIDs = ids
+	e.state.Unlock()
+	return map[string]any{"sessions": restoreListJSON(rs)}, nil
+}
+
+// listedSessions reloads the quarantine and returns the sessions named by ids,
+// each of which must come from the latest restore.list, with their 1-based
+// numbers. A listed session that is gone since (restored or emptied
+// elsewhere) is refused rather than guessed at.
+func (e *engine) listedSessions(ids []string) ([]restoreSession, []int, error) {
+	if len(ids) == 0 {
+		return nil, nil, badRequest("no session given")
+	}
+	e.state.Lock()
+	for _, id := range ids {
+		if !e.restoreIDs[id] {
+			e.state.Unlock()
+			return nil, nil, badRequest("session " + id + " is not from the latest restore.list")
+		}
+	}
+	e.state.Unlock()
+	rs := groupSessions(loadKeptSessions(quarantineRoots()))
+	var out []restoreSession
+	var numbers []int
+	for _, id := range ids {
+		found := false
+		for i, r := range rs {
+			if r.ID == id {
+				out, numbers, found = append(out, r), append(numbers, i+1), true
+				break
+			}
+		}
+		if !found {
+			return nil, nil, &engineError{Code: "failed", Message: "session " + id + " is no longer kept; refresh the list"}
+		}
+	}
+	return out, numbers, nil
+}
+
+func engineRestoreRun(e *engine, _ context.Context, _ int64, raw json.RawMessage) (any, error) {
+	var p struct {
+		ID   string `json:"id"`
+		Item int    `json:"item"` // 0 = the whole session
+	}
+	if err := decodeParams(raw, &p); err != nil {
+		return nil, err
+	}
+	rs, numbers, err := e.listedSessions([]string{p.ID})
+	if err != nil {
+		return nil, err
+	}
+	session, n := rs[0], numbers[0]
+	if err := restoreRequestError(session, n, p.Item, p.Item != 0); err != nil {
+		return nil, badRequest(err.Error())
+	}
+	results := restoreItems(session, p.Item, false)
+	if p.Item == 0 {
+		results = append(results, damagedPartResults(session, n)...)
+	}
+	failed := false
+	for _, r := range results {
+		failed = failed || r.Status == "failed"
+	}
+	return map[string]any{"results": results, "failed": failed}, nil
+}
+
+func engineRestoreEmpty(e *engine, _ context.Context, _ int64, raw json.RawMessage) (any, error) {
+	var p struct {
+		IDs []string `json:"ids"`
+	}
+	if err := decodeParams(raw, &p); err != nil {
+		return nil, err
+	}
+	rs, _, err := e.listedSessions(p.IDs)
+	if err != nil {
+		return nil, err
+	}
+	var size int64
+	for _, r := range rs {
+		size += r.Size()
+	}
+	if err := emptySessions(rs); err != nil {
+		return nil, err
+	}
+	return map[string]any{"emptied": len(rs), "size": size}, nil
+}
+
+// maxAnalyzeEntries caps one folder listing; a folder with more entries lists
+// its largest ones and reports the rest in "more".
+const maxAnalyzeEntries = 500
+
+type engineAnalysis struct {
+	root  *FolderNode
+	items map[int64]engineAnalyzeRef
+	next  int64
+	undo  *quarantineSession // created on the first recycle the bin refuses
+}
+
+type engineAnalyzeRef struct {
+	path string
+	size int64
+	dir  bool
+}
+
+type engineAnalyzeItem struct {
+	ID    int64  `json:"id"`
+	Name  string `json:"name"`
+	Path  string `json:"path"`
+	Size  int64  `json:"size"`
+	IsDir bool   `json:"is_dir"`
+	Items int    `json:"items,omitempty"`
+}
+
+type engineAnalyzeFolder struct {
+	ID      int64               `json:"id"`
+	Path    string              `json:"path"`
+	Size    int64               `json:"size"`
+	Entries []engineAnalyzeItem `json:"entries"`
+	More    int                 `json:"more,omitempty"`
+	Largest []engineAnalyzeItem `json:"largest"`
+}
+
+// issue hands out an ID for path; only issued IDs are accepted back.
+func (a *engineAnalysis) issue(path string, size int64, dir bool) int64 {
+	a.next++
+	a.items[a.next] = engineAnalyzeRef{path: path, size: size, dir: dir}
+	return a.next
+}
+
+func (a *engineAnalysis) item(path string, size int64, dir bool, items int) engineAnalyzeItem {
+	return engineAnalyzeItem{ID: a.issue(path, size, dir), Name: filepath.Base(path), Path: path, Size: size, IsDir: dir, Items: items}
+}
+
+// folder lists n: its largest entries and the largest files below it.
+func (a *engineAnalysis) folder(n *FolderNode) engineAnalyzeFolder {
+	buildEntries(n)
+	f := engineAnalyzeFolder{ID: a.issue(n.Path, n.Size, true), Path: n.Path, Size: n.Size, Entries: []engineAnalyzeItem{}, Largest: []engineAnalyzeItem{}}
+	for i, en := range n.Entries {
+		if i == maxAnalyzeEntries {
+			f.More = len(n.Entries) - i
+			break
+		}
+		f.Entries = append(f.Entries, a.item(en.Path, en.Size, en.IsDir, en.Items))
+	}
+	for _, file := range topFiles(n, 10) {
+		f.Largest = append(f.Largest, a.item(file.Path, file.Size, false, 0))
+	}
+	return f
+}
+
+// findFolder walks from the root to the scanned folder at path.
+func findFolder(n *FolderNode, path string) *FolderNode {
+	for n != nil && n.Path != path {
+		var next *FolderNode
+		for _, sub := range n.SubFolders {
+			if path == sub.Path || strings.HasPrefix(path, sub.Path+string(filepath.Separator)) {
+				next = sub
+				break
+			}
+		}
+		n = next
+	}
+	return n
+}
+
+// analyzeRef returns an issued item that is still in the tree.
+func (e *engine) analyzeRef(id int64) (*engineAnalysis, engineAnalyzeRef, error) {
+	a := e.analysis
+	if a == nil {
+		return nil, engineAnalyzeRef{}, badRequest("no analyze.scan yet")
+	}
+	ref, ok := a.items[id]
+	if !ok {
+		return nil, engineAnalyzeRef{}, badRequest("item is not from the latest analyze.scan")
+	}
+	return a, ref, nil
+}
+
+func engineAnalyzeScan(e *engine, ctx context.Context, id int64, raw json.RawMessage) (any, error) {
+	var p struct {
+		Path string `json:"path"`
+	}
+	if err := decodeParams(raw, &p); err != nil {
+		return nil, err
+	}
+	if !filepath.IsAbs(p.Path) {
+		return nil, badRequest("path must be absolute")
+	}
+	if err := scanTargetError(p.Path, true); err != nil {
+		return nil, &engineError{Code: "failed", Message: err.Error()}
+	}
+
+	// Progress at most every 100 ms: a disk walk visits thousands of entries a second.
+	ch := make(chan scanProgressInfo, 100)
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		var last time.Time
+		for pr := range ch {
+			if time.Since(last) >= 100*time.Millisecond {
+				last = time.Now()
+				e.event(id, "progress", map[string]any{"dirs": pr.DirsScanned, "files": pr.FilesScanned, "bytes": pr.TotalSize, "path": pr.CurrentPath})
+			}
+		}
+	}()
+	root, _, err := scanDirectoryCtx(ctx, p.Path, ch)
+	close(ch)
+	<-drained
+	if err != nil {
+		return nil, err
+	}
+
+	files, dirs := countFilesAndFolders(root)
+	res := map[string]any{"dirs": dirs, "files": files, "changes": nil}
+	baseline, notes := recordScanHistory(root, 0, time.Now())
+	if baseline != nil {
+		report := explainChanges(baseline, root)
+		res["changes"] = &report
+	}
+	if len(notes) > 0 {
+		res["history_notes"] = notes
+	}
+
+	a := &engineAnalysis{root: root, items: map[int64]engineAnalyzeRef{}}
+	e.state.Lock()
+	res["root"] = a.folder(root)
+	e.analysis = a
+	e.state.Unlock()
+	return res, nil
+}
+
+func engineAnalyzeChildren(e *engine, _ context.Context, _ int64, raw json.RawMessage) (any, error) {
+	var p struct {
+		ID int64 `json:"id"`
+	}
+	if err := decodeParams(raw, &p); err != nil {
+		return nil, err
+	}
+	e.state.Lock()
+	defer e.state.Unlock()
+	a, ref, err := e.analyzeRef(p.ID)
+	if err != nil {
+		return nil, err
+	}
+	n := findFolder(a.root, ref.path)
+	if !ref.dir || n == nil {
+		return nil, badRequest("item is not a scanned folder")
+	}
+	return a.folder(n), nil
+}
+
+// engineAnalyzeRecycle sends one scanned item to the Recycle Bin (Duster's
+// quarantine when the bin refuses it), through the same recyclePath the TUI
+// uses, then drops it from the in-memory tree so listings stay current.
+func engineAnalyzeRecycle(e *engine, _ context.Context, _ int64, raw json.RawMessage) (any, error) {
+	var p struct {
+		ID int64 `json:"id"`
+	}
+	if err := decodeParams(raw, &p); err != nil {
+		return nil, err
+	}
+	e.state.Lock()
+	a, ref, err := e.analyzeRef(p.ID)
+	if err == nil && ref.path == a.root.Path {
+		err = badRequest("the scanned folder itself cannot be recycled")
+	}
+	if err == nil {
+		// The size at issue time is stale once something below was recycled.
+		var ok bool
+		if ref.size, ok = a.liveSize(ref); !ok {
+			err = badRequest("item is no longer in the scan")
+		}
+	}
+	if err == nil && a.undo == nil {
+		a.undo = newQuarantineSession("analyze")
+	}
+	e.state.Unlock()
+	if err != nil {
+		return nil, err
+	}
+
+	kept, err := recyclePath(a.undo, ref.path, ref.size)
+	if err != nil {
+		return nil, err
+	}
+
+	e.state.Lock()
+	a.remove(ref)
+	e.state.Unlock()
+	return map[string]any{"kept": kept, "bytes": ref.size}, nil
+}
+
+// liveSize is the item's size in the tree now, or false once it is gone.
+func (a *engineAnalysis) liveSize(ref engineAnalyzeRef) (int64, bool) {
+	parent := findFolder(a.root, filepath.Dir(ref.path))
+	if parent == nil {
+		return 0, false
+	}
+	if ref.dir {
+		for _, f := range parent.SubFolders {
+			if f.Path == ref.path {
+				return f.Size, true
+			}
+		}
+		return 0, false
+	}
+	for _, f := range parent.Files {
+		if f.Path == ref.path {
+			return f.Size, true
+		}
+	}
+	return 0, false
+}
+
+// remove drops a recycled item from the tree and every ID at or below it.
+func (a *engineAnalysis) remove(ref engineAnalyzeRef) {
+	parent := findFolder(a.root, filepath.Dir(ref.path))
+	if parent != nil {
+		if ref.dir {
+			parent.SubFolders = slices.DeleteFunc(parent.SubFolders, func(f *FolderNode) bool { return f.Path == ref.path })
+		} else {
+			parent.Files = slices.DeleteFunc(parent.Files, func(f FileNode) bool { return f.Path == ref.path })
+		}
+		// Every ancestor's cached listing shows the old size: rebuild them all.
+		for n := parent; n != nil; n = n.Parent {
+			n.Size -= ref.size
+			n.Entries = nil
+		}
+	}
+	prefix := ref.path + string(filepath.Separator)
+	for id, r := range a.items {
+		if r.path == ref.path || strings.HasPrefix(r.path, prefix) {
+			delete(a.items, id)
+		}
+	}
 }

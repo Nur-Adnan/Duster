@@ -1,4 +1,4 @@
-using Duster.App.ViewModels;
+using Duster.Core.ViewModels;
 using Duster.Core;
 using Microsoft.UI.Xaml;
 
@@ -16,6 +16,14 @@ public static class Ui
     public static bool HasText(string? value) => !string.IsNullOrEmpty(value);
 
     public static string Bytes(long bytes) => Format.Bytes(bytes);
+
+    public static string SessionSummary(DateTimeOffset created, int items, long size, bool damaged) =>
+        $"{created.LocalDateTime:g} · {items} item{(items == 1 ? "" : "s")} · {Format.Bytes(size)}{(damaged ? " · partly unreadable" : "")}";
+
+    public static string RestoreName(string path) => "Restore " + path;
+
+    // Segoe Fluent Icons: Folder, Page.
+    public static string ItemGlyph(bool isDir) => isDir ? "\uE8B7" : "\uE8A5";
 
     // Segoe Fluent Icons: CheckMark, Error, Sync.
     public static string EngineGlyph(EngineState state) => state switch

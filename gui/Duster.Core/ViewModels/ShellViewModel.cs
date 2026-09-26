@@ -2,7 +2,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Duster.Core;
 
-namespace Duster.App.ViewModels;
+namespace Duster.Core.ViewModels;
 
 /// <summary>Engine connection state for the window chrome: pane footer and error bar.</summary>
 public sealed partial class ShellViewModel : ObservableObject

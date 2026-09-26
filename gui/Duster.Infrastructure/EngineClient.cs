@@ -74,16 +74,53 @@ public sealed class EngineClient(string appDirectory, string fileName, Action<st
     public async Task<CleanResult> RunCleanAsync(
         IReadOnlyCollection<string> ids, IProgress<CleanProgress>? progress, CancellationToken ct = default)
     {
-        var result = await Channel.RequestAsync("clean.run", w =>
+        try
         {
-            w.WriteStartArray("ids");
-            foreach (var id in ids)
-            {
-                w.WriteStringValue(id);
-            }
-            w.WriteEndArray();
-        }, OnProgress(progress), ct).ConfigureAwait(false);
-        return Read(result, EngineJson.Default.CleanResult);
+            var result = await Channel.RequestAsync("clean.run", w => WriteStrings(w, "ids", ids), OnProgress(progress), ct)
+                .ConfigureAwait(false);
+            return Read(result, EngineJson.Default.CleanResult);
+        }
+        catch (EngineException ex) when (ex.Kind == EngineErrorKind.Canceled && ex.Partial is { } partial)
+        {
+            return Read(partial, EngineJson.Default.CleanResult) with { Canceled = true };
+        }
+    }
+
+    public async Task<IReadOnlyList<RestoreSession>> ListRestoreAsync(CancellationToken ct = default) =>
+        Read(await Channel.RequestAsync("restore.list", null, null, ct).ConfigureAwait(false), EngineJson.Default.RestoreSessionList).Sessions;
+
+    public async Task<RestoreRunResult> RestoreAsync(string sessionId, int item, CancellationToken ct = default) =>
+        Read(await Channel.RequestAsync("restore.run", w =>
+        {
+            w.WriteString("id", sessionId);
+            w.WriteNumber("item", item);
+        }, null, ct).ConfigureAwait(false), EngineJson.Default.RestoreRunResult);
+
+    public async Task<RestoreEmptyResult> EmptyRestoreAsync(IReadOnlyCollection<string> sessionIds, CancellationToken ct = default) =>
+        Read(await Channel.RequestAsync("restore.empty", w => WriteStrings(w, "ids", sessionIds), null, ct).ConfigureAwait(false),
+            EngineJson.Default.RestoreEmptyResult);
+
+    public async Task<AnalyzeResult> AnalyzeAsync(string path, IProgress<AnalyzeProgress>? progress, CancellationToken ct = default) =>
+        Read(await Channel.RequestAsync("analyze.scan", w => w.WriteString("path", path),
+            progress is null ? null : data => progress.Report(Read(data, EngineJson.Default.AnalyzeProgress)), ct).ConfigureAwait(false),
+            EngineJson.Default.AnalyzeResult);
+
+    public async Task<AnalyzeFolder> AnalyzeChildrenAsync(long id, CancellationToken ct = default) =>
+        Read(await Channel.RequestAsync("analyze.children", w => w.WriteNumber("id", id), null, ct).ConfigureAwait(false),
+            EngineJson.Default.AnalyzeFolder);
+
+    public async Task<RecycleResult> RecycleAsync(long id, CancellationToken ct = default) =>
+        Read(await Channel.RequestAsync("analyze.recycle", w => w.WriteNumber("id", id), null, ct).ConfigureAwait(false),
+            EngineJson.Default.RecycleResult);
+
+    private static void WriteStrings(Utf8JsonWriter w, string name, IEnumerable<string> values)
+    {
+        w.WriteStartArray(name);
+        foreach (var value in values)
+        {
+            w.WriteStringValue(value);
+        }
+        w.WriteEndArray();
     }
 
     public async ValueTask DisposeAsync()

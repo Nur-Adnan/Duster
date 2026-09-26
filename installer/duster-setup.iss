@@ -101,6 +101,9 @@ Source: "..\dist\duster-windows-amd64.exe"; DestDir: "{app}"; DestName: "{#MyApp
 
 ; Windowless launcher for scheduled cleans (du schedule)
 Source: "..\dist\duw-windows-amd64.exe"; DestDir: "{app}"; DestName: "duw.exe"; Flags: ignoreversion
+; Release builds always have it (release.yml fails without it); windows-smoke builds the
+; installer without the GUI to test uninstalls.
+Source: "..\dist\duster-gui-windows-amd64.exe"; DestDir: "{app}"; DestName: "Duster.exe"; Flags: ignoreversion skipifsourcedoesntexist
 
 ; Documentation
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
@@ -108,13 +111,14 @@ Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 ; Start Menu shortcuts
-Name: "{group}\{#MyAppName}"; Filename: "{cmd}"; Parameters: "/K ""{app}\{#MyAppExeName}"" --help"; IconFilename: "{app}\{#MyAppExeName}"; Comment: "Launch Duster CLI"
+Name: "{group}\{#MyAppName}"; Filename: "{app}\Duster.exe"; Comment: "Open Duster"
+Name: "{group}\{#MyAppName} Command Line"; Filename: "{cmd}"; Parameters: "/K ""{app}\{#MyAppExeName}"" --help"; IconFilename: "{app}\{#MyAppExeName}"; Comment: "Launch Duster CLI"
 Name: "{group}\{#MyAppName} Status Dashboard"; Filename: "{cmd}"; Parameters: "/K ""{app}\{#MyAppExeName}"" status"; IconFilename: "{app}\{#MyAppExeName}"; Comment: "Open Duster System Status Dashboard"
 Name: "{group}\{#MyAppName} Deep Clean"; Filename: "{cmd}"; Parameters: "/K ""{app}\{#MyAppExeName}"" clean --dry-run"; IconFilename: "{app}\{#MyAppExeName}"; Comment: "Preview Duster Deep Clean"
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 
 ; Desktop shortcut (optional task)
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{cmd}"; Parameters: "/K ""{app}\{#MyAppExeName}"" --help"; IconFilename: "{app}\{#MyAppExeName}"; Tasks: desktopicon; Comment: "Duster CLI"
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\Duster.exe"; Tasks: desktopicon; Comment: "Open Duster"
 
 [Registry]
 ; HKA resolves to HKLM for an elevated (admin-mode) install and HKCU for a
@@ -131,6 +135,9 @@ Root: HKA; Subkey: "Software\{#MyAppPublisher}\{#MyAppName}"; ValueType: string;
 [Run]
 ; Post-install: show help output to verify installation
 Filename: "{cmd}"; Parameters: "/K echo. & echo   Duster v{#MyAppVersion} installed successfully! & echo. & echo   Type 'du --help' to get started. & echo. & ""{app}\{#MyAppExeName}"" --version & echo. & pause"; Description: "Launch Duster CLI"; Flags: nowait postinstall skipifsilent shellexec
+
+; Setup runs elevated; the GUI must not (it asks for UAC only when an action needs it).
+Filename: "{app}\Duster.exe"; Description: "Open Duster"; Flags: nowait postinstall skipifsilent runasoriginaluser unchecked
 
 [UninstallRun]
 ; Delete every Duster scheduled clean this account can see (not only the one

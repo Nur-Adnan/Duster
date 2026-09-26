@@ -55,6 +55,40 @@ public interface IEngineClient : IAsyncDisposable
     /// <summary>Read-only: sizes every clean category.</summary>
     Task<CleanResult> ScanCleanAsync(IProgress<CleanProgress>? progress, CancellationToken ct = default);
 
-    /// <summary>Deletes the given categories (IDs from the latest scan). Canceling stops between categories.</summary>
+    /// <summary>
+    /// Deletes the given categories (IDs from the latest scan). Canceling stops
+    /// between categories and returns what finished, with <see cref="CleanResult.Canceled"/> set.
+    /// </summary>
     Task<CleanResult> RunCleanAsync(IReadOnlyCollection<string> ids, IProgress<CleanProgress>? progress, CancellationToken ct = default);
+
+    /// <summary>Quarantine sessions Duster kept (purge, uninstall leftovers, installers, analyze).</summary>
+    Task<IReadOnlyList<RestoreSession>> ListRestoreAsync(CancellationToken ct = default);
+
+    /// <summary>Puts a listed session back (<paramref name="item"/> 0 = all). Never overwrites.</summary>
+    Task<RestoreRunResult> RestoreAsync(string sessionId, int item, CancellationToken ct = default);
+
+    /// <summary>Deletes listed sessions for good.</summary>
+    Task<RestoreEmptyResult> EmptyRestoreAsync(IReadOnlyCollection<string> sessionIds, CancellationToken ct = default);
+
+    /// <summary>Read-only size scan of a folder (also records history for "changes since").</summary>
+    Task<AnalyzeResult> AnalyzeAsync(string path, IProgress<AnalyzeProgress>? progress, CancellationToken ct = default);
+
+    /// <summary>A folder from the latest scan, by its item ID.</summary>
+    Task<AnalyzeFolder> AnalyzeChildrenAsync(long id, CancellationToken ct = default);
+
+    /// <summary>Sends a scanned item to the Recycle Bin (or quarantine when the bin refuses).</summary>
+    Task<RecycleResult> RecycleAsync(long id, CancellationToken ct = default);
+}
+
+/// <summary>What ViewModels need from the window: dialogs, elevation, pickers.</summary>
+public interface IAppHost
+{
+    /// <summary>Asks before a destructive action; true only when the user picks <paramref name="confirmLabel"/>.</summary>
+    Task<bool> ConfirmAsync(string title, string message, string confirmLabel);
+
+    /// <summary>Relaunches Duster elevated (UAC) and exits this instance; false when the user declines.</summary>
+    bool RestartAsAdministrator();
+
+    /// <summary>A folder the user picked, or null.</summary>
+    Task<string?> PickFolderAsync();
 }

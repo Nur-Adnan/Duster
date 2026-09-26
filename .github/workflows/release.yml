@@ -270,10 +270,67 @@ jobs:
           if-no-files-found: error
           retention-days: 5
 
+  # The Windows GUI (gui/Duster.App): WinUI 3 builds only on Windows. One
+  # self-contained Duster.exe per arch (single-file publish profiles), so it
+  # ships and updates exactly like duw.exe. Not in the SignPath artifact yet:
+  # add Duster.exe to its "binaries" configuration when signing is enabled.
+  build-gui:
+    name: Build Windows GUI
+    needs: [test, test-windows]
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        include:
+          - platform: x64
+            suffix: amd64
+          - platform: ARM64
+            suffix: arm64
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref }}
+          persist-credentials: false
+
+      - name: Extract Version from Tag
+        id: version
+        shell: bash
+        env:
+          INPUT_TAG: ${{ inputs.tag_name }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="$INPUT_TAG"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::Tag '$TAG' is not of the form vMAJOR.MINOR.PATCH[-prerelease]"
+            exit 1
+          fi
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish Duster.exe
+        shell: pwsh
+        run: |
+          dotnet publish gui/Duster.App -c Release -p:Platform=${{ matrix.platform }} -p:Version=${{ steps.version.outputs.version }} -o gui-out
+          if ($LASTEXITCODE) { throw 'dotnet publish failed' }
+          # du update installs Duster.exe alone; anything else the publish needs would be missing after an update.
+          $extra = Get-ChildItem gui-out -File | Where-Object { $_.Name -ne 'Duster.exe' -and $_.Extension -ne '.pdb' }
+          if ($extra) { throw "single-file publish left extra files: $($extra.Name -join ', ')" }
+          Copy-Item gui-out/Duster.exe "duster-gui-windows-${{ matrix.suffix }}.exe"
+
+      - name: Upload GUI Binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: duster-gui-${{ matrix.suffix }}
+          path: duster-gui-windows-${{ matrix.suffix }}.exe
+          if-no-files-found: error
+          retention-days: 5
+
   # ── Stage 3: Package & Release ─────────────────────────────────────
   release:
     name: Package & Publish Release
-    needs: sign
+    needs: [sign, build-gui]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -318,11 +375,19 @@ jobs:
           name: duster-windows-arm64
           path: dist/
 
+      - name: Download GUI Binaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: duster-gui-*
+          merge-multiple: true
+          path: dist/
+
       - name: Create Portable ZIP (AMD64)
         run: |
           mkdir -p dist/portable/Duster-${{ steps.version.outputs.version }}-Portable-x64
           cp dist/duster-windows-amd64.exe dist/portable/Duster-${{ steps.version.outputs.version }}-Portable-x64/du.exe
           cp dist/duw-windows-amd64.exe dist/portable/Duster-${{ steps.version.outputs.version }}-Portable-x64/duw.exe
+          cp dist/duster-gui-windows-amd64.exe dist/portable/Duster-${{ steps.version.outputs.version }}-Portable-x64/Duster.exe
           cp README.md LICENSE SECURITY.md dist/portable/Duster-${{ steps.version.outputs.version }}-Portable-x64/ 2>/dev/null || true
           printf '@echo off\ntitle Duster\n"%%~dp0du.exe" --version\ncmd /K\n' > dist/portable/Duster-${{ steps.version.outputs.version }}-Portable-x64/Launch-Duster.bat
           cd dist/portable && zip -r ../Duster-${{ steps.version.outputs.version }}-Portable-x64.zip Duster-${{ steps.version.outputs.version }}-Portable-x64/
@@ -332,6 +397,7 @@ jobs:
           mkdir -p dist/portable/Duster-${{ steps.version.outputs.version }}-Portable-arm64
           cp dist/duster-windows-arm64.exe dist/portable/Duster-${{ steps.version.outputs.version }}-Portable-arm64/du.exe
           cp dist/duw-windows-arm64.exe dist/portable/Duster-${{ steps.version.outputs.version }}-Portable-arm64/duw.exe
+          cp dist/duster-gui-windows-arm64.exe dist/portable/Duster-${{ steps.version.outputs.version }}-Portable-arm64/Duster.exe
           cp README.md LICENSE SECURITY.md dist/portable/Duster-${{ steps.version.outputs.version }}-Portable-arm64/ 2>/dev/null || true
           printf '@echo off\ntitle Duster\n"%%~dp0du.exe" --version\ncmd /K\n' > dist/portable/Duster-${{ steps.version.outputs.version }}-Portable-arm64/Launch-Duster.bat
           cd dist/portable && zip -r ../Duster-${{ steps.version.outputs.version }}-Portable-arm64.zip Duster-${{ steps.version.outputs.version }}-Portable-arm64/
@@ -427,7 +493,7 @@ jobs:
   # ── Stage 4: Build Inno Setup Installer (Windows runner) ───────────
   installer:
     name: Build Inno Setup Installer
-    needs: [sign, release]
+    needs: [sign, build-gui, release]
     runs-on: windows-latest
     permissions:
       contents: write
@@ -466,6 +532,12 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: duster-windows-amd64
+          path: dist/
+
+      - name: Download AMD64 GUI Binary
+        uses: actions/download-artifact@v4
+        with:
+          name: duster-gui-amd64
           path: dist/
 
       - name: Check Inno Setup

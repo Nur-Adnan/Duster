@@ -1,5 +1,5 @@
 using System.Diagnostics;
-using Duster.App.ViewModels;
+using Duster.Core.ViewModels;
 using Duster.Infrastructure;
 using Microsoft.UI.Xaml;
 
