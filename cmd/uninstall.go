@@ -198,34 +198,40 @@ func scanAppsCmd() tea.Cmd {
 // and a blocking Update() freezes the whole TUI on the confirm screen.
 func runNativeUninstallCmd(app uninstall.InstalledApp) tea.Cmd {
 	return func() tea.Msg {
-		// A per-user (HKCU) uninstaller lives in a folder any of the user's
-		// processes can write; running it elevated would run whatever was
-		// planted there as admin.
-		if app.RegistryHive == "HKCU" && elevation.IsAdmin() {
-			return nativeUninstallDoneMsg{err: errors.New("per-user app: run Duster without administrator rights to uninstall it")}
-		}
-		if uninstDryRun {
-			return nativeUninstallDoneMsg{}
-		}
-		err := runNativeUninstaller(app)
-		// msiexec reports a successful uninstall that needs a reboot as 3010
-		// (ERROR_SUCCESS_REBOOT_REQUIRED) or 1641 (reboot initiated).
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) && (exitErr.ExitCode() == 3010 || exitErr.ExitCode() == 1641) {
-			err = nil
-		}
-		// A cancelled wizard, or an uninstaller that hands off to a temp copy
-		// and exits at once, returns success while the app is still present.
-		// If we can't tell, assume it is (fail closed: skip the sweep).
-		still := false
-		if err == nil {
-			var verr error
-			if still, verr = appStillInstalled(app); verr != nil {
-				still = true
-			}
-		}
+		still, err := uninstallApp(app, uninstDryRun)
 		return nativeUninstallDoneMsg{err: err, stillInstalled: still}
 	}
+}
+
+// uninstallApp runs app's own uninstaller and waits for it (the TUI and the
+// GUI engine share it). stillInstalled reports that its registry entry remains.
+func uninstallApp(app uninstall.InstalledApp, dry bool) (stillInstalled bool, err error) {
+	// A per-user (HKCU) uninstaller lives in a folder any of the user's
+	// processes can write; running it elevated would run whatever was
+	// planted there as admin.
+	if app.RegistryHive == "HKCU" && elevation.IsAdmin() {
+		return false, errors.New("per-user app: run Duster without administrator rights to uninstall it")
+	}
+	if dry {
+		return false, nil
+	}
+	err = runNativeUninstaller(app)
+	// msiexec reports a successful uninstall that needs a reboot as 3010
+	// (ERROR_SUCCESS_REBOOT_REQUIRED) or 1641 (reboot initiated).
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && (exitErr.ExitCode() == 3010 || exitErr.ExitCode() == 1641) {
+		err = nil
+	}
+	// A cancelled wizard, or an uninstaller that hands off to a temp copy
+	// and exits at once, returns success while the app is still present.
+	// If we can't tell, assume it is (fail closed: skip the sweep).
+	if err == nil {
+		var verr error
+		if stillInstalled, verr = appStillInstalled(app); verr != nil {
+			stillInstalled = true
+		}
+	}
+	return stillInstalled, err
 }
 
 // appStillInstalled reports whether app's uninstall registry entry still exists.
@@ -258,40 +264,43 @@ func scanLeftoversCmd(app uninstall.InstalledApp) tea.Cmd {
 
 func runSweepCmd(items []leftoverItem, dry bool) tea.Cmd {
 	return func() tea.Msg {
-		var s *quarantineSession
-		var warn string
-		if !dry {
-			warn = sweepNotice(sweepQuarantine(time.Now(), sweepFull))
-			s = newQuarantineSession("uninstall")
-		}
-		var size int64
-		var failed int
-		for _, item := range items {
-			if !item.Selected {
-				continue
-			}
-
-			var err error
-			if !dry {
-				err = quarantinePath(s, item.Path, item.Size)
-			}
-
-			success := err == nil
-			if !dry { // a dry run deleted nothing, so there is nothing to log
-				logUninstOperation("quarantine", item.Path, item.Size, success)
-			}
-			if success {
-				size += item.Size
-			} else {
-				failed++ // e.g. errNoQuarantine on a network-redirected folder
-			}
-		}
-		var kept int
-		if s != nil {
-			kept = s.Kept()
-		}
+		size, kept, failed, warn := sweepLeftoverItems(items, dry)
 		return sweepCompleteMsg{size: size, kept: kept, failed: failed, sweepWarn: warn}
 	}
+}
+
+// sweepLeftoverItems keeps the selected leftovers in one quarantine session
+// (the TUI and the GUI engine share it). size counts what was kept.
+func sweepLeftoverItems(items []leftoverItem, dry bool) (size int64, kept, failed int, warn string) {
+	var s *quarantineSession
+	if !dry {
+		warn = sweepNotice(sweepQuarantine(time.Now(), sweepFull))
+		s = newQuarantineSession("uninstall")
+	}
+	for _, item := range items {
+		if !item.Selected {
+			continue
+		}
+
+		var err error
+		if !dry {
+			err = quarantinePath(s, item.Path, item.Size)
+		}
+
+		success := err == nil
+		if !dry { // a dry run deleted nothing, so there is nothing to log
+			logUninstOperation("quarantine", item.Path, item.Size, success)
+		}
+		if success {
+			size += item.Size
+		} else {
+			failed++ // e.g. errNoQuarantine on a network-redirected folder
+		}
+	}
+	if s != nil {
+		kept = s.Kept()
+	}
+	return size, kept, failed, warn
 }
 
 func (m uninstallModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -514,7 +523,10 @@ func (m *uninstallModel) recalculateSweep() {
 	m.sweepSize = size
 }
 
-func (m uninstallModel) isProtected(name string) bool {
+func (m uninstallModel) isProtected(name string) bool { return isProtectedApp(name) }
+
+// isProtectedApp reports system components Duster never uninstalls (TUI and GUI engine).
+func isProtectedApp(name string) bool {
 	lowerName := strings.ToLower(name)
 	for _, keyword := range systemProtectedKeywords {
 		if strings.Contains(lowerName, keyword) {
