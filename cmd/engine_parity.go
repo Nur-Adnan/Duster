@@ -262,6 +262,9 @@ func engineStartupRemove(e *engine, _ context.Context, _ int64, raw json.RawMess
 	}
 	live := make([]startupEntry, 0, len(picked))
 	for _, p := range picked {
+		if p.Enabled {
+			return nil, badRequest(p.Name + " is enabled: disable it before removing it")
+		}
 		en, err := liveStartupEntry(p)
 		if err != nil {
 			return nil, err
