@@ -1,0 +1,225 @@
+{
+  "source": "cmd/*.go, main.go at 9bda094 (flags from Flags()/PersistentFlags(), keys from the TUI Update handlers)",
+  "status_values": ["FULL", "PARTIAL", "GUI-NATIVE-EQUIVALENT", "CLI-ONLY", "WINDOWS-ONLY", "NOT-APPLICABLE"],
+  "commands": [
+    {
+      "command": "du", "args": "none", "purpose": "Landing menu (bare du) plus --version/--help",
+      "file": "main.go, cmd/landing.go", "mutating": false, "privileged": false, "platform": "windows",
+      "gui_baseline": "navigation shell", "gui": "NavigationView (the menu), Settings > About (version)", "engine": "hello",
+      "status": "GUI-NATIVE-EQUIVALENT",
+      "flags": [
+        {"flag": "--version", "class": "USER-FACING", "gui": "Settings > About shows Duster and engine versions", "status": "FULL"},
+        {"flag": "--help / help", "class": "SCRIPTING-ONLY", "gui": "labels and descriptions on every page", "status": "CLI-ONLY"}
+      ],
+      "tui": [
+        {"key": "1-9, 0, enter", "action": "open a menu item", "gui": "navigation items", "status": "GUI-NATIVE-EQUIVALENT"},
+        {"key": "d / v / b", "action": "doctor / verify / benchmark", "gui": "Diagnostics page", "status": "GUI-NATIVE-EQUIVALENT"},
+        {"key": "q", "action": "quit", "gui": "close the window", "status": "NOT-APPLICABLE"}
+      ]
+    },
+    {
+      "command": "landing: Drivers", "purpose": "List installed PnP drivers (name, version, manufacturer, signed, class)",
+      "file": "cmd/landing.go, cmd/drivers_windows.go (scanInstalledDrivers: powershell Get-CimInstance, 30 s timeout)",
+      "mutating": false, "privileged": false, "platform": "windows",
+      "gui_baseline": "none", "gui": "System > Drivers", "engine": "drivers.list", "status": "FULL"
+    },
+    {
+      "command": "landing: Startup", "purpose": "List Run-key and Startup-folder entries; space toggles approval, d twice removes disabled entries",
+      "file": "cmd/landing.go, cmd/startup_windows.go (getStartupEntries, toggleStartupApproval, removeStartupEntry)",
+      "mutating": true, "privileged": "HKLM entries need administrator", "platform": "windows",
+      "gui_baseline": "none", "gui": "System > Startup apps (toggle; remove disabled with confirm)",
+      "engine": "startup.list, startup.toggle, startup.remove", "status": "FULL"
+    },
+    {
+      "command": "landing: Network", "purpose": "Live download/upload rate (GetSystemStats every 500 ms)",
+      "file": "cmd/landing.go (fetchNetworkStatsCmd)", "mutating": false, "privileged": false, "platform": "windows",
+      "gui_baseline": "none", "gui": "Home dashboard Network card (live mode)", "engine": "status.get", "status": "GUI-NATIVE-EQUIVALENT"
+    },
+    {
+      "command": "landing: Security", "purpose": "Defender, firewall, UAC, Windows Update, RDP checks and a 0-100 score",
+      "file": "cmd/landing.go, cmd/security_windows.go (runSecurityAudit)", "mutating": false, "privileged": false, "platform": "windows",
+      "gui_baseline": "none", "gui": "System > Security", "engine": "security.run", "status": "FULL"
+    },
+    {
+      "command": "analyze", "args": "[path] (default: current folder)", "purpose": "Disk usage explorer with history and Recycle Bin",
+      "file": "cmd/analyze.go, cmd/analyze_history.go", "mutating": "d sends to Recycle Bin (quarantine fallback)", "privileged": false, "platform": "any",
+      "gui_baseline": "Analyze page", "gui": "Analyze page", "engine": "analyze.scan, analyze.children, analyze.recycle, analyze.reveal", "status": "FULL",
+      "flags": [
+        {"flag": "--json", "class": "SCRIPTING-ONLY", "gui": "the page itself", "status": "CLI-ONLY"},
+        {"flag": "--no-history", "class": "USER-FACING", "gui": "'Don't save this scan' check box", "status": "FULL"},
+        {"flag": "--since", "class": "USER-FACING", "gui": "'Compare with' editable box (previous scan, 24h, 7d, 2w, 30d or any value the CLI accepts)", "status": "FULL"}
+      ],
+      "tui": [
+        {"key": "enter/l/right, backspace/h/left/b", "action": "drill in / up", "gui": "row click, breadcrumb", "status": "FULL"},
+        {"key": "L", "action": "largest files", "gui": "Largest files tab", "status": "FULL"},
+        {"key": "c", "action": "changes panel", "gui": "Changes tab", "status": "FULL"},
+        {"key": "enter on a change", "action": "jump to its folder", "gui": "click a change", "status": "FULL"},
+        {"key": "o", "action": "open in Explorer", "gui": "Show in Explorer", "status": "FULL"},
+        {"key": "d, y/n", "action": "recycle with confirm", "gui": "Move to Recycle Bin with confirm", "status": "FULL"}
+      ]
+    },
+    {
+      "command": "benchmark", "purpose": "Scan, write, delete, JSON speed, heap, goroutines, CPU in its own sandbox",
+      "file": "cmd/benchmark.go (runSystemBenchmark)", "mutating": "own temp sandbox only", "privileged": false, "platform": "any",
+      "gui_baseline": "none", "gui": "Diagnostics > Benchmark (runs only on request)", "engine": "benchmark.run", "status": "FULL",
+      "flags": [{"flag": "--json", "class": "GUI-NATIVE", "gui": "Copy report", "status": "GUI-NATIVE-EQUIVALENT"}]
+    },
+    {
+      "command": "clean", "purpose": "34 categories: scan, select, delete permanently; prefetch needs admin",
+      "file": "cmd/clean.go, cmd/clean_tui.go, cmd/clean_whitelist.go", "mutating": true, "privileged": "prefetch", "platform": "windows",
+      "gui_baseline": "Clean page", "gui": "Clean page", "engine": "clean.scan, clean.run", "status": "FULL",
+      "flags": [
+        {"flag": "--dry-run/-d", "class": "GUI-NATIVE", "gui": "Scan is the preview; nothing is deleted before the confirm", "status": "GUI-NATIVE-EQUIVALENT"},
+        {"flag": "--debug", "class": "SCRIPTING-ONLY", "gui": "none: verbose per-file log for terminals", "status": "CLI-ONLY"},
+        {"flag": "--yes/-y", "class": "GUI-NATIVE", "gui": "confirm dialog", "status": "GUI-NATIVE-EQUIVALENT"},
+        {"flag": "--whitelist/-w", "class": "GUI-NATIVE", "gui": "uncheck categories (aliases chrome/edge/brave/firefox = Web browsers, logs = error reports + log files)", "status": "GUI-NATIVE-EQUIVALENT"}
+      ],
+      "tui": [
+        {"key": "space, enter", "action": "select", "gui": "check boxes", "status": "FULL"},
+        {"key": "d", "action": "dry run", "gui": "Scan", "status": "GUI-NATIVE-EQUIVALENT"},
+        {"key": "r", "action": "rescan", "gui": "Scan again", "status": "FULL"},
+        {"key": "c", "action": "clean", "gui": "Clean selected + confirm", "status": "FULL"},
+        {"key": "v", "action": "operations log", "gui": "Restore > Activity log", "status": "FULL"}
+      ]
+    },
+    {
+      "command": "doctor", "purpose": "10 environment checks (PASS/WARN/FAIL/SKIPPED)",
+      "file": "cmd/doctor.go (runDoctorDiagnostics)", "mutating": false, "privileged": false, "platform": "windows",
+      "gui_baseline": "engine + client only", "gui": "Diagnostics > Health check (restart as administrator for the privilege check)", "engine": "doctor.run", "status": "FULL",
+      "flags": [{"flag": "--json", "class": "GUI-NATIVE", "gui": "Copy report; exit code 1 on FAIL is scripting-only", "status": "GUI-NATIVE-EQUIVALENT"}]
+    },
+    {
+      "command": "engine", "hidden": true, "purpose": "The GUI's private NDJSON stdio host",
+      "file": "cmd/engine.go, cmd/engine_parity.go", "mutating": "per method", "privileged": false, "platform": "any",
+      "gui_baseline": "transport", "gui": "transport", "engine": "all", "status": "NOT-APPLICABLE"
+    },
+    {
+      "command": "installer", "purpose": "Old installers (>= 7 days, >= min size) in Downloads, kept 7 days",
+      "file": "cmd/installer.go (scanInstallerItems, sweepInstallerItems)", "mutating": true, "privileged": false, "platform": "windows",
+      "gui_baseline": "none", "gui": "Cleanup > Old installers", "engine": "installer.scan, installer.run", "status": "FULL",
+      "flags": [
+        {"flag": "--json", "class": "SCRIPTING-ONLY", "gui": "the page", "status": "CLI-ONLY"},
+        {"flag": "--dry-run/-d", "class": "GUI-NATIVE", "gui": "the scan list is the preview", "status": "GUI-NATIVE-EQUIVALENT"},
+        {"flag": "--min-size", "class": "USER-FACING", "gui": "Minimum size (MB) number box", "status": "FULL"}
+      ],
+      "tui": [{"key": "space, a, enter, y/n", "action": "select, all, confirm", "gui": "check boxes, Select all, confirm dialog", "status": "FULL"}]
+    },
+    {
+      "command": "optimize", "purpose": "DNS flush, Delivery Optimization cache, SSD TRIM (admin), --deep DISM component store (admin); reclaim report",
+      "file": "cmd/optimize.go, cmd/reclaim.go (optimizeTasks, execOptimizeTask, buildReclaimItems)", "mutating": true, "privileged": "ssd_trim, component_store", "platform": "windows",
+      "gui_baseline": "none", "gui": "System > Optimize", "engine": "optimize.list, optimize.run", "status": "FULL",
+      "flags": [
+        {"flag": "--json", "class": "SCRIPTING-ONLY", "gui": "the page", "status": "CLI-ONLY"},
+        {"flag": "--dry-run/-d", "class": "USER-FACING", "gui": "Preview (only the component store runs, as DISM's read-only analysis)", "status": "FULL"},
+        {"flag": "--yes/-y", "class": "GUI-NATIVE", "gui": "confirm dialog", "status": "GUI-NATIVE-EQUIVALENT"},
+        {"flag": "--deep", "class": "GUI-NATIVE", "gui": "component store task: unchecked by default, admin shield, long-run warning", "status": "GUI-NATIVE-EQUIVALENT"}
+      ]
+    },
+    {
+      "command": "purge", "purpose": "Developer build artifacts with a project marker; kept 7 days, Recycle Bin, or permanent",
+      "file": "cmd/purge.go (scanArtifactsCtx, purgeOne, purgeTally)", "mutating": true, "privileged": false, "platform": "any",
+      "gui_baseline": "none", "gui": "Cleanup > Developer artifacts", "engine": "purge.scan, purge.run", "status": "FULL",
+      "flags": [
+        {"flag": "--path/-p", "class": "USER-FACING", "gui": "folder box + Browse", "status": "FULL"},
+        {"flag": "--dry-run/-d", "class": "GUI-NATIVE", "gui": "the scan list is the preview", "status": "GUI-NATIVE-EQUIVALENT"},
+        {"flag": "--safe/-s", "class": "USER-FACING", "gui": "'Recycle Bin' option", "status": "FULL"},
+        {"flag": "--permanent", "class": "USER-FACING", "gui": "'Delete permanently' option", "status": "FULL"},
+        {"flag": "--json", "class": "SCRIPTING-ONLY", "gui": "the page", "status": "CLI-ONLY"},
+        {"flag": "--yes/-y", "class": "GUI-NATIVE", "gui": "confirm dialog", "status": "GUI-NATIVE-EQUIVALENT"}
+      ],
+      "tui": [{"key": "space, a, enter, y/n", "action": "select, all, confirm", "gui": "check boxes, Select all, confirm dialog", "status": "FULL"}]
+    },
+    {
+      "command": "remove", "purpose": "Self-uninstall: empty quarantines, delete data dir, schedule, duw.exe, Duster.exe, du.exe (delayed)",
+      "file": "cmd/remove.go", "mutating": true, "privileged": false, "platform": "windows",
+      "gui_baseline": "none", "gui": "Settings > Remove Duster (setup installs: link to Windows Settings > Apps)", "engine": "remove.plan, remove.run", "status": "FULL",
+      "flags": [
+        {"flag": "--json", "class": "SCRIPTING-ONLY", "gui": "the plan is shown in the page", "status": "CLI-ONLY"},
+        {"flag": "--force/-f", "class": "GUI-NATIVE", "gui": "confirm dialog", "status": "GUI-NATIVE-EQUIVALENT"},
+        {"flag": "--dry-run/-d", "class": "GUI-NATIVE", "gui": "the plan shown before confirming", "status": "GUI-NATIVE-EQUIVALENT"}
+      ]
+    },
+    {
+      "command": "restore", "args": "[n|id]", "purpose": "List, restore (whole or --item) or --empty kept sessions; expiry sweep before acting",
+      "file": "cmd/restore.go, cmd/quarantine.go", "mutating": true, "privileged": false, "platform": "any",
+      "gui_baseline": "Restore page (no dry run, no expiry sweep)", "gui": "Recovery > Restore", "engine": "restore.list, restore.run, restore.empty", "status": "FULL",
+      "flags": [
+        {"flag": "--json", "class": "SCRIPTING-ONLY", "gui": "the page", "status": "CLI-ONLY"},
+        {"flag": "--dry-run", "class": "USER-FACING", "gui": "Preview restore", "status": "FULL"},
+        {"flag": "--empty", "class": "USER-FACING", "gui": "Delete for good / Empty quarantine", "status": "FULL"},
+        {"flag": "--yes", "class": "GUI-NATIVE", "gui": "confirm dialog", "status": "GUI-NATIVE-EQUIVALENT"},
+        {"flag": "--item", "class": "USER-FACING", "gui": "Restore on one item", "status": "FULL"}
+      ]
+    },
+    {
+      "command": "schedule", "subcommands": ["status (default)", "on", "off", "run (hidden)"],
+      "purpose": "One per-user Task Scheduler task running duw.exe schedule run",
+      "file": "cmd/schedule*.go", "mutating": true, "privileged": false, "platform": "windows",
+      "gui_baseline": "none", "gui": "Automation > Schedule", "engine": "schedule.get, schedule.set, schedule.off", "status": "FULL",
+      "flags": [
+        {"flag": "--json (all)", "class": "SCRIPTING-ONLY", "gui": "the page", "status": "CLI-ONLY"},
+        {"flag": "on --every", "class": "USER-FACING", "gui": "How often", "status": "FULL"},
+        {"flag": "on --at", "class": "USER-FACING", "gui": "Check time (TimePicker)", "status": "FULL"},
+        {"flag": "on --low-space", "class": "USER-FACING", "gui": "Clean early below (off, 1-50%)", "status": "FULL"},
+        {"flag": "on --add", "class": "USER-FACING", "gui": "Also clean (opt-in categories)", "status": "FULL"},
+        {"flag": "on --dry-run", "class": "USER-FACING", "gui": "Preview", "status": "FULL"},
+        {"flag": "off --uninstall", "class": "INTERNAL", "gui": "none: the setup uninstaller's sweep of every Duster task", "status": "CLI-ONLY"},
+        {"flag": "run (hidden)", "class": "INTERNAL", "gui": "none: the task's own entry point; manual cleaning is the Clean page", "status": "NOT-APPLICABLE"}
+      ]
+    },
+    {
+      "command": "status", "purpose": "Live dashboard: host, OS, CPU %, per-core, temperature, RAM, disks, disk I/O, network, battery, uptime, health, top processes",
+      "file": "cmd/status.go, lib/sysinfo", "mutating": false, "privileged": false, "platform": "windows",
+      "gui_baseline": "Home snapshot (host, OS, CPU %, memory, drives)", "gui": "Home dashboard (Live toggle, Top processes on request)", "engine": "status.get", "status": "FULL",
+      "flags": [{"flag": "--json", "class": "GUI-NATIVE", "gui": "Copy report", "status": "GUI-NATIVE-EQUIVALENT"}]
+    },
+    {
+      "command": "uninstall", "purpose": "Installed apps; runs the app's own uninstaller, then keeps selected leftovers 7 days",
+      "file": "cmd/uninstall.go, lib/uninstall", "mutating": true, "privileged": "HKLM apps (UAC from the app's own uninstaller); HKCU apps refused while elevated", "platform": "windows",
+      "gui_baseline": "none", "gui": "Cleanup > Apps", "engine": "uninstall.list, uninstall.run, uninstall.sweep", "status": "FULL",
+      "flags": [
+        {"flag": "--json", "class": "SCRIPTING-ONLY", "gui": "the page", "status": "CLI-ONLY"},
+        {"flag": "--dry-run/-d", "class": "GUI-NATIVE", "gui": "confirm shows the app and command; leftovers are listed unselected before anything moves", "status": "GUI-NATIVE-EQUIVALENT"}
+      ],
+      "tui": [{"key": "type to search, enter, space, a, y/n", "action": "search, pick, select leftovers, confirm", "gui": "search box, Uninstall, check boxes, confirm", "status": "FULL"}]
+    },
+    {
+      "command": "update", "purpose": "GitHub release check; mandatory SHA-256; installs du.exe, duw.exe, Duster.exe",
+      "file": "cmd/update.go", "mutating": true, "privileged": false, "platform": "windows",
+      "gui_baseline": "none", "gui": "Settings > Updates", "engine": "update.check, update.install", "status": "FULL",
+      "flags": [
+        {"flag": "--json", "class": "SCRIPTING-ONLY", "gui": "the page", "status": "CLI-ONLY"},
+        {"flag": "--yes/-y", "class": "GUI-NATIVE", "gui": "Install button + confirm", "status": "GUI-NATIVE-EQUIVALENT"},
+        {"flag": "--check/-c", "class": "GUI-NATIVE", "gui": "Check for updates", "status": "GUI-NATIVE-EQUIVALENT"},
+        {"flag": "--force/-f", "class": "USER-FACING", "gui": "Reinstall this version (repairs a missing duw.exe or Duster.exe)", "status": "FULL"}
+      ]
+    },
+    {
+      "command": "vdisk", "purpose": "Compact WSL/Docker VHDX with diskpart (admin); blocked disks explained",
+      "file": "cmd/vdisk.go, cmd/vdisk_tui.go", "mutating": true, "privileged": "compaction", "platform": "windows",
+      "gui_baseline": "none", "gui": "Storage > Virtual disks", "engine": "vdisk.scan, vdisk.run", "status": "FULL",
+      "flags": [
+        {"flag": "--json", "class": "SCRIPTING-ONLY", "gui": "the page", "status": "CLI-ONLY"},
+        {"flag": "--dry-run/-d", "class": "GUI-NATIVE", "gui": "the scan list with estimates is the preview", "status": "GUI-NATIVE-EQUIVALENT"},
+        {"flag": "--yes/-y", "class": "GUI-NATIVE", "gui": "confirm dialog", "status": "GUI-NATIVE-EQUIVALENT"}
+      ]
+    },
+    {
+      "command": "verify", "purpose": "8 self-tests in temp sandboxes",
+      "file": "cmd/verify.go (runIntegrityVerification)", "mutating": "own temp sandboxes only", "privileged": false, "platform": "any",
+      "gui_baseline": "none", "gui": "Diagnostics > Self-test", "engine": "verify.run", "status": "FULL",
+      "flags": [{"flag": "--json", "class": "GUI-NATIVE", "gui": "Copy report; exit code is scripting-only", "status": "GUI-NATIVE-EQUIVALENT"}]
+    }
+  ],
+  "environment": [
+    {"name": "DU_NO_OPLOG", "use": "tests: disable operations.log", "status": "CLI-ONLY"},
+    {"name": "LOCALAPPDATA, APPDATA, USERPROFILE, WINDIR", "use": "data dir, Startup folder, Downloads, paths", "status": "NOT-APPLICABLE"},
+    {"name": "TERM, WT_SESSION", "use": "doctor's terminal check", "status": "NOT-APPLICABLE"},
+    {"name": "DU_E2E_BIN, DUSTER_ENGINE", "use": "test harnesses", "status": "NOT-APPLICABLE"}
+  ],
+  "cross_cutting": [
+    {"item": "exit codes (doctor, verify, optimize, update, purge --json)", "status": "CLI-ONLY", "gui": "each page shows failures"},
+    {"item": "piped stdout = headless", "status": "CLI-ONLY"},
+    {"item": "configuration", "status": "NOT-APPLICABLE", "gui": "Duster has no config file; scheduled-clean settings live in the task (Schedule page); the GUI follows the Windows theme"}
+  ]
+}

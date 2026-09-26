@@ -223,40 +223,43 @@ func scanInstallersCmd(minSizeMB int64) tea.Cmd {
 
 func runSetupSweepCmd(items []installerItem, dry bool) tea.Cmd {
 	return func() tea.Msg {
-		var s *quarantineSession
-		var warn string
-		if !dry {
-			warn = sweepNotice(sweepQuarantine(time.Now(), sweepFull))
-			s = newQuarantineSession("installer")
-		}
-		var size int64
-		var failed int
-		for _, item := range items {
-			if !item.Selected {
-				continue
-			}
-
-			var err error
-			if !dry {
-				err = quarantinePath(s, item.Path, item.Size)
-			}
-
-			success := err == nil
-			if !dry { // a dry run deleted nothing, so there is nothing to log
-				logInstOperation("quarantine", item.Path, item.Size, success)
-			}
-			if success {
-				size += item.Size
-			} else {
-				failed++ // e.g. errNoQuarantine on a network-redirected Downloads
-			}
-		}
-		var kept int
-		if s != nil {
-			kept = s.Kept()
-		}
+		size, kept, failed, warn := sweepInstallerItems(items, dry)
 		return setupSweepCompleteMsg{size: size, kept: kept, failed: failed, sweepWarn: warn}
 	}
+}
+
+// sweepInstallerItems keeps the selected installers in one quarantine session
+// (the TUI and the GUI engine share it). size counts what was kept.
+func sweepInstallerItems(items []installerItem, dry bool) (size int64, kept, failed int, warn string) {
+	var s *quarantineSession
+	if !dry {
+		warn = sweepNotice(sweepQuarantine(time.Now(), sweepFull))
+		s = newQuarantineSession("installer")
+	}
+	for _, item := range items {
+		if !item.Selected {
+			continue
+		}
+
+		var err error
+		if !dry {
+			err = quarantinePath(s, item.Path, item.Size)
+		}
+
+		success := err == nil
+		if !dry { // a dry run deleted nothing, so there is nothing to log
+			logInstOperation("quarantine", item.Path, item.Size, success)
+		}
+		if success {
+			size += item.Size
+		} else {
+			failed++ // e.g. errNoQuarantine on a network-redirected Downloads
+		}
+	}
+	if s != nil {
+		kept = s.Kept()
+	}
+	return size, kept, failed, warn
 }
 
 func (m installerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {

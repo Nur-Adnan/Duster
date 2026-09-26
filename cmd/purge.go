@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -865,11 +866,19 @@ func runHeadlessPurge(target string) {
 // for the TUI and headless paths, so the two can never disagree about what is
 // eligible for deletion.
 func scanArtifacts(root string, onFound func(DiscoveredArtifact, int)) ([]DiscoveredArtifact, error) {
+	return scanArtifactsCtx(context.Background(), root, onFound)
+}
+
+// scanArtifactsCtx is scanArtifacts that stops when ctx is done (the GUI engine's Stop).
+func scanArtifactsCtx(ctx context.Context, root string, onFound func(DiscoveredArtifact, int)) ([]DiscoveredArtifact, error) {
 	list := []DiscoveredArtifact{} // non-nil so JSON renders [] instead of null
 	// A long-form root keeps "~" out of every child path, so the per-folder
 	// IsValidPath below skips its GetLongPathNameW disk lookup.
 	root = fs.LongPath(root)
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if cerr := ctx.Err(); cerr != nil {
+			return cerr
+		}
 		if err != nil {
 			return nil
 		}
