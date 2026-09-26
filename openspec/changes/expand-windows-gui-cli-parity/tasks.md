@@ -55,7 +55,7 @@ Overall status: IMPLEMENTED — WINDOWS VERIFICATION PENDING. Groups 1-8 are imp
 - [x] 8.4 Security and performance review of every new method and page; fix findings with tests
 - [x] 8.5 Packaging check (no new files, single-file publish unchanged, artifact names distinct); extend docs/gui-windows-verification.md with the new pages
 - [x] 8.6 Final parity audit against the CLI source; update docs/gui-cli-parity.md and cli-inventory.json; `openspec validate expand-windows-gui-cli-parity --strict`
-- [x] 8.7 WinUI code review (winui-code-review checklist): bindings, templates, accessibility names, theming, no blocking waits; `gui\smoke.ps1` now opens every page through UI Automation, so a page that fails to load fails the smoke
+- [x] 8.7 WinUI code review: bindings, templates, accessibility names, theming, no blocking waits; `gui\smoke.ps1` now opens every page through UI Automation, so a page that fails to load fails the smoke
 
 ## 9. Final Windows verification (M17)
 
