@@ -19,5 +19,13 @@ public sealed partial class HomePage : Page
         ViewModel = (HomeViewModel)e.Parameter;
         Bindings.Update();
         base.OnNavigatedTo(e);
+        ViewModel.IsVisible = true;
+    }
+
+    // Live never polls a page nobody is looking at.
+    protected override void OnNavigatedFrom(NavigationEventArgs e)
+    {
+        ViewModel.IsVisible = false;
+        base.OnNavigatedFrom(e);
     }
 }

@@ -23,8 +23,14 @@ public sealed partial class RestoreViewModel : ObservableObject
 
     public ObservableCollection<RestoreSession> Sessions { get; } = [];
 
+    /// <summary>Recent entries of Duster's operations log, newest first (the clean screen's v key).</summary>
+    public ObservableCollection<OplogEntry> Activity { get; } = [];
+
     [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(RestoreSessionCommand), nameof(EmptySessionCommand))]
+    public partial string ActivityStatus { get; set; } = "";
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(RestoreSessionCommand), nameof(EmptySessionCommand), nameof(PreviewSessionCommand))]
     [NotifyPropertyChangedFor(nameof(SelectedItems), nameof(SelectedTitle))]
     public partial RestoreSession? SelectedSession { get; set; }
 
@@ -36,7 +42,7 @@ public sealed partial class RestoreViewModel : ObservableObject
         : "";
 
     [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(RestoreSessionCommand), nameof(EmptySessionCommand), nameof(EmptyAllCommand), nameof(RefreshCommand))]
+    [NotifyCanExecuteChangedFor(nameof(RestoreSessionCommand), nameof(EmptySessionCommand), nameof(EmptyAllCommand), nameof(RefreshCommand), nameof(PreviewSessionCommand))]
     public partial bool IsBusy { get; set; }
 
     [ObservableProperty]
@@ -54,6 +60,38 @@ public sealed partial class RestoreViewModel : ObservableObject
 
     [RelayCommand(CanExecute = nameof(HasSelection))]
     private Task RestoreSessionAsync() => RestoreAsync(SelectedSession!, 0);
+
+    /// <summary>What Restore all would do, without moving anything (<c>du restore --dry-run</c>).</summary>
+    [RelayCommand(CanExecute = nameof(HasSelection))]
+    private Task PreviewSessionAsync() => RunAsync(async () =>
+    {
+        Status = "Preview: " + Summary(await _engine.CallAsync(Calls.Restore(SelectedSession!.Id, 0, dryRun: true)));
+    });
+
+    [RelayCommand]
+    private async Task LoadActivityAsync()
+    {
+        if (_engine.State != EngineState.Connected)
+        {
+            return;
+        }
+        try
+        {
+            var log = await _engine.CallAsync(Calls.Oplog());
+            Activity.Clear();
+            foreach (var entry in log.Entries)
+            {
+                Activity.Add(entry);
+            }
+            ActivityStatus = log.Entries.Count == 0
+                ? "Nothing logged yet. Every delete, move and restore Duster makes is recorded here."
+                : $"Newest first{(log.More > 0 ? $"; {log.More:N0} older entries are in operations.log" : "")}.";
+        }
+        catch (EngineException ex)
+        {
+            ActivityStatus = ex.Message;
+        }
+    }
 
     /// <summary>Restores one item of the selected session (1-based <see cref="RestoreItem.Number"/>).</summary>
     [RelayCommand]
@@ -101,7 +139,8 @@ public sealed partial class RestoreViewModel : ObservableObject
     private async Task LoadAsync()
     {
         var selected = SelectedSession?.Id;
-        var sessions = await _engine.ListRestoreAsync();
+        var list = await _engine.CallAsync(Calls.RestoreList());
+        var sessions = list.Sessions;
         Sessions.Clear();
         foreach (var s in sessions)
         {
@@ -115,11 +154,16 @@ public sealed partial class RestoreViewModel : ObservableObject
                 ? "Nothing is kept right now. Items Duster sets aside stay restorable for 7 days."
                 : $"{Plural(sessions.Count, "session", "sessions")}, {Format.Bytes(sessions.Sum(s => s.Size))} kept.";
         }
+        // Same 7-day expiry as du restore, which says what it removed.
+        foreach (var note in new[] { list.Expired, list.Warning }.Where(n => n.Length > 0))
+        {
+            Status += " " + note;
+        }
     }
 
     private Task RestoreAsync(RestoreSession session, int item) => RunAsync(async () =>
     {
-        var result = await _engine.RestoreAsync(session.Id, item);
+        var result = await _engine.CallAsync(Calls.Restore(session.Id, item, dryRun: false));
         Status = Summary(result);
         await LoadAsync();
     });
@@ -155,6 +199,11 @@ public sealed partial class RestoreViewModel : ObservableObject
         if (restored.Count > 0)
         {
             parts.Add($"Restored {Plural(restored.Count, "item", "items")} ({Format.Bytes(restored.Sum(r => r.Size))})");
+        }
+        var would = result.Results.Where(r => r.Status == "would restore").ToList();
+        if (would.Count > 0)
+        {
+            parts.Add($"would restore {Plural(would.Count, "item", "items")} ({Format.Bytes(would.Sum(r => r.Size))})");
         }
         var skipped = result.Results.Count(r => r.Status == "skipped");
         if (skipped > 0)

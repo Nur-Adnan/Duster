@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="Duster.App.Views.SystemPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:core="using:Duster.Core"
+    xmlns:local="using:Duster.App"
+    xmlns:vm="using:Duster.Core.ViewModels">
+
+    <Grid Padding="{StaticResource PagePadding}" RowSpacing="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Style="{StaticResource PageTitleStyle}" Text="Startup, security, drivers" />
+
+        <SelectorBar x:Name="ViewSelector" Grid.Row="1" SelectionChanged="Views_SelectionChanged">
+            <SelectorBarItem x:Name="StartupView" IsSelected="True" Text="Startup apps" AutomationProperties.AutomationId="SystemStartupView" />
+            <SelectorBarItem x:Name="SecurityView" Text="Security" AutomationProperties.AutomationId="SystemSecurityView" />
+            <SelectorBarItem x:Name="DriversView" Text="Drivers" AutomationProperties.AutomationId="SystemDriversView" />
+        </SelectorBar>
+
+        <StackPanel Grid.Row="2" Spacing="4">
+            <ProgressBar IsIndeterminate="True" Visibility="{x:Bind local:Ui.Visible(ViewModel.IsBusy), Mode=OneWay}" AutomationProperties.Name="Working" />
+            <TextBlock Style="{StaticResource SecondaryTextStyle}" Text="{x:Bind ViewModel.Status, Mode=OneWay}" AutomationProperties.AutomationId="SystemStatus" AutomationProperties.LiveSetting="Polite" />
+        </StackPanel>
+
+        <Grid Grid.Row="3">
+            <Grid x:Name="StartupPanel" RowSpacing="8">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <InfoBar
+                    Title="Some entries start for every user"
+                    IsClosable="False"
+                    IsOpen="{x:Bind ViewModel.NeedsAdmin, Mode=OneWay}"
+                    Message="Changing them needs administrator rights."
+                    Severity="Informational"
+                    AutomationProperties.AutomationId="SystemAdminBar">
+                    <InfoBar.ActionButton>
+                        <Button Command="{x:Bind ViewModel.RestartAsAdministratorCommand}" Content="Restart as administrator" AutomationProperties.AutomationId="SystemRestartAsAdmin" />
+                    </InfoBar.ActionButton>
+                </InfoBar>
+                <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8">
+                    <Button Command="{x:Bind ViewModel.LoadStartupCommand}" AutomationProperties.AutomationId="SystemStartupRefresh">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <FontIcon FontSize="14" Glyph="&#xE72C;" />
+                            <TextBlock Text="Refresh" />
+                        </StackPanel>
+                    </Button>
+                    <Button Command="{x:Bind ViewModel.RemoveDisabledCommand}" Content="Remove disabled entries…" AutomationProperties.AutomationId="SystemStartupRemove" />
+                </StackPanel>
+                <ListView
+                    Grid.Row="2"
+                    ItemsSource="{x:Bind ViewModel.Startup}"
+                    SelectionMode="None"
+                    AutomationProperties.AutomationId="SystemStartupList"
+                    AutomationProperties.Name="Startup apps">
+                    <ListView.ItemTemplate>
+                        <DataTemplate x:DataType="vm:StartupRow">
+                            <Grid Padding="0,6" ColumnSpacing="16">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <TextBlock Text="{x:Bind Entry.Name}" />
+                                        <FontIcon FontSize="12" Glyph="&#xE7EF;" ToolTipService.ToolTip="Needs administrator rights" Visibility="{x:Bind local:Ui.Visible(Entry.AdminRequired)}" AutomationProperties.Name="Needs administrator rights" />
+                                    </StackPanel>
+                                    <TextBlock Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind Entry.Command}" TextTrimming="CharacterEllipsis" ToolTipService.ToolTip="{x:Bind Entry.Command}" />
+                                    <TextBlock Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind Entry.Location}" />
+                                </StackPanel>
+                                <TextBlock Grid.Column="1" VerticalAlignment="Center" Text="{x:Bind State}" />
+                                <Button
+                                    Grid.Column="2"
+                                    VerticalAlignment="Center"
+                                    Click="Toggle_Click"
+                                    Content="{x:Bind ToggleLabel}"
+                                    IsEnabled="{x:Bind CanChange}"
+                                    Tag="{x:Bind}"
+                                    AutomationProperties.Name="{x:Bind ToggleName}" />
+                            </Grid>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+            </Grid>
+
+            <Grid x:Name="SecurityPanel" RowSpacing="8" Visibility="Collapsed">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <TextBlock Style="{StaticResource SecondaryTextStyle}" Text="{x:Bind ViewModel.SecuritySummary, Mode=OneWay}" />
+                <Button Grid.Row="1" Command="{x:Bind ViewModel.CheckSecurityCommand}" Content="Check security" Style="{StaticResource AccentButtonStyle}" AutomationProperties.AutomationId="SystemSecurityRun" />
+                <ListView
+                    Grid.Row="2"
+                    ItemsSource="{x:Bind ViewModel.Security}"
+                    SelectionMode="None"
+                    AutomationProperties.AutomationId="SystemSecurityList"
+                    AutomationProperties.Name="Security checks">
+                    <ListView.ItemTemplate>
+                        <DataTemplate x:DataType="core:SecurityCheck">
+                            <Grid Padding="0,6" ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <FontIcon VerticalAlignment="Top" FontSize="16" Glyph="{x:Bind local:Ui.StatusGlyph(Status)}" AutomationProperties.Name="{x:Bind Status}" />
+                                <StackPanel Grid.Column="1">
+                                    <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="{x:Bind Name}" />
+                                    <TextBlock Style="{StaticResource SecondaryTextStyle}" Text="{x:Bind Details}" />
+                                </StackPanel>
+                            </Grid>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+            </Grid>
+
+            <Grid x:Name="DriversPanel" RowSpacing="8" Visibility="Collapsed">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <TextBlock Style="{StaticResource SecondaryTextStyle}" Text="{x:Bind ViewModel.DriversSummary, Mode=OneWay}" />
+                <Button Grid.Row="1" Command="{x:Bind ViewModel.ListDriversCommand}" Content="List drivers" Style="{StaticResource AccentButtonStyle}" AutomationProperties.AutomationId="SystemDriversRun" />
+                <ListView
+                    Grid.Row="2"
+                    ItemsSource="{x:Bind ViewModel.Drivers}"
+                    SelectionMode="None"
+                    AutomationProperties.AutomationId="SystemDriversList"
+                    AutomationProperties.Name="Installed drivers">
+                    <ListView.ItemTemplate>
+                        <DataTemplate x:DataType="core:DriverInfo">
+                            <Grid Padding="0,4" ColumnSpacing="16">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="160" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="{x:Bind Name}" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind Manufacturer}" />
+                                </StackPanel>
+                                <TextBlock Grid.Column="1" VerticalAlignment="Center" Text="{x:Bind Version}" />
+                                <TextBlock Grid.Column="2" VerticalAlignment="Center" Text="{x:Bind local:Ui.Signed(Signed)}" />
+                            </Grid>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+            </Grid>
+        </Grid>
+    </Grid>
+</Page>

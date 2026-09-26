@@ -43,6 +43,32 @@ public sealed partial class AnalyzePage : Page
     private void Rows_SelectionChanged(object sender, SelectionChangedEventArgs e) =>
         ViewModel.SelectedRow = (sender as ListView)?.SelectedItem as AnalyzeRow;
 
+    private void Changes_ItemClick(object sender, ItemClickEventArgs e)
+    {
+        // A change that is gone has no folder to open; its Explorer button still works.
+        if (e.ClickedItem is ChangeRow { CanOpen: true } row)
+        {
+            ViewModel.OpenChangeCommand.Execute(row);
+            ViewSelector.SelectedItem = FolderView; // show where it went
+        }
+    }
+
+    private void RevealChange_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: ChangeRow row })
+        {
+            ViewModel.RevealChangeCommand.Execute(row);
+        }
+    }
+
+    private void Reveal_Click(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel.SelectedRow is { } row)
+        {
+            ViewModel.RevealCommand.Execute(row);
+        }
+    }
+
     // Which list is showing is view state only.
     private void Views_SelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
     {

@@ -1,3 +1,4 @@
+using System.Reflection;
 using Duster.Core.ViewModels;
 using Duster.App.Views;
 using Microsoft.UI.Windowing;
@@ -16,12 +17,22 @@ public sealed partial class MainWindow : Window
     {
         ViewModel = viewModel;
         var host = new WindowsAppHost(this);
+        var engine = viewModel.Engine;
         _pages = new()
         {
-            ["home"] = (typeof(HomePage), new HomeViewModel(viewModel.Engine, Navigate)),
-            ["clean"] = (typeof(CleanPage), new CleanViewModel(viewModel.Engine, host)),
-            ["restore"] = (typeof(RestorePage), new RestoreViewModel(viewModel.Engine, host)),
-            ["analyze"] = (typeof(AnalyzePage), new AnalyzeViewModel(viewModel.Engine, host)),
+            ["home"] = (typeof(HomePage), new HomeViewModel(engine, host, Navigate)),
+            ["clean"] = (typeof(CleanPage), new CleanViewModel(engine, host)),
+            ["purge"] = (typeof(PurgePage), new PurgeViewModel(engine, host)),
+            ["installers"] = (typeof(InstallersPage), new InstallersViewModel(engine, host)),
+            ["apps"] = (typeof(AppsPage), new AppsViewModel(engine, host)),
+            ["analyze"] = (typeof(AnalyzePage), new AnalyzeViewModel(engine, host)),
+            ["vdisk"] = (typeof(VirtualDisksPage), new VirtualDisksViewModel(engine, host)),
+            ["restore"] = (typeof(RestorePage), new RestoreViewModel(engine, host)),
+            ["optimize"] = (typeof(OptimizePage), new OptimizeViewModel(engine, host)),
+            ["system"] = (typeof(SystemPage), new SystemViewModel(engine, host)),
+            ["diagnostics"] = (typeof(DiagnosticsPage), new DiagnosticsViewModel(engine, host)),
+            ["schedule"] = (typeof(SchedulePage), new ScheduleViewModel(engine, host)),
+            ["settings"] = (typeof(SettingsPage), new SettingsViewModel(engine, host, AppVersion())),
         };
         InitializeComponent();
 
@@ -36,7 +47,11 @@ public sealed partial class MainWindow : Window
     public ShellViewModel ViewModel { get; }
 
     private void Navigate(string tag) =>
-        NavView.SelectedItem = NavView.MenuItems.OfType<NavigationViewItem>().First(i => i.Tag is string t && t == tag);
+        NavView.SelectedItem = NavView.MenuItems.Concat(NavView.FooterMenuItems).OfType<NavigationViewItem>().First(i => i.Tag is string t && t == tag);
+
+    /// <summary>The release version (dotnet publish -p:Version), without the build metadata suffix.</summary>
+    private static string AppVersion() =>
+        typeof(MainWindow).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "unknown";
 
     private void NavView_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {

@@ -43,6 +43,28 @@ public sealed class EngineClientTests
         Assert.AreEqual("", clean.Categories[0].Description);
         var restored = JsonSerializer.Deserialize("""{"results":[{"path":"/p","status":"restored"}]}""", EngineJson.Default.RestoreRunResult)!;
         Assert.AreEqual("", restored.Results[0].Reason);
+        var r = JsonSerializer.Deserialize("""{"freed":1}""", EngineJson.Default.PurgeResult)!;
+        Assert.AreEqual("", r.Notice, "PurgeResult.Notice");
+    }
+
+    [TestMethod]
+    public void ParityDtosReadTheEngineWireNames()
+    {
+        var purge = JsonSerializer.Deserialize("""{"freed":1,"recycled":2,"kept":3,"kept_count":1,"done":2,"failed":1,"errors":["/p: busy"],"notice":"n"}""", EngineJson.Default.PurgeResult)!;
+        Assert.AreEqual((1L, 2L, 3L, 1, 2), (purge.Freed, purge.Recycled, purge.Kept, purge.KeptCount, purge.Done));
+        var disks = JsonSerializer.Deserialize("""{"disks":[{"id":1,"on_disk_bytes":9,"used_known":true,"blocked":"sparse","estimate_known":true}],"admin":true,"advice":[]}""", EngineJson.Default.VirtualDiskList)!;
+        Assert.AreEqual((9L, "sparse", true), (disks.Disks[0].OnDiskBytes, disks.Disks[0].Blocked, disks.Disks[0].EstimateKnown));
+        var schedule = JsonSerializer.Deserialize("""{"enabled":true,"every":"weekly","at":"19:00","low_space_percent":null,"categories":[],"next_check":"2026-09-27T19:00:00+06:00","last_check":null,"last_clean":null,"warnings":[]}""", EngineJson.Default.ScheduleStatus)!;
+        Assert.IsNull(schedule.LowSpacePercent);
+        Assert.AreEqual(19, schedule.NextCheck!.Value.Hour);
+        var apps = JsonSerializer.Deserialize("""{"apps":[{"id":1,"protected":true,"per_user":true,"name":"x","install_date":"20260101"}],"admin":false}""", EngineJson.Default.AppList)!;
+        Assert.IsTrue(apps.Apps[0].Protected && apps.Apps[0].PerUser);
+        var installers = JsonSerializer.Deserialize("""{"items":[{"id":1,"path":"p","name":"n","size_bytes":5,"age_days":9,"modified_time":"2026-01-01T00:00:00Z","selected":true}]}""", EngineJson.Default.InstallerScan)!;
+        Assert.AreEqual((5L, 9), (installers.Items[0].SizeBytes, installers.Items[0].AgeDays));
+        var bench = JsonSerializer.Deserialize("""{"scan_files_per_sec":2.5,"cpu_usage_percent":7,"json_speed_per_sec":3}""", EngineJson.Default.BenchmarkMetrics)!;
+        Assert.AreEqual((2.5, 7.0), (bench.ScanFilesPerSec, bench.CpuUsagePercent));
+        var folder = JsonSerializer.Deserialize("""{"id":3,"path":"/r/a","trail":[{"id":1,"path":"/r"}],"entries":[],"largest":[]}""", EngineJson.Default.AnalyzeFolder)!;
+        Assert.AreEqual("/r", folder.Trail.Single().Path);
     }
 
     [TestMethod]
@@ -51,7 +73,7 @@ public sealed class EngineClientTests
         const string stats = """{"HostName":"pc","CPUPercent":12.5,"RAMTotal":8,"Disks":[{"Drive":"C:","Total":100,"Free":40,"Used":60}],"TopProcesses":null}""";
         var s = JsonSerializer.Deserialize(stats, EngineJson.Default.SystemStats)!;
         Assert.AreEqual("pc", s.HostName);
-        Assert.AreEqual(40UL, s.Disks[0].Free);
+        Assert.AreEqual(40UL, s.Disks![0].Free);
 
         const string clean = """{"categories":[{"id":"prefetch","group":"System Core","bytes":5,"admin_required":true,"error":"admin_required"}],"bytes":5,"files":1}""";
         var c = JsonSerializer.Deserialize(clean, EngineJson.Default.CleanResult)!;
@@ -129,6 +151,54 @@ public sealed class EngineClientTests
     }
 
     [TestMethod]
+    public async Task RealEnginePurgeKeepPreviewAndRestoreRoundTrip()
+    {
+        // The engine inherits these: its quarantine and log go to a temp profile, and
+        // the log is on (CI sets DU_NO_OPLOG) because this test checks the purge was logged.
+        var profile = Directory.CreateTempSubdirectory().FullName;
+        var saved = (Environment.GetEnvironmentVariable("LOCALAPPDATA"), Environment.GetEnvironmentVariable("DU_NO_OPLOG"));
+        Environment.SetEnvironmentVariable("LOCALAPPDATA", profile);
+        Environment.SetEnvironmentVariable("DU_NO_OPLOG", null);
+        try
+        {
+            await using var client = RealEngine();
+            await client.StartAsync(TestContext.CancellationToken);
+            var work = Directory.CreateTempSubdirectory().FullName;
+            var modules = Path.Combine(work, "app", "node_modules");
+            Directory.CreateDirectory(Path.Combine(modules, "pkg"));
+            File.WriteAllBytes(Path.Combine(modules, "pkg", "index.js"), new byte[64]);
+            File.WriteAllText(Path.Combine(work, "app", "package.json"), "{}");
+
+            var scan = await client.CallAsync(Calls.PurgeScan(work), null, TestContext.CancellationToken);
+            var artifact = scan.Artifacts.Single();
+            Assert.AreEqual(modules, artifact.Path);
+            var kept = await client.CallAsync(Calls.Purge([artifact.Id], "keep"), null, TestContext.CancellationToken);
+            Assert.AreEqual((1, 64L, 0L), (kept.KeptCount, kept.Kept, kept.Freed), "kept bytes are never freed bytes");
+            Assert.IsFalse(Directory.Exists(modules));
+
+            var session = (await client.CallAsync(Calls.RestoreList(), null, TestContext.CancellationToken)).Sessions.Single();
+            var preview = await client.CallAsync(Calls.Restore(session.Id, 0, dryRun: true), null, TestContext.CancellationToken);
+            Assert.AreEqual("would restore", preview.Results.Single().Status);
+            Assert.IsFalse(Directory.Exists(modules), "a preview moved the folder back");
+            await client.CallAsync(Calls.Restore(session.Id, 0, dryRun: false), null, TestContext.CancellationToken);
+            Assert.IsTrue(File.Exists(Path.Combine(modules, "pkg", "index.js")));
+
+            var log = await client.CallAsync(Calls.Oplog(), null, TestContext.CancellationToken);
+            Assert.IsTrue(log.Entries.Any(e => e.Command == "purge"), "the purge was logged");
+            var plan = await client.CallAsync(Calls.RemovePlan(), null, TestContext.CancellationToken);
+            Assert.AreEqual(Path.Combine(profile, "Duster"), plan.DataDir);
+
+            var bad = await Assert.ThrowsExactlyAsync<EngineException>(() => client.CallAsync(Calls.Purge([99], "keep"), null, TestContext.CancellationToken));
+            Assert.AreEqual("bad_request", bad.Code, "an ID the engine did not list is refused");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LOCALAPPDATA", saved.Item1);
+            Environment.SetEnvironmentVariable("DU_NO_OPLOG", saved.Item2);
+        }
+    }
+
+    [TestMethod]
     public async Task RealEngineAnalyzeRecycleAndRestoreRoundTrip()
     {
         // The engine inherits these: its quarantine, history and log go to a temp profile.
@@ -146,7 +216,7 @@ public sealed class EngineClientTests
             File.WriteAllBytes(victim, new byte[4096]);
             File.WriteAllBytes(Path.Combine(root, "small.bin"), new byte[16]);
 
-            var scan = await client.AnalyzeAsync(root, null, TestContext.CancellationToken);
+            var scan = await client.AnalyzeAsync(root, "", false, null, TestContext.CancellationToken);
             Assert.AreEqual(4112, scan.Root.Size);
             Assert.IsNull(scan.Changes, "first scan has nothing to compare with");
             var sub = await client.AnalyzeChildrenAsync(scan.Root.Entries.Single(e => e.IsDir).Id, TestContext.CancellationToken);
@@ -160,9 +230,9 @@ public sealed class EngineClientTests
                 Assert.Inconclusive("the Recycle Bin took the file, so there is no quarantine session to restore");
             }
 
-            var session = (await client.ListRestoreAsync(TestContext.CancellationToken)).Single();
+            var session = (await client.CallAsync(Calls.RestoreList(), null, TestContext.CancellationToken)).Sessions.Single();
             Assert.AreEqual("analyze", session.Command);
-            var restored = await client.RestoreAsync(session.Id, 0, TestContext.CancellationToken);
+            var restored = await client.CallAsync(Calls.Restore(session.Id, 0, dryRun: false), null, TestContext.CancellationToken);
             Assert.AreEqual("restored", restored.Results.Single().Status);
             Assert.IsTrue(File.Exists(victim));
         }

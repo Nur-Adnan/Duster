@@ -455,47 +455,73 @@ func executeScheduleStatus() {
 }
 
 func executeScheduleOn() {
-	every, err := parseEvery(schedEvery)
+	cfg, notes, err := parseScheduleOn(schedEvery, schedAt, schedLowSpace, schedAdd)
 	if err != nil {
 		scheduleFail(err)
 	}
-	at, err := parseAt(schedAt)
+	st, err := applyScheduleOn(cfg, notes, schedDryRun)
 	if err != nil {
 		scheduleFail(err)
 	}
-	low, err := parseLowSpace(schedLowSpace)
-	if err != nil {
-		scheduleFail(err)
+	if st.DryRun && !schedJSON {
+		fmt.Println("Dry run: nothing was registered. A run now would clean:")
+		names := scheduleCategoryNames()
+		for _, r := range st.WouldClean {
+			fmt.Printf("  %-32s %s\n", names[r.ID], strings.TrimSpace(formatBytes(r.Freed)))
+		}
+		fmt.Println()
 	}
-	add, notes, err := resolveAdd(schedAdd)
-	if err != nil {
-		scheduleFail(err)
-	}
-	cfg := scheduleConfig{Every: every, At: at, LowSpace: low, Add: add}
+	printScheduleStatus(st)
+}
 
+// parseScheduleOn validates `schedule on`'s settings with the parsers `run`
+// re-applies (the CLI flags and the GUI engine share it).
+func parseScheduleOn(every, at, lowSpace string, addIDs []string) (scheduleConfig, []string, error) {
+	e, err := parseEvery(every)
+	if err != nil {
+		return scheduleConfig{}, nil, err
+	}
+	a, err := parseAt(at)
+	if err != nil {
+		return scheduleConfig{}, nil, err
+	}
+	low, err := parseLowSpace(lowSpace)
+	if err != nil {
+		return scheduleConfig{}, nil, err
+	}
+	add, notes, err := resolveAdd(addIDs)
+	if err != nil {
+		return scheduleConfig{}, nil, err
+	}
+	return scheduleConfig{Every: e, At: a, LowSpace: low, Add: add}, notes, nil
+}
+
+// applyScheduleOn registers (or with dryRun only previews) this account's
+// task and returns the resulting status. The CLI and the GUI engine share it.
+func applyScheduleOn(cfg scheduleConfig, notes []string, dryRun bool) (scheduleStatus, error) {
 	exe, err := os.Executable()
 	if err != nil {
-		scheduleFail(err)
+		return scheduleStatus{}, err
 	}
 	duw := filepath.Join(filepath.Dir(exe), "duw.exe")
 	if info, err := os.Lstat(duw); err != nil || !info.Mode().IsRegular() {
-		scheduleFail(fmt.Errorf("duw.exe is missing from %s: run du update --force (or reinstall Duster)", filepath.Dir(exe)))
+		return scheduleStatus{}, fmt.Errorf("duw.exe is missing from %s: run du update --force (or reinstall Duster)", filepath.Dir(exe))
 	}
 	name, u, err := currentScheduleTask()
 	if err != nil {
-		scheduleFail(err)
+		return scheduleStatus{}, err
 	}
 	now := time.Now()
 	taskXML, err := buildTaskXML(cfg, duw, u.Uid, now)
 	if err != nil {
-		scheduleFail(err)
+		return scheduleStatus{}, err
 	}
 
 	rec := loadScheduleRecord(logging.Dir())
-	if schedDryRun {
+	if dryRun {
 		doc, err := parseTaskXML(taskXML)
 		if err != nil {
-			scheduleFail(err)
+			return scheduleStatus{}, err
 		}
 		st := statusFromDoc(scheduleStatus{TaskName: name, LastCheck: rec.LastCheck, LastClean: rec.LastClean}, doc, now)
 		st.DryRun, st.Notes = true, notes
@@ -507,20 +533,11 @@ func executeScheduleOn() {
 			size, files, _ := runCategory(c, true)
 			st.WouldClean = append(st.WouldClean, scheduleCategoryResult{ID: c.ID, Freed: size, Files: files, Status: "would clean"})
 		}
-		if !schedJSON {
-			fmt.Println("Dry run: nothing was registered. A run now would clean:")
-			names := scheduleCategoryNames()
-			for _, r := range st.WouldClean {
-				fmt.Printf("  %-32s %s\n", names[r.ID], strings.TrimSpace(formatBytes(r.Freed)))
-			}
-			fmt.Println()
-		}
-		printScheduleStatus(st)
-		return
+		return st, nil
 	}
 
 	if err := registerScheduleTask(name, taskXML); err != nil {
-		scheduleFail(err)
+		return scheduleStatus{}, err
 	}
 	st := readScheduleStatus(name, rec, now)
 	if !st.Enabled {
@@ -534,7 +551,7 @@ func executeScheduleOn() {
 	if elevation.IsAdmin() {
 		st.Warnings = append(st.Warnings, fmt.Sprintf("registered for %s; runs without administrator rights", u.Username))
 	}
-	printScheduleStatus(st)
+	return st, nil
 }
 
 func executeScheduleOff() {
@@ -558,19 +575,9 @@ func executeScheduleOff() {
 		}
 		return
 	}
-	name, _, err := currentScheduleTask()
+	name, alreadyOff, err := turnScheduleOff()
 	if err != nil {
 		scheduleFail(err)
-	}
-	alreadyOff := false
-	if deleteErr := deleteScheduleTask(name); deleteErr != nil {
-		names, listErr := listScheduleTaskNames()
-		var ok bool
-		ok, err = offOutcome(deleteErr, names, listErr, name)
-		if err != nil {
-			scheduleFail(err)
-		}
-		alreadyOff = ok
 	}
 	if alreadyOff {
 		if !schedJSON {
@@ -582,6 +589,20 @@ func executeScheduleOff() {
 		return
 	}
 	printScheduleStatus(readScheduleStatus(name, loadScheduleRecord(logging.Dir()), time.Now()))
+}
+
+// turnScheduleOff deletes this account's task (the CLI and the GUI engine
+// share it); the record of past runs stays.
+func turnScheduleOff() (name string, alreadyOff bool, err error) {
+	name, _, err = currentScheduleTask()
+	if err != nil {
+		return "", false, err
+	}
+	if deleteErr := deleteScheduleTask(name); deleteErr != nil {
+		names, listErr := listScheduleTaskNames()
+		alreadyOff, err = offOutcome(deleteErr, names, listErr, name)
+	}
+	return name, alreadyOff, err
 }
 
 // offOutcome decides what executeScheduleOff reports after always attempting

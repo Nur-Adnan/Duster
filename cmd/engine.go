@@ -79,7 +79,7 @@ var engineMethods = map[string]engineMethod{
 	"clean.scan": {run: engineCleanScan},
 	"clean.run":  {mutates: true, run: engineCleanRun},
 
-	"restore.list":  {run: engineRestoreList},
+	"restore.list":  {mutates: true, run: engineRestoreList}, // applies the 7-day expiry, as du restore does
 	"restore.run":   {mutates: true, run: engineRestoreRun},
 	"restore.empty": {mutates: true, run: engineRestoreEmpty},
 
@@ -104,10 +104,12 @@ type engine struct {
 	restoreIDs map[string]bool
 	// analysis is the latest analyze.scan: its tree and the item IDs handed out.
 	analysis *engineAnalysis
+	// lists holds the latest listing per kind (engine_parity.go); actions take IDs into it.
+	lists map[string]any
 }
 
 func newEngine(w io.Writer) *engine {
-	return &engine{enc: json.NewEncoder(w), cats: getCategories, running: map[int64]context.CancelFunc{}}
+	return &engine{enc: json.NewEncoder(w), cats: getCategories, running: map[int64]context.CancelFunc{}, lists: map[string]any{}}
 }
 
 // serve handles requests until in reaches EOF, then cancels everything still
@@ -369,8 +371,9 @@ func engineCleanRun(e *engine, ctx context.Context, id int64, raw json.RawMessag
 }
 
 func engineRestoreList(e *engine, _ context.Context, _ int64, _ json.RawMessage) (any, error) {
-	// ponytail: no expiry sweep here, unlike `du restore`: listing stays
-	// read-only, and purge/installer/schedule runs still apply retention.
+	// Same retention as `du restore`: expired sessions only, never the
+	// low-space pass, so the session the user came for is still there.
+	rep := sweepQuarantine(time.Now(), sweepExpiredOnly)
 	rs := groupSessions(loadKeptSessions(quarantineRoots()))
 	ids := map[string]bool{}
 	for _, r := range rs {
@@ -379,7 +382,14 @@ func engineRestoreList(e *engine, _ context.Context, _ int64, _ json.RawMessage)
 	e.state.Lock()
 	e.restoreIDs = ids
 	e.state.Unlock()
-	return map[string]any{"sessions": restoreListJSON(rs)}, nil
+	res := map[string]any{"sessions": restoreListJSON(rs)}
+	if l := rep.expiredLine(); l != "" {
+		res["expired"] = l
+	}
+	if w := sweepWarning(rep.Errs); w != "" {
+		res["warning"] = w
+	}
+	return res, nil
 }
 
 // listedSessions reloads the quarantine and returns the sessions named by ids,
@@ -418,8 +428,9 @@ func (e *engine) listedSessions(ids []string) ([]restoreSession, []int, error) {
 
 func engineRestoreRun(e *engine, _ context.Context, _ int64, raw json.RawMessage) (any, error) {
 	var p struct {
-		ID   string `json:"id"`
-		Item int    `json:"item"` // 0 = the whole session
+		ID     string `json:"id"`
+		Item   int    `json:"item"` // 0 = the whole session
+		DryRun bool   `json:"dry_run"`
 	}
 	if err := decodeParams(raw, &p); err != nil {
 		return nil, err
@@ -432,7 +443,7 @@ func engineRestoreRun(e *engine, _ context.Context, _ int64, raw json.RawMessage
 	if err := restoreRequestError(session, n, p.Item, p.Item != 0); err != nil {
 		return nil, badRequest(err.Error())
 	}
-	results := restoreItems(session, p.Item, false)
+	results := restoreItems(session, p.Item, p.DryRun)
 	if p.Item == 0 {
 		results = append(results, damagedPartResults(session, n)...)
 	}
@@ -473,6 +484,8 @@ type engineAnalysis struct {
 	items map[int64]engineAnalyzeRef
 	next  int64
 	undo  *quarantineSession // created on the first recycle the bin refuses
+	// changePaths are the latest scan's change entries, for analyze.reveal.
+	changePaths []string
 }
 
 type engineAnalyzeRef struct {
@@ -491,12 +504,19 @@ type engineAnalyzeItem struct {
 }
 
 type engineAnalyzeFolder struct {
-	ID      int64               `json:"id"`
-	Path    string              `json:"path"`
-	Size    int64               `json:"size"`
-	Entries []engineAnalyzeItem `json:"entries"`
-	More    int                 `json:"more,omitempty"`
-	Largest []engineAnalyzeItem `json:"largest"`
+	ID   int64  `json:"id"`
+	Path string `json:"path"`
+	Size int64  `json:"size"`
+	// Trail is the breadcrumb from the scanned folder down to this one's parent.
+	Trail   []engineAnalyzeCrumb `json:"trail"`
+	Entries []engineAnalyzeItem  `json:"entries"`
+	More    int                  `json:"more,omitempty"`
+	Largest []engineAnalyzeItem  `json:"largest"`
+}
+
+type engineAnalyzeCrumb struct {
+	ID   int64  `json:"id"`
+	Path string `json:"path"`
 }
 
 // issue hands out an ID for path; only issued IDs are accepted back.
@@ -513,7 +533,10 @@ func (a *engineAnalysis) item(path string, size int64, dir bool, items int) engi
 // folder lists n: its largest entries and the largest files below it.
 func (a *engineAnalysis) folder(n *FolderNode) engineAnalyzeFolder {
 	buildEntries(n)
-	f := engineAnalyzeFolder{ID: a.issue(n.Path, n.Size, true), Path: n.Path, Size: n.Size, Entries: []engineAnalyzeItem{}, Largest: []engineAnalyzeItem{}}
+	f := engineAnalyzeFolder{ID: a.issue(n.Path, n.Size, true), Path: n.Path, Size: n.Size, Trail: []engineAnalyzeCrumb{}, Entries: []engineAnalyzeItem{}, Largest: []engineAnalyzeItem{}}
+	for p := n.Parent; p != nil; p = p.Parent {
+		f.Trail = append([]engineAnalyzeCrumb{{ID: a.issue(p.Path, p.Size, true), Path: p.Path}}, f.Trail...)
+	}
 	for i, en := range n.Entries {
 		if i == maxAnalyzeEntries {
 			f.More = len(n.Entries) - i
@@ -525,6 +548,19 @@ func (a *engineAnalysis) folder(n *FolderNode) engineAnalyzeFolder {
 		f.Largest = append(f.Largest, a.item(file.Path, file.Size, false, 0))
 	}
 	return f
+}
+
+// engineChange is a change line; ID is the folder to open for it (0: none).
+type engineChange struct {
+	ID int64 `json:"id,omitempty"`
+	changeEntry
+}
+
+// engineChangeReport is changeReport with engineChange entries (the outer
+// Entries field shadows the embedded one in JSON).
+type engineChangeReport struct {
+	changeReport
+	Entries []engineChange `json:"entries"`
 }
 
 // findFolder walks from the root to the scanned folder at path.
@@ -557,13 +593,23 @@ func (e *engine) analyzeRef(id int64) (*engineAnalysis, engineAnalyzeRef, error)
 
 func engineAnalyzeScan(e *engine, ctx context.Context, id int64, raw json.RawMessage) (any, error) {
 	var p struct {
-		Path string `json:"path"`
+		Path      string `json:"path"`
+		Since     string `json:"since"`      // as --since: compare with a scan at least this old
+		NoHistory bool   `json:"no_history"` // as --no-history: neither compare nor save
 	}
 	if err := decodeParams(raw, &p); err != nil {
 		return nil, err
 	}
 	if !filepath.IsAbs(p.Path) {
 		return nil, badRequest("path must be absolute")
+	}
+	var since time.Duration
+	if p.Since != "" {
+		d, err := parseSinceDuration(p.Since)
+		if err != nil {
+			return nil, badRequest(err.Error())
+		}
+		since = d
 	}
 	if err := scanTargetError(p.Path, true); err != nil {
 		return nil, &engineError{Code: "failed", Message: err.Error()}
@@ -591,17 +637,37 @@ func engineAnalyzeScan(e *engine, ctx context.Context, id int64, raw json.RawMes
 
 	files, dirs := countFilesAndFolders(root)
 	res := map[string]any{"dirs": dirs, "files": files, "changes": nil}
-	baseline, notes := recordScanHistory(root, 0, time.Now())
-	if baseline != nil {
-		report := explainChanges(baseline, root)
-		res["changes"] = &report
-	}
-	if len(notes) > 0 {
-		res["history_notes"] = notes
-	}
-
 	a := &engineAnalysis{root: root, items: map[int64]engineAnalyzeRef{}}
+	var report *changeReport
+	if !p.NoHistory {
+		baseline, notes := recordScanHistory(root, since, time.Now())
+		if baseline != nil {
+			r := explainChanges(baseline, root)
+			report = &r
+		}
+		if len(notes) > 0 {
+			res["history_notes"] = notes
+		}
+	}
 	e.state.Lock()
+	if report != nil {
+		// Changed folders still in the tree get IDs, so the GUI can open them.
+		entries := make([]engineChange, 0, len(report.Entries))
+		for _, en := range report.Entries {
+			c := engineChange{changeEntry: en}
+			// As the TUI's Enter: open the deepest existing folder on the way to
+			// the change's parent; a change spread over the scanned folder has nowhere to go.
+			if normalizeRoot(en.Path) != normalizeRoot(root.Path) {
+				if chain := folderChain(root, filepath.Dir(en.Path)); len(chain) > 0 {
+					n := chain[len(chain)-1]
+					c.ID = a.issue(n.Path, n.Size, true)
+				}
+			}
+			entries = append(entries, c)
+			a.changePaths = append(a.changePaths, en.Path)
+		}
+		res["changes"] = engineChangeReport{changeReport: *report, Entries: entries}
+	}
 	res["root"] = a.folder(root)
 	e.analysis = a
 	e.state.Unlock()

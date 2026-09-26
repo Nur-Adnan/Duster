@@ -4,6 +4,7 @@ using Duster.Core;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.Windows.Storage.Pickers;
+using Windows.ApplicationModel.DataTransfer;
 
 namespace Duster.App;
 
@@ -54,5 +55,26 @@ internal sealed class WindowsAppHost(Window window) : IAppHost
         var picker = new FolderPicker(window.AppWindow.Id);
         var result = await picker.PickSingleFolderAsync();
         return result?.Path;
+    }
+
+    public void CopyText(string text)
+    {
+        var package = new DataPackage();
+        package.SetText(text);
+        Clipboard.SetContent(package);
+    }
+
+    // A fixed ms-settings URI through the Windows launcher: no shell, no input.
+    public void OpenAppsSettings() => _ = Windows.System.Launcher.LaunchUriAsync(new Uri("ms-settings:appsfeatures"));
+
+    // Exiting closes the engine's stdin; it stops at a safe point on its own.
+    public void Exit() => Application.Current.Exit();
+
+    /// <summary>After an update: starts the new Duster.exe from this same path (no shell) and exits.</summary>
+    public void Restart()
+    {
+        var self = Environment.ProcessPath ?? throw new InvalidOperationException("Duster.exe path unknown");
+        Process.Start(new ProcessStartInfo(self) { UseShellExecute = false })?.Dispose();
+        Application.Current.Exit();
     }
 }

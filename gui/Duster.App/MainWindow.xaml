@@ -25,7 +25,7 @@
             </TitleBar.IconSource>
         </TitleBar>
 
-        <!-- Adding a page: one NavigationViewItem here and one entry in MainWindow._pages. -->
+        <!-- Adding a page: one NavigationViewItem here and one entry in MainWindow._pages. Groups follow docs/gui-cli-parity.md. -->
         <NavigationView
             x:Name="NavView"
             Grid.Row="1"
@@ -39,22 +39,75 @@
                         <FontIcon Glyph="&#xE80F;" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
+                <NavigationViewItemHeader Content="Cleanup" />
                 <NavigationViewItem Content="Clean" Tag="clean" AutomationProperties.AutomationId="NavClean">
                     <NavigationViewItem.Icon>
                         <FontIcon Glyph="&#xE74D;" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
-                <NavigationViewItem Content="Restore" Tag="restore" AutomationProperties.AutomationId="NavRestore">
+                <NavigationViewItem Content="Developer artifacts" Tag="purge" AutomationProperties.AutomationId="NavPurge">
                     <NavigationViewItem.Icon>
-                        <FontIcon Glyph="&#xE81C;" />
+                        <FontIcon Glyph="&#xE943;" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
+                <NavigationViewItem Content="Old installers" Tag="installers" AutomationProperties.AutomationId="NavInstallers">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE896;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItem Content="Apps" Tag="apps" AutomationProperties.AutomationId="NavApps">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE71D;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItemHeader Content="Storage" />
                 <NavigationViewItem Content="Analyze" Tag="analyze" AutomationProperties.AutomationId="NavAnalyze">
                     <NavigationViewItem.Icon>
                         <FontIcon Glyph="&#xEB05;" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
+                <NavigationViewItem Content="Virtual disks" Tag="vdisk" AutomationProperties.AutomationId="NavVirtualDisks">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xEDA2;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItemHeader Content="Recovery" />
+                <NavigationViewItem Content="Restore" Tag="restore" AutomationProperties.AutomationId="NavRestore">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE81C;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItemHeader Content="System" />
+                <NavigationViewItem Content="Optimize" Tag="optimize" AutomationProperties.AutomationId="NavOptimize">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE945;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItem Content="Startup, security, drivers" Tag="system" AutomationProperties.AutomationId="NavSystem">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE770;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItem Content="Diagnostics" Tag="diagnostics" AutomationProperties.AutomationId="NavDiagnostics">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE9D9;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItemHeader Content="Automation" />
+                <NavigationViewItem Content="Schedule" Tag="schedule" AutomationProperties.AutomationId="NavSchedule">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE823;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
             </NavigationView.MenuItems>
+
+            <NavigationView.FooterMenuItems>
+                <NavigationViewItem Content="Settings" Tag="settings" AutomationProperties.AutomationId="NavSettings">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE713;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+            </NavigationView.FooterMenuItems>
 
             <NavigationView.PaneFooter>
                 <StackPanel
