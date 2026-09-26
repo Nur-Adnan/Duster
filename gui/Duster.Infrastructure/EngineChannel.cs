@@ -62,6 +62,10 @@ internal sealed class EngineChannel
         {
             _input.Dispose();
         }
+        catch (IOException)
+        {
+            // The engine already exited: its end of the pipe is gone, which is what closing wanted.
+        }
         finally
         {
             _writeLock.Release();
