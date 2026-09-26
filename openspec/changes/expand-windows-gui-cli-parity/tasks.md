@@ -1,4 +1,4 @@
-Overall status: IMPLEMENTED — WINDOWS VERIFICATION PENDING. Groups 1-8 are implemented; the Go engine, the ViewModels and the client are tested on macOS; the WinUI pages have not been compiled yet (WinUI builds only on Windows). Group 9 is the Windows gate.
+Overall status: IMPLEMENTED — WINDOWS VERIFICATION PENDING. Groups 1-8 are implemented; the Go engine, the ViewModels and the client are tested on macOS; the WinUI pages compile on Windows CI (PR #35: GUI build x64 and ARM64 pass) but have not been run yet. Group 9 is the Windows gate.
 
 ## 1. Inventory and plan (M8)
 
