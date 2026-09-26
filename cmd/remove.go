@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -160,6 +161,7 @@ func runUninstallCmd(currentExe, logDir string, dryRun bool) tea.Cmd {
 		// SECURITY: Uses discrete argument passing instead of cmd.exe /C shell injection
 		if !dryRun {
 			removeScheduleAndLauncher(currentExe)
+			removeGUI(currentExe)
 			scheduleDelayedDelete(currentExe)
 		}
 
@@ -364,6 +366,7 @@ func runSilentRemove(currentExe string) {
 	if !rmDryRun {
 		// SECURITY: Uses safe delayed delete instead of cmd.exe /C shell injection
 		removeScheduleAndLauncher(currentExe)
+		removeGUI(currentExe)
 		scheduleDelayedDelete(currentExe)
 		os.Exit(0)
 	} else {
@@ -390,6 +393,7 @@ func runHeadlessRemove(currentExe string) {
 		if err == nil {
 			// SECURITY: Uses safe delayed delete instead of cmd.exe /C shell injection
 			removeScheduleAndLauncher(currentExe)
+			removeGUI(currentExe)
 			scheduleDelayedDelete(currentExe)
 		}
 	}
@@ -441,4 +445,16 @@ func rmCyanText(s string) string {
 
 func rmWhiteText(s string) string {
 	return lipgloss.NewStyle().Foreground(rmWhiteColor).Render(s)
+}
+
+// removeGUI deletes Duster.exe (the Windows GUI) beside du.exe. While the GUI
+// runs Windows refuses, so the delete is scheduled for after it exits.
+func removeGUI(currentExe string) {
+	gui := filepath.Join(filepath.Dir(currentExe), guiExeName)
+	if !fs.IsValidPath(gui) {
+		return
+	}
+	if err := os.Remove(gui); err != nil && !errors.Is(err, os.ErrNotExist) {
+		scheduleDelayedDelete(gui)
+	}
 }

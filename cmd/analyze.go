@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -715,6 +716,12 @@ func (m analyzeModel) View() string {
 
 // Traversal Engine Helper Methods
 func scanDirectory(root string, progressChan chan<- scanProgressInfo) (*FolderNode, []FileNode, error) {
+	return scanDirectoryCtx(context.Background(), root, progressChan)
+}
+
+// scanDirectoryCtx is scanDirectory that stops at the next entry once ctx is
+// done (the GUI's Cancel). The walk only reads, so stopping anywhere is safe.
+func scanDirectoryCtx(ctx context.Context, root string, progressChan chan<- scanProgressInfo) (*FolderNode, []FileNode, error) {
 	root = filepath.Clean(root)
 
 	folderMap := make(map[string]*FolderNode)
@@ -734,6 +741,9 @@ func scanDirectory(root string, progressChan chan<- scanProgressInfo) (*FolderNo
 	var totalSize int64
 
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if cerr := ctx.Err(); cerr != nil {
+			return cerr
+		}
 		if err != nil {
 			if d != nil && d.IsDir() {
 				return filepath.SkipDir

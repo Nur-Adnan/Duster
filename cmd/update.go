@@ -352,10 +352,14 @@ func extractFileFromZip(archive []byte, name string) ([]byte, error) {
 	return nil, fmt.Errorf("%s: %w", name, errNotInArchive)
 }
 
+// guiExeName is the Windows GUI shipped beside du.exe (gui/Duster.App).
+const guiExeName = "Duster.exe"
+
 // releaseBinaries are the verified executables from one release archive. duw
-// is nil for releases that predate scheduled cleaning.
+// is nil for releases that predate scheduled cleaning, gui for releases that
+// predate the GUI.
 type releaseBinaries struct {
-	du, duw []byte
+	du, duw, gui []byte
 }
 
 // downloadVerifiedBinary downloads the platform archive, verifies it against the
@@ -399,24 +403,36 @@ func downloadVerifiedBinary(rel releaseMetadata) (releaseBinaries, error) {
 	if err != nil && !errors.Is(err, errNotInArchive) {
 		return releaseBinaries{}, err
 	}
-	return releaseBinaries{du: du, duw: duw}, nil
+	// extractFileFromZip compares lower-cased entry names.
+	gui, err := extractFileFromZip(archive, strings.ToLower(guiExeName))
+	if err != nil && !errors.Is(err, errNotInArchive) {
+		return releaseBinaries{}, err
+	}
+	return releaseBinaries{du: du, duw: duw, gui: gui}, nil
 }
 
-// swapBinary installs a verified release: duw.exe first, then du.exe. If duw.exe
-// cannot be replaced nothing has changed yet; the launcher does not depend on
-// du.exe's version, so a failure after it leaves a working install.
+// swapBinary installs a verified release: duw.exe, then Duster.exe, then du.exe.
+// If either of the first two cannot be replaced du.exe has not changed yet;
+// the launcher does not depend on du.exe's version, and a GUI failure stops
+// before the engine it talks to is replaced, so the install keeps working.
 func swapBinary(bins releaseBinaries) error {
 	currentExe, err := os.Executable()
 	if err != nil {
 		return err
 	}
-	if bins.duw != nil {
-		old, err := replaceFile(filepath.Join(filepath.Dir(currentExe), "duw.exe"), bins.duw)
+	for _, extra := range []struct {
+		name string
+		data []byte
+	}{{"duw.exe", bins.duw}, {guiExeName, bins.gui}} {
+		if extra.data == nil {
+			continue
+		}
+		old, err := replaceFile(filepath.Join(filepath.Dir(currentExe), extra.name), extra.data)
 		if err != nil {
-			return fmt.Errorf("cannot update duw.exe: %w", err)
+			return fmt.Errorf("cannot update %s: %w", extra.name, err)
 		}
 		if old != "" {
-			scheduleDelayedDelete(old) // locked while a scheduled clean runs
+			scheduleDelayedDelete(old) // locked while a scheduled clean or the GUI runs
 		}
 	}
 	old, err := replaceFile(currentExe, bins.du)

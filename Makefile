@@ -25,7 +25,7 @@ LAUNCHER_LDFLAGS = -ldflags="-s -w -H=windowsgui"
 export CGO_ENABLED = 0
 
 .PHONY: all build build-amd64 build-arm64 build-all resources test vet lint \
-        clean release portable installer verify help hooks
+        clean release portable installer verify help hooks gui gui-test
 
 # ── Default target ───────────────────────────────────────────────────
 all: test build
@@ -101,6 +101,19 @@ build-arm64: resources
 build-all: build-amd64 build-arm64
 	@echo "✓ All architectures built."
 
+# Windows GUI (gui/Duster.App): WinUI 3 builds only on Windows (.NET 10 SDK).
+# Single-file publish profiles, so each arch is one Duster.exe.
+gui:
+	@mkdir -p $(DIST_DIR)
+	dotnet publish gui/Duster.App -c Release -p:Platform=x64 -p:Version=$(VERSION) -o $(DIST_DIR)/gui-x64
+	cp $(DIST_DIR)/gui-x64/Duster.exe $(DIST_DIR)/duster-gui-windows-amd64.exe
+	dotnet publish gui/Duster.App -c Release -p:Platform=ARM64 -p:Version=$(VERSION) -o $(DIST_DIR)/gui-arm64
+	cp $(DIST_DIR)/gui-arm64/Duster.exe $(DIST_DIR)/duster-gui-windows-arm64.exe
+	@echo "✓ Built: $(DIST_DIR)/duster-gui-windows-{amd64,arm64}.exe"
+
+gui-test:
+	dotnet test --project gui/Duster.Tests
+
 # ── Test & Quality ───────────────────────────────────────────────────
 test:
 	@echo "Running test suite..."
@@ -149,6 +162,11 @@ portable: build-all
 	@cp $(DIST_DIR)/duster-windows-arm64.exe $(DIST_DIR)/portable/Duster-$(VERSION)-Portable-arm64/du.exe
 	@cp $(DIST_DIR)/duw-windows-amd64.exe $(DIST_DIR)/portable/Duster-$(VERSION)-Portable-x64/duw.exe
 	@cp $(DIST_DIR)/duw-windows-arm64.exe $(DIST_DIR)/portable/Duster-$(VERSION)-Portable-arm64/duw.exe
+	@# Duster.exe (WinUI GUI) builds only on Windows: `make gui` there, or the release workflow.
+	@for arch in amd64:x64 arm64:arm64; do \
+		src=$(DIST_DIR)/duster-gui-windows-$${arch%%:*}.exe; dst=$(DIST_DIR)/portable/Duster-$(VERSION)-Portable-$${arch##*:}; \
+		if [ -f $$src ]; then cp $$src $$dst/Duster.exe; else echo "⚠ $$src missing: portable $${arch##*:} zip has no GUI"; fi; \
+	done
 	@cp README.md LICENSE SECURITY.md $(DIST_DIR)/portable/Duster-$(VERSION)-Portable-x64/ 2>/dev/null || true
 	@cp README.md LICENSE SECURITY.md $(DIST_DIR)/portable/Duster-$(VERSION)-Portable-arm64/ 2>/dev/null || true
 	@printf '@echo off\ntitle Duster\n"%%~dp0du.exe" --version\ncmd /K\n' > $(DIST_DIR)/portable/Duster-$(VERSION)-Portable-x64/Launch-Duster.bat
@@ -162,6 +180,8 @@ installer: build-amd64
 	@mkdir -p $(DIST_DIR)/installer
 	@cp $(DIST_DIR)/duster-windows-amd64.exe $(DIST_DIR)/installer/
 	@cp $(DIST_DIR)/duw-windows-amd64.exe $(DIST_DIR)/installer/
+	@if [ -f $(DIST_DIR)/duster-gui-windows-amd64.exe ]; then cp $(DIST_DIR)/duster-gui-windows-amd64.exe $(DIST_DIR)/installer/; \
+	else echo "⚠ $(DIST_DIR)/duster-gui-windows-amd64.exe missing: run 'make gui' on Windows before compiling the installer"; fi
 	@echo "✓ Installer artifacts staged in $(DIST_DIR)/installer/"
 	@echo "  → Open installer/duster-setup.iss in Inno Setup to compile the .exe installer."
 

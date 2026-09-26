@@ -1,0 +1,9 @@
+<Project Sdk="MSTest.Sdk/4.4.1">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Duster.Infrastructure\Duster.Infrastructure.csproj" />
+  </ItemGroup>
+</Project>
