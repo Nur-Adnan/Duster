@@ -18,7 +18,7 @@ import (
 
 // The undo window: user-facing deletes move items into a quarantine on the
 // item's own volume (a rename: no copy, permissions kept) that `du restore`
-// can put back for quarantineKeep. See docs/superpowers/specs/2026-09-24-undo-restore-design.md.
+// can put back for quarantineKeep.
 
 const (
 	quarantineKeep         = 7 * 24 * time.Hour
