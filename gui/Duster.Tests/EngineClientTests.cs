@@ -35,6 +35,17 @@ public sealed class EngineClientTests
     }
 
     [TestMethod]
+    public void OmittedFieldsKeepTheirDefaults()
+    {
+        // Go omits empty fields (omitempty); a missing string must read as "", never null.
+        var clean = JsonSerializer.Deserialize("""{"categories":[{"id":"temp","bytes":5}],"bytes":5}""", EngineJson.Default.CleanResult)!;
+        Assert.AreEqual("", clean.Categories[0].Error, "CleanCategory.Error: the clean page reads its Length");
+        Assert.AreEqual("", clean.Categories[0].Description);
+        var restored = JsonSerializer.Deserialize("""{"results":[{"path":"/p","status":"restored"}]}""", EngineJson.Default.RestoreRunResult)!;
+        Assert.AreEqual("", restored.Results[0].Reason);
+    }
+
+    [TestMethod]
     public void DtosReadTheEngineWireNames()
     {
         const string stats = """{"HostName":"pc","CPUPercent":12.5,"RAMTotal":8,"Disks":[{"Drive":"C:","Total":100,"Free":40,"Used":60}],"TopProcesses":null}""";
