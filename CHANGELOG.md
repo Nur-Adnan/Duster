@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-09-27
+
+### Added
+- Duster now has a desktop app, `Duster.exe`, a native Windows app (WinUI 3) for Windows 10 1809 or later and Windows 11, x64 and ARM64. It ships beside `du.exe` in the setup exe (Start menu > Duster; the CLI shortcut is now "Duster Command Line"), in the portable zips and through the PowerShell one-liner, and `du update` installs it. It has four pages: Home (device, processor, memory and drives), Clean (scan, grouped categories, confirm before deleting, progress, Stop, per-category results, Restart as administrator for Prefetch), Restore (sessions and items Duster kept, restore all or one item, delete for good behind a confirm) and Analyze (folder picker, drill-down, largest files, changes since the last scan, Move to Recycle Bin behind a confirm). Everything else stays in the CLI for now. The app deletes nothing itself: it runs `du.exe` from its own folder as its engine, over a private stdin/stdout channel, so every scan, delete and safety check is the same code the CLI uses. It runs without administrator rights and never elevates without asking.
+- `du remove` and the uninstall script also remove `Duster.exe`.
+
 ## [1.3.0] - 2026-09-25
 
 ### Added

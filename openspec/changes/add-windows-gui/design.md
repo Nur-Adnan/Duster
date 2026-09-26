@@ -60,9 +60,32 @@ Unelevated by default (`asInvoker`). Admin actions offer "Restart as administrat
 - [Inno Setup is free only under $5,000/yr revenue including donations] → recorded; revisit if donations approach it.
 - [WinUI builds only on Windows] → `Duster.Core` holds all non-UI logic and its tests run on any OS; the UI project builds in CI on every PR.
 
-## Future work (post-V1, not in this change)
+## Scope: V1, deferred, and CLI-only
 
-Purge, Installers, Uninstall (needs the run and leftover sweep extracted from `uninstallModel.Update` first), Optimize with the reclaim report, Virtual disks, Schedule, a Settings page, and progress/cancel hooks inside a single long category. Each is an engine method set plus one page and one navigation entry; D3-D7 already cover them.
+The GUI is not meant to mirror every CLI command. V1 is frozen at four pages; anything below marked Deferred may get a page later, CLI-only means no GUI is planned.
+
+**1. V1 GUI:** Home, Clean, Restore, Analyze.
+
+| CLI feature | GUI equivalent | Status | Difference |
+|---|---|---|---|
+| `clean` (scan, categories, admin-only `prefetch`) | Clean page | Covered | Cancel stops between categories, not inside one (same as the engine's `clean.run`) |
+| `clean --dry-run`, `--yes` | Scan is the preview; the confirm dialog is the `--yes` | Covered | |
+| `clean --whitelist` | Uncheck categories | Covered | Per run in both |
+| `restore` list, `[n\|id]`, `--item`, `--empty` | Restore page | Covered | |
+| `restore` 7-day cleanup | None | Partial (intentional) | `du restore` deletes expired sessions before listing; the GUI's `restore.list` stays read-only, so it can show a session past 7 days until a CLI run, purge, installer sweep or scheduled clean applies retention |
+| `restore --dry-run` | None | Deferred | A GUI restore never overwrites and reports skips |
+| `analyze` scan, drill-down, largest files, changes, `d` | Analyze page (Move to Recycle Bin) | Covered | |
+| `analyze --since` | Changes compares with the previous scan only | Deferred | |
+| `analyze --no-history` | None: the GUI always records scan history | Deferred | |
+| `analyze` Enter on a change jumps to its folder | Changes list is not clickable | Deferred | |
+| `status` | Home snapshot: host, Windows version, CPU % and model, memory, drives, Refresh | Partial | No live refresh, temperature, disk I/O, network, battery, uptime, health score or top processes |
+| `doctor` | None | Deferred | `doctor.run` exists in the engine and `RunDoctorAsync` in the client; no screen shows it |
+
+**2. Deferred GUI features** (each is an engine method set plus one page or control; D3-D7 already cover them): Doctor; full live Status dashboard; `restore --dry-run`; `analyze --since` and `--no-history`; opening a folder from an Analyze change; Purge; Installers; Uninstall (needs the run and leftover sweep extracted from `uninstallModel.Update` first); Optimize with the reclaim report; Virtual disks; Schedule; a Settings page; an update flow (`du update` already installs `Duster.exe`); a remove flow; cancelling partway through a single category (needed before Purge ships).
+
+**3. CLI-only features** (no GUI planned): the landing menu's Drivers, Network, Security and Startup views; `benchmark`; `verify`; the hidden `engine` command itself. Installed copies are removed by the setup uninstaller, portable ones by `du remove`.
+
+**4. CLI-only flags and modes:** `--json` and piped headless output, `--yes` for unattended runs, `--debug`, `du schedule run` (the scheduled task's entry point), and `update --check`/`--force`.
 
 ## Migration Plan
 

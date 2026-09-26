@@ -558,6 +558,17 @@ if ($TempLauncher -and (Test-Path -LiteralPath $TempLauncher)) {
     }
 }
 
+# Duster.exe (the Windows GUI) sits beside du.exe in releases that have it.
+$TempGui = if ($TempLauncher) { Join-Path (Split-Path $TempLauncher) "Duster.exe" } else { $null }
+if ($TempGui -and (Test-Path -LiteralPath $TempGui)) {
+    try {
+        Copy-Item -LiteralPath $TempGui -Destination (Join-Path $InstallDir "Duster.exe") -Force
+        Write-OK "Installed the Duster window: $(Join-Path $InstallDir 'Duster.exe')"
+    } catch {
+        Write-Warn "Could not copy Duster.exe (the GUI; close it if it is open). Run 'du update --force' later."
+    }
+}
+
 Write-OK "Installed: $ExePath"
 
 # == 7. Add to PATH ====================================================

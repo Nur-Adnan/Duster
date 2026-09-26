@@ -59,5 +59,5 @@ Every interactive control SHALL have an automation name and ID, be reachable and
 The GUI SHALL share the CLI's data directory, operations log, quarantine, and scheduled task, so work done in one is visible in the other.
 
 #### Scenario: Restore across interfaces
-- **WHEN** items are purged in the GUI
-- **THEN** `du restore` lists that session and can restore it
+- **WHEN** Analyze in the GUI moves an item to the Recycle Bin and the bin cannot take it (too large, a drive without a bin, or a platform without one), so the engine keeps it in Duster's quarantine instead
+- **THEN** `du restore` lists that session and can restore the item
