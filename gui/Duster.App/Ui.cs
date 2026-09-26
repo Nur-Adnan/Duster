@@ -25,6 +25,22 @@ public static class Ui
     // Segoe Fluent Icons: Folder, Page.
     public static string ItemGlyph(bool isDir) => isDir ? "\uE8B7" : "\uE8A5";
 
+    // Segoe Fluent Icons: CheckMark, Warning, ErrorBadge, Info. Doctor and verify say
+    // PASS/WARN/FAIL/SKIPPED, the security audit secure/warning/critical. The status
+    // text is always shown or read out too, so the icon is never the only signal.
+    public static string StatusGlyph(string status) => status.ToLowerInvariant() switch
+    {
+        "pass" or "secure" => "\uE73E",
+        "warn" or "warning" => "\uE7BA",
+        "fail" or "critical" => "\uEA39",
+        _ => "\uE946",
+    };
+
+    public static string Signed(bool signed) => signed ? "Signed" : "Unsigned";
+
+    /// <summary>"purge · quarantine": which command did what, for the activity log.</summary>
+    public static string Action(string command, string action) => $"{command} · {action}";
+
     // Segoe Fluent Icons: CheckMark, Error, Sync.
     public static string EngineGlyph(EngineState state) => state switch
     {

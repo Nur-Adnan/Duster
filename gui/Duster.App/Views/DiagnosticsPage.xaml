@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="Duster.App.Views.DiagnosticsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:Duster.App"
+    xmlns:vm="using:Duster.Core.ViewModels">
+
+    <Page.Resources>
+        <DataTemplate x:Key="CheckTemplate" x:DataType="vm:CheckRow">
+            <Grid Padding="0,6" ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <FontIcon VerticalAlignment="Top" FontSize="16" Glyph="{x:Bind local:Ui.StatusGlyph(Status)}" AutomationProperties.Name="{x:Bind Status}" />
+                <StackPanel Grid.Column="1" ToolTipService.ToolTip="{x:Bind Description}">
+                    <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="{x:Bind Name}" />
+                    <TextBlock Style="{StaticResource SecondaryTextStyle}" IsTextSelectionEnabled="True" Text="{x:Bind Message}" />
+                </StackPanel>
+            </Grid>
+        </DataTemplate>
+    </Page.Resources>
+
+    <Grid Padding="{StaticResource PagePadding}" RowSpacing="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Grid>
+            <TextBlock Style="{StaticResource PageTitleStyle}" Text="Diagnostics" />
+            <Button HorizontalAlignment="Right" Command="{x:Bind ViewModel.CopyReportCommand}" AutomationProperties.AutomationId="DiagnosticsCopy">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <FontIcon FontSize="14" Glyph="&#xE8C8;" />
+                    <TextBlock Text="Copy report" />
+                </StackPanel>
+            </Button>
+        </Grid>
+
+        <SelectorBar x:Name="ViewSelector" Grid.Row="1" SelectionChanged="Views_SelectionChanged">
+            <SelectorBarItem x:Name="HealthView" IsSelected="True" Text="Health check" AutomationProperties.AutomationId="DiagnosticsHealthView" />
+            <SelectorBarItem x:Name="SelfTestView" Text="Self-test" AutomationProperties.AutomationId="DiagnosticsSelfTestView" />
+            <SelectorBarItem x:Name="BenchmarkView" Text="Benchmark" AutomationProperties.AutomationId="DiagnosticsBenchmarkView" />
+        </SelectorBar>
+
+        <StackPanel Grid.Row="2" Spacing="4">
+            <ProgressBar IsIndeterminate="True" Visibility="{x:Bind local:Ui.Visible(ViewModel.IsBusy), Mode=OneWay}" AutomationProperties.Name="Working" />
+            <TextBlock Style="{StaticResource SecondaryTextStyle}" Text="{x:Bind ViewModel.Status, Mode=OneWay}" AutomationProperties.AutomationId="DiagnosticsStatus" AutomationProperties.LiveSetting="Polite" />
+        </StackPanel>
+
+        <Grid Grid.Row="3">
+            <Grid x:Name="HealthPanel" RowSpacing="8">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <TextBlock Style="{StaticResource SecondaryTextStyle}" Text="{x:Bind ViewModel.HealthSummary, Mode=OneWay}" AutomationProperties.LiveSetting="Polite" />
+                <Button Grid.Row="1" Command="{x:Bind ViewModel.RunHealthCheckCommand}" Content="Run health check" Style="{StaticResource AccentButtonStyle}" AutomationProperties.AutomationId="DiagnosticsHealthRun" />
+                <InfoBar
+                    Grid.Row="2"
+                    Title="Duster is running without administrator rights"
+                    IsClosable="False"
+                    IsOpen="{x:Bind ViewModel.CanElevate, Mode=OneWay}"
+                    Message="Prefetch cleaning, SSD TRIM, the component store and virtual disk compaction need them."
+                    Severity="Informational"
+                    AutomationProperties.AutomationId="DiagnosticsAdminBar">
+                    <InfoBar.ActionButton>
+                        <Button Command="{x:Bind ViewModel.RestartAsAdministratorCommand}" Content="Restart as administrator" AutomationProperties.AutomationId="DiagnosticsRestartAsAdmin" />
+                    </InfoBar.ActionButton>
+                </InfoBar>
+                <ListView Grid.Row="3" ItemTemplate="{StaticResource CheckTemplate}" ItemsSource="{x:Bind ViewModel.Health}" SelectionMode="None" AutomationProperties.AutomationId="DiagnosticsHealthList" AutomationProperties.Name="Health checks" />
+            </Grid>
+
+            <Grid x:Name="SelfTestPanel" RowSpacing="8" Visibility="Collapsed">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <TextBlock Style="{StaticResource SecondaryTextStyle}" Text="{x:Bind ViewModel.SelfTestSummary, Mode=OneWay}" AutomationProperties.LiveSetting="Polite" />
+                <Button Grid.Row="1" Command="{x:Bind ViewModel.RunSelfTestCommand}" Content="Run self-test" Style="{StaticResource AccentButtonStyle}" AutomationProperties.AutomationId="DiagnosticsSelfTestRun" />
+                <ListView Grid.Row="2" ItemTemplate="{StaticResource CheckTemplate}" ItemsSource="{x:Bind ViewModel.SelfTest}" SelectionMode="None" AutomationProperties.AutomationId="DiagnosticsSelfTestList" AutomationProperties.Name="Self-tests" />
+            </Grid>
+
+            <Grid x:Name="BenchmarkPanel" RowSpacing="8" Visibility="Collapsed">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <TextBlock Style="{StaticResource SecondaryTextStyle}" Text="{x:Bind ViewModel.BenchmarkSummary, Mode=OneWay}" AutomationProperties.LiveSetting="Polite" />
+                <Button Grid.Row="1" Command="{x:Bind ViewModel.RunBenchmarkCommand}" Content="Run benchmark" Style="{StaticResource AccentButtonStyle}" AutomationProperties.AutomationId="DiagnosticsBenchmarkRun" />
+                <ListView Grid.Row="2" ItemsSource="{x:Bind ViewModel.Benchmark}" SelectionMode="None" AutomationProperties.AutomationId="DiagnosticsBenchmarkList" AutomationProperties.Name="Benchmark results">
+                    <ListView.ItemTemplate>
+                        <DataTemplate x:DataType="vm:StatRow">
+                            <Grid Padding="0,4" ColumnSpacing="16">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="160" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Style="{StaticResource SecondaryTextStyle}" Text="{x:Bind Label}" />
+                                <TextBlock Grid.Column="1" IsTextSelectionEnabled="True" Text="{x:Bind Value}" TextWrapping="Wrap" />
+                            </Grid>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+            </Grid>
+        </Grid>
+    </Grid>
+</Page>

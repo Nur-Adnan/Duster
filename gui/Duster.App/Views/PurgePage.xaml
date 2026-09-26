@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="Duster.App.Views.PurgePage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:Duster.App"
+    xmlns:vm="using:Duster.Core.ViewModels">
+
+    <Grid Padding="{StaticResource PagePadding}" RowSpacing="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <StackPanel>
+            <TextBlock Style="{StaticResource PageTitleStyle}" Text="Developer artifacts" />
+            <TextBlock Style="{StaticResource SecondaryTextStyle}" Text="Build output your projects recreate (node_modules, target, bin and obj, .gradle and more). Only folders beside a project file are offered, and they are kept for 7 days unless you choose otherwise." />
+        </StackPanel>
+
+        <Grid Grid.Row="1" ColumnSpacing="8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBox Header="Folder to search" Text="{x:Bind ViewModel.Path, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.AutomationId="PurgePath" />
+            <Button Grid.Column="1" VerticalAlignment="Bottom" Command="{x:Bind ViewModel.BrowseCommand}" Content="Browse…" AutomationProperties.AutomationId="PurgeBrowse" />
+            <Button Grid.Column="2" VerticalAlignment="Bottom" Command="{x:Bind ViewModel.ScanCommand}" Content="Scan" Style="{StaticResource AccentButtonStyle}" AutomationProperties.AutomationId="PurgeScan" />
+            <Button Grid.Column="3" VerticalAlignment="Bottom" Command="{x:Bind ViewModel.StopCommand}" Content="Stop" Visibility="{x:Bind local:Ui.Visible(ViewModel.IsBusy), Mode=OneWay}" AutomationProperties.AutomationId="PurgeStop" />
+        </Grid>
+
+        <RadioButtons
+            Grid.Row="2"
+            Header="Where removed folders go"
+            MaxColumns="3"
+            SelectedIndex="{x:Bind ViewModel.Mode, Mode=TwoWay}"
+            AutomationProperties.AutomationId="PurgeMode">
+            <x:String>Keep for 7 days (Restore brings them back)</x:String>
+            <x:String>Recycle Bin</x:String>
+            <x:String>Delete permanently</x:String>
+        </RadioButtons>
+
+        <StackPanel Grid.Row="3" Spacing="4">
+            <ProgressBar IsIndeterminate="True" Visibility="{x:Bind local:Ui.Visible(ViewModel.IsBusy), Mode=OneWay}" AutomationProperties.Name="Working" />
+            <TextBlock Style="{StaticResource SecondaryTextStyle}" Text="{x:Bind ViewModel.Status, Mode=OneWay}" AutomationProperties.AutomationId="PurgeStatus" AutomationProperties.LiveSetting="Polite" />
+        </StackPanel>
+
+        <ListView
+            Grid.Row="4"
+            ItemsSource="{x:Bind ViewModel.Items}"
+            SelectionMode="None"
+            AutomationProperties.AutomationId="PurgeItems"
+            AutomationProperties.Name="Build folders found">
+            <ListView.ItemTemplate>
+                <DataTemplate x:DataType="vm:PurgeRow">
+                    <Grid Padding="0,4" ColumnSpacing="16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="90" />
+                        </Grid.ColumnDefinitions>
+                        <CheckBox IsChecked="{x:Bind IsSelected, Mode=TwoWay}" AutomationProperties.Name="{x:Bind Artifact.Path}">
+                            <StackPanel>
+                                <TextBlock Text="{x:Bind Artifact.Path}" TextTrimming="CharacterEllipsis" ToolTipService.ToolTip="{x:Bind Artifact.Path}" />
+                                <TextBlock Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind Detail}" />
+                            </StackPanel>
+                        </CheckBox>
+                        <TextBlock Grid.Column="1" VerticalAlignment="Center" Style="{StaticResource SecondaryTextStyle}" Text="{x:Bind Outcome, Mode=OneWay}" />
+                        <TextBlock Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center" Text="{x:Bind SizeText}" />
+                    </Grid>
+                </DataTemplate>
+            </ListView.ItemTemplate>
+        </ListView>
+
+        <Grid Grid.Row="5" ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <HyperlinkButton Command="{x:Bind ViewModel.SelectAllCommand}" Content="Select all" AutomationProperties.AutomationId="PurgeSelectAll" />
+                <HyperlinkButton Command="{x:Bind ViewModel.SelectNoneCommand}" Content="Select none" AutomationProperties.AutomationId="PurgeSelectNone" />
+            </StackPanel>
+            <TextBlock Grid.Column="2" VerticalAlignment="Center" Style="{StaticResource SecondaryTextStyle}" Text="{x:Bind ViewModel.SelectedText, Mode=OneWay}" />
+            <Button Grid.Column="3" Command="{x:Bind ViewModel.PurgeCommand}" Content="Remove selected…" Style="{StaticResource AccentButtonStyle}" AutomationProperties.AutomationId="PurgeRun" />
+        </Grid>
+    </Grid>
+</Page>
