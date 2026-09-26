@@ -5,8 +5,8 @@ Duster is CLI/TUI only, which keeps out users who never open a terminal. A nativ
 ## What Changes
 
 - New hidden subcommand `du engine`: a long-lived process that speaks versioned NDJSON over stdin/stdout, calls the existing engine functions, streams progress, and supports cancellation. No network or named-pipe endpoint.
-- New `gui/` tree: `Duster.exe`, a WinUI 3 (Windows App SDK 2.x, C#, .NET 10) app that starts `du.exe engine` from its own folder and drives it. Pages mirror the CLI: Home (status + doctor), Clean, Analyze, Purge, Uninstall, Installers, Optimize, Virtual disks, Restore, Schedule, Settings.
-- Small engine refactors so the GUI and the TUI share one code path: clean include-list selection, the uninstall run/leftover sweep out of the Bubble Tea model, and progress + cancel hooks in clean and purge loops.
+- New `gui/` tree: `Duster.exe`, a WinUI 3 (Windows App SDK 2.x, C#, .NET 10) app that starts `du.exe engine` from its own folder and drives it. **V1 pages: Home, Clean, Restore, Analyze.** Purge, Uninstall, Installers, Optimize, Virtual disks, and Schedule stay CLI-only for now (see design.md, Future work); the shell adds a page with one navigation entry, so they need no redesign later.
+- Engine methods for the V1 pages only: status, doctor, clean (done), restore, analyze. No refactor of CLI code paths is needed for V1.
 - Packaging: `Duster.exe` (self-contained, unpackaged, x64 + ARM64) ships beside `du.exe` and `duw.exe` in the Inno installer and the portable zips; `du update` and `du remove` learn about it.
 - CLI behavior and output are unchanged.
 
@@ -21,11 +21,11 @@ None (no existing specs).
 
 ## Impact
 
-- Subcommands touched: clean, analyze, purge, installer, uninstall, restore, optimize, vdisk, schedule, status, doctor (engine entry points only), update and remove (install and remove `Duster.exe`). lib/ packages reused unchanged: `fs`, `elevation`, `sysinfo`, `uninstall`.
-- Files: the GUI deletes and moves exactly what the CLI already does, through the same engine functions (quarantine, Recycle Bin, category cleans, uninstallers, diskpart compaction). No new delete paths. Registry: read-only except the startup Run-key edit the landing view already has.
-- Elevation: the GUI runs unelevated; admin-only actions (prefetch clean, defrag, DISM, vdisk compaction) offer "Restart as administrator", which relaunches `Duster.exe` elevated with UAC. No service, no elevated helper.
+- Subcommands touched in V1: clean, restore, analyze, status, doctor (engine entry points only), update and remove (install and remove `Duster.exe`). Purge, installer, uninstall, optimize, vdisk, and schedule are untouched. lib/ packages reused unchanged: `fs`, `elevation`, `sysinfo`.
+- Files: the GUI deletes and moves exactly what the CLI already does, through the same engine functions (V1: category cleans, quarantine restore and empty, Analyze's send-to-Recycle-Bin). No new delete paths. Registry: read-only.
+- Elevation: the GUI runs unelevated; admin-only actions (in V1 only the prefetch clean category) offer "Restart as administrator", which relaunches `Duster.exe` elevated with UAC. No service, no elevated helper.
 - New dependencies (all free/MIT): .NET 10 SDK, Windows App SDK, CommunityToolkit.Mvvm, Microsoft.Extensions.DependencyInjection, MSTest, FlaUI (UI smoke). Go side adds none.
-- CI: a `gui` job on `windows-latest` (x64) and `windows-11-arm`; `Duster.Core` tests also run on Linux.
+- CI: a `gui` job on `windows-latest` (x64) and `windows-11-arm`; `Duster.Core`/`Duster.Infrastructure` tests also run on Linux.
 
 ## Non-goals
 

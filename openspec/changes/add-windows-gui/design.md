@@ -42,7 +42,11 @@ Each request runs in its own goroutine with a context derived from the process c
 Packaged (MSIX) apps and the processes they spawn get AppData write virtualization, which would split the GUI's quarantine and logs from the CLI's `%LOCALAPPDATA%\Duster`, and sideloaded MSIX needs a certificate the user's machine trusts. So `Duster.exe` is published unpackaged and self-contained (`WindowsPackageType=None`, `WindowsAppSDKSelfContained=true`, `SelfContained=true`) for `win-x64` and `win-arm64`, and ships in the Inno installer and zips beside `du.exe`. This is a distribution choice made up front, not a workaround for a launch failure.
 
 ### D9. GUI layering
-`Duster.App` (WinUI: Views, ViewModels with CommunityToolkit.Mvvm partial-property `[ObservableProperty]` and `[RelayCommand]`), `Duster.Core` (net10.0: `EngineClient`, protocol records, `System.Text.Json` source-generated context, no WinUI references), `Duster.Core.Tests` (MSTest). Microsoft.Extensions.DependencyInjection wires `EngineClient`, navigation, and settings. No separate domain or infrastructure projects: the domain is the Go engine.
+- `Duster.App` (WinUI): Views, ViewModels (CommunityToolkit.Mvvm partial-property `[ObservableProperty]`, `[RelayCommand]`), navigation, startup, window, theme. ViewModels see only `IEngineClient`; they never touch `Process`.
+- `Duster.Core` (net10.0, no WinUI, no I/O): protocol DTOs, `IEngineClient`, `EngineState`, `EngineException` with a typed error kind.
+- `Duster.Infrastructure` (net10.0): engine path resolution, process lifecycle, NDJSON framing and correlation, cancellation, `System.Text.Json` source-generated context.
+- `Duster.Tests` (MSTest): protocol, lifecycle, and path tests; runs on any OS, and against the real `du engine` when one is built.
+Microsoft.Extensions.DependencyInjection wires the few services. `IEngineClient` exists for one reason: ViewModel tests substitute a fake. No domain layer: the domain is the Go engine.
 
 ### D10. Elevation by relaunch
 Unelevated by default (`asInvoker`). Admin actions offer "Restart as administrator": `ShellExecute` with `runas` on `Duster.exe`, then exit; the new GUI starts an elevated engine. No elevated helper, no service.
@@ -50,11 +54,15 @@ Unelevated by default (`asInvoker`). Admin actions offer "Restart as administrat
 ## Risks / Trade-offs
 
 - [Engine and GUI versions drift in a partial update] → handshake refuses a protocol mismatch; `du update` installs both binaries from one release.
-- [A long category clean can't be cancelled mid-category in M1] → cancel checks between categories now; per-item checks come with the progress hooks refactor (tasks 6.x) before Purge ships.
+- [A long category clean can't be cancelled mid-category] → cancel checks between categories; per-item checks are future work, needed before Purge ships.
 - [Hosted Windows runners may not allow UI automation] → FlaUI smoke is attempted in windows-smoke; fallback is a scripted manual checklist in docs/release-checklist.md.
 - [Self-contained GUI adds roughly 60-100 MB to the installer (unmeasured)] → measure in the packaging milestone; trimming or Native AOT (supported since Windows App SDK 1.6) only if the size or startup numbers justify it.
 - [Inno Setup is free only under $5,000/yr revenue including donations] → recorded; revisit if donations approach it.
 - [WinUI builds only on Windows] → `Duster.Core` holds all non-UI logic and its tests run on any OS; the UI project builds in CI on every PR.
+
+## Future work (post-V1, not in this change)
+
+Purge, Installers, Uninstall (needs the run and leftover sweep extracted from `uninstallModel.Update` first), Optimize with the reclaim report, Virtual disks, Schedule, a Settings page, and progress/cancel hooks inside a single long category. Each is an engine method set plus one page and one navigation entry; D3-D7 already cover them.
 
 ## Migration Plan
 
