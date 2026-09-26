@@ -1,6 +1,6 @@
 <div align="center">
   <h1>Duster</h1>
-  <p><strong>Windows-native deep cleaner & system optimization CLI</strong></p>
+  <p><strong>Windows-native deep cleaner & system optimization CLI, now with a desktop app</strong></p>
   <p>A single-binary, zero-dependency terminal utility that cleans caches, analyzes disk usage, monitors system health, and purges developer artifacts, with a 7-day undo for what it removes.</p>
 </div>
 
@@ -29,6 +29,7 @@ du             # Menu with system overview
 du status      # Live system dashboard
 du clean       # Deep cache cleanup
 du analyze .   # Interactive disk explorer
+Duster         # The desktop app (GUI), installed beside du.exe
 ```
 
 ---
@@ -105,11 +106,25 @@ The PowerShell one-liner in [Quick Start](#quick-start) is the recommended way.
 powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/Nur-Adnan/Duster/main/scripts/install.ps1 | iex"
 ```
 
-**Setup exe or portable zip:** download `Duster-Setup-<version>-x64.exe` or `Duster-<version>-Portable-<arch>.zip` from [Releases](https://github.com/Nur-Adnan/Duster/releases/latest). Keep `du.exe` and `duw.exe` in the same folder, on your PATH.
+**Setup exe or portable zip:** download `Duster-Setup-<version>-x64.exe` or `Duster-<version>-Portable-<arch>.zip` from [Releases](https://github.com/Nur-Adnan/Duster/releases/latest). Keep `du.exe`, `duw.exe` and `Duster.exe` in the same folder, on your PATH.
+
+### Desktop app (GUI)
+
+`Duster.exe` is a native Windows app (WinUI 3) for Windows 10 1809 or later and Windows 11, x64 or ARM64. It ships in every install method from v1.4.0, beside `du.exe`, and uses `du.exe` as its engine, so both must stay in the same folder.
+
+| How you installed | How to open the app |
+|---|---|
+| PowerShell one-liner | Run `Duster` in a terminal, or open `%LOCALAPPDATA%\Duster\Duster.exe` |
+| Setup exe | Start menu > **Duster** (the CLI is **Duster Command Line**); the setup can open it for you when it finishes |
+| Portable zip | Double-click `Duster.exe` in the extracted folder |
+
+Already on an older version? `du update` adds `Duster.exe`.
+
+Pages: **Home** (system overview), **Clean**, **Restore** and **Analyze**. Everything else is still in the CLI for now. The app runs without administrator rights; for categories that need them (Prefetch), use **Restart as administrator** on the Clean page. Every delete asks first, and Restore brings back what Duster kept for 7 days. Windows may show a SmartScreen prompt the first time, because the binaries are not code-signed yet (see [Code signing policy](#code-signing-policy)).
 
 **Scoop / winget:** not published yet; manifests are staged in [scripts/manifests/](scripts/manifests/).
 
-**Uninstall:** `du remove`, or
+**Uninstall:** `du remove` (also removes `Duster.exe`), Settings > Apps for a setup install, or
 
 ```powershell
 irm https://raw.githubusercontent.com/Nur-Adnan/Duster/main/scripts/uninstall.ps1 | iex
