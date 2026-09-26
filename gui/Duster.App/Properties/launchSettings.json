@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "Duster.App (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "Duster.App (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}

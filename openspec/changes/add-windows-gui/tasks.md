@@ -9,45 +9,35 @@
 
 ## 2. GUI shell (milestone 2)
 
-- [ ] 2.1 Scaffold gui/ with `winapp new --template winui-mvvm` on the PC (or equivalent csproj), add Duster.Core + Duster.Core.Tests, gui/Duster.slnx, x64 + ARM64 only, nullable + warnings as errors; verify `dotnet build -c Release -p:Platform=x64` succeeds on windows-latest
-- [ ] 2.2 Duster.Core `EngineClient`: start du.exe beside the app (link refused), request/reply correlation, events as IAsyncEnumerable, cancel, crash detection; verify MSTest suite against an in-memory stream pair runs on macOS and Linux
-- [ ] 2.3 Shell: NavigationView with all pages as placeholders, Mica backdrop, theme setting, AutomationIds; verify on the PC with `.\BuildAndRun.ps1` in light, dark, and high contrast
-- [ ] 2.4 Home page: live status poll every 2 s (no top processes), doctor summary, engine-missing and protocol-mismatch screens; verify on the PC and by renaming du.exe
-- [ ] 2.5 CI job `gui` (windows-latest x64, windows-11-arm ARM64) + Duster.Core tests on ubuntu; verify the jobs pass on the PR
+- [ ] 2.1 Create gui/Duster.slnx with Duster.App (WinUI 3, from the official winui-mvvm template, x64 + ARM64 only), Duster.Core (net10.0: protocol DTOs, `IEngineClient`, errors), Duster.Infrastructure (net10.0: engine path resolution, process + NDJSON client), Duster.Tests (MSTest); nullable + warnings as errors; verify `dotnet build` of Core/Infrastructure/Tests on macOS and of the whole solution on the PC
+- [ ] 2.2 Infrastructure `EngineClient`: resolve du.exe beside the app (link refused), start with redirected stdio and no window, handshake, request/reply correlation, progress events, cancel, stderr drained, malformed lines tolerated, exit detection, clean shutdown (stdin close, then kill after a grace period); verify tests against an in-memory stream pair and against the real `du engine` binary
+- [ ] 2.3 Shell: NavigationView (Home, Clean, Restore, Analyze) with page routing by type so later pages are one entry each, Mica, system theme, engine status in the footer, app-level error bar, AutomationIds; verify on the PC with `.\BuildAndRun.ps1` in light, dark, and high contrast
+- [ ] 2.4 Home page: engine connection state, version, one `status.get` on load plus a Refresh button (no timer), links to Clean/Restore/Analyze, engine-missing and protocol-mismatch states; Clean/Restore/Analyze pages as shells with ViewModels; verify on the PC, including with du.exe renamed
+- [ ] 2.5 Verify on the PC: `dotnet test`, the app launches, handshake shows connected, and closing the window leaves no `du.exe` running (`Get-Process du`)
 
 ## 3. Clean page (milestone 3)
 
-- [ ] 3.1 Clean page: grouped categories with sizes from `clean.scan`, select/deselect, admin shield, confirm dialog, progress, Cancel, results; verify on the PC against categories that are safe to empty, plus a ViewModel unit test with a fake EngineClient
+- [ ] 3.1 Clean page: grouped categories with sizes from `clean.scan`, select/deselect, admin shield, confirm dialog stating deletion is permanent, progress, Cancel, results; verify on the PC against categories that are safe to empty, plus a ViewModel unit test with a fake `IEngineClient`
 - [ ] 3.2 "Restart as administrator" relaunch; verify on the PC that UAC appears and prefetch becomes available
 
-## 4. Quarantine-based pages (milestone 4)
+## 4. Restore page (milestone 4)
 
-- [ ] 4.1 Engine: progress + context hooks in purge loops, `purge.scan`/`purge.run`, `installer.scan`/`installer.run`, `restore.list`/`restore.run`/`restore.empty` with engine-issued IDs; verify Go tests with `tempQuarantine` for locked file, access denied, and reparse point scenarios
-- [ ] 4.2 Purge, Installers, and Restore pages; verify a GUI purge shows up in `du restore` and restores (windows-smoke or a test folder on the PC)
+- [ ] 4.1 Engine: `restore.list`/`restore.run`/`restore.empty` over the existing quarantine sessions with engine-issued IDs; verify Go tests with `tempQuarantine` for a conflict skip, access denied, and a reparse point
+- [ ] 4.2 Restore page; verify a `du purge` session appears in the GUI and restores (windows-smoke or a test folder on the PC)
 
 ## 5. Analyze (milestone 5)
 
 - [ ] 5.1 Engine: `analyze.scan` with throttled progress and history changes (tests set LOCALAPPDATA to t.TempDir()); verify Go tests
 - [ ] 5.2 Analyze page: virtualized folder tree, largest files, changes since last scan, send to Recycle Bin via engine; verify on the PC with a large folder that the UI stays responsive
 
-## 6. Uninstall (milestone 6)
+## 6. Packaging (milestone 6)
 
-- [ ] 6.1 Extract the uninstall run + leftover sweep from `uninstallModel.Update` into a function the TUI and the engine share; verify existing uninstall tests pass unchanged and a new test covers the extracted function
-- [ ] 6.2 Engine `uninstall.list`/`uninstall.run`/`uninstall.leftovers`; Uninstall page with search, leftovers starting unselected; verify with the e2e Inno test app in windows-smoke
+- [ ] 6.1 Publish Duster.exe self-contained for win-x64 and win-arm64 in release.yml, Makefile, and build-release.sh; add to the Inno installer (Start menu shortcut) and zips; CI job `gui` (windows-latest, windows-11-arm) plus Core/Infrastructure tests on ubuntu; verify the release dry run produces both and checksums cover them
+- [ ] 6.2 `du update` installs Duster.exe too (extend `releaseBinaries`) and `du remove` removes it; verify update and remove tests and a windows-smoke install/uninstall
 
-## 7. Remaining pages (milestone 7)
+## 7. Hardening (milestone 7)
 
-- [ ] 7.1 Engine + pages for Optimize (with reclaim report), Virtual disks, Schedule; verify Go tests and on the PC (vdisk compaction only in windows-smoke)
-- [ ] 7.2 Settings: theme, update check, about; `du update` installs Duster.exe too (extend `releaseBinaries`); verify update tests cover the new binary
-
-## 8. Packaging (milestone 8)
-
-- [ ] 8.1 Publish Duster.exe self-contained for win-x64 and win-arm64 in release.yml, Makefile, and build-release.sh; add to the Inno installer (Start menu shortcut) and zips; verify the release dry run produces both and checksums cover them
-- [ ] 8.2 `du remove` removes Duster.exe; verify remove tests and a windows-smoke install/uninstall
-
-## 9. Hardening (milestone 9)
-
-- [ ] 9.1 FlaUI smoke test in windows-smoke (launch, visit every page, clean dry run); if hosted runners can't automate UI, add the flow to docs/release-checklist.md instead; verify one of the two lands
-- [ ] 9.2 Accessibility Insights pass and keyboard-only walkthrough; verify zero automated failures
-- [ ] 9.3 Measure cold start and memory; try Native AOT only if startup exceeds 1.5 s; verify numbers recorded in the PR
-- [ ] 9.4 Run `winui-code-review` and the security review over the whole GUI; verify findings fixed or recorded
+- [ ] 7.1 FlaUI smoke test in windows-smoke (launch, visit every page, clean scan only); if hosted runners can't automate UI, add the flow to docs/release-checklist.md instead; verify one of the two lands
+- [ ] 7.2 Accessibility Insights pass and keyboard-only walkthrough; verify zero automated failures
+- [ ] 7.3 Measure cold start and memory; try Native AOT only if startup exceeds 1.5 s; verify numbers recorded in the PR
+- [ ] 7.4 Run `winui-code-review` and the security review over the whole GUI; verify findings fixed or recorded
