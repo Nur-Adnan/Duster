@@ -7,7 +7,7 @@ Overall status: IMPLEMENTED — WINDOWS VERIFICATION PENDING. Implementation is 
 - [x] 1.3 Implement per-request contexts, stdin-EOF shutdown, and the `busy` TryLock for state-changing methods; verify tests for concurrent read-only requests, a second destructive request getting `busy`, and EOF exiting cleanly
 - [x] 1.4 Implement `status.get` (optional top processes) and `doctor.run`; verify results decode into the same structs `du status --json` and `du doctor --json` emit
 - [x] 1.5 Implement `clean.scan` (categories in `cleanGroups` order, group, bytes, files, admin-blocked) and `clean.run` (engine-issued IDs only, progress events per category, cancel between categories, `admin_required` per-category error); verify with a test category rooted in t.TempDir() covering selected subset, unknown ID refused, cancel mid-run, and a symlink inside the root not traversed
-- [x] 1.6 Run all gates (gofmt, vet, staticcheck, both GOOS) and `DU_NO_OPLOG=1 go test ./...`; update CLAUDE.md (engine row + layout)
+- [x] 1.6 Run all gates (gofmt, vet, staticcheck, both GOOS) and `DU_NO_OPLOG=1 go test ./...`; update the contributor notes (engine row + layout)
 
 ## 2. GUI shell (milestone 2)
 

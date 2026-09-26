@@ -6,7 +6,7 @@ Nothing here deletes your files except where a step says so, and those steps use
 
 ## 0. Setup
 
-- [ ] **1. Toolchain.** In PowerShell: `[Environment]::OSVersion.Version`, `$env:PROCESSOR_ARCHITECTURE`, `$PSVersionTable.PSVersion`, `dotnet --list-sdks` (needs a 10.0 SDK), `go version` (1.25+), `git --version`, `winapp --version` (optional, 0.6+). Developer Mode is not required (the app is unpackaged). Missing .NET 10: `winget install Microsoft.DotNet.SDK.10`, or run `/winui:winui-setup` in Claude Code.
+- [ ] **1. Toolchain.** In PowerShell: `[Environment]::OSVersion.Version`, `$env:PROCESSOR_ARCHITECTURE`, `$PSVersionTable.PSVersion`, `dotnet --list-sdks` (needs a 10.0 SDK), `go version` (1.25+), `git --version`, `winapp --version` (optional, 0.6+). Developer Mode is not required (the app is unpackaged). Missing .NET 10: `winget install Microsoft.DotNet.SDK.10`.
 - [ ] **2. Repository.** `git checkout feat/windows-gui`, `git status` clean apart from your own edits.
 
 ## 1. Automated gate

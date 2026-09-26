@@ -1,6 +1,6 @@
 schema: spec-driven
 
-# Injected into every artifact prompt. Keep it to facts an AI can't infer quickly.
+# Injected into every artifact prompt. Keep it to facts a reader can't infer quickly.
 context: |
   Duster: Windows-native deep cleaner and system optimization CLI. Ships as a
   single static binary `du.exe` (Go 1.25, CGO_ENABLED=0, windows/amd64 + arm64).

@@ -71,19 +71,10 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# --------------------------------------------------------------------
-# AI Assistants, Agentic Tools & Editor Configurations (CRITICAL)
-# --------------------------------------------------------------------
-.agents/
-.cursor/
-.gemini/
-.claude/
-.kiro/
-.cursorrules
 journal/
 
 # --------------------------------------------------------------------
-# Private Documentation, Prompts, Planning & AI Notes
+# Private documentation and notes
 # --------------------------------------------------------------------
 # Ignore all markdown files globally by default to prevent committing
 # private planning documents, workflow logs, fuzzer notes, or guidelines.
