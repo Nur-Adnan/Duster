@@ -11,9 +11,14 @@ public sealed record AnalyzeRow(AnalyzeItem Item, double Percent)
     public string Detail => Item.IsDir ? $"{Item.Items:N0} items" : "";
 }
 
-/// <summary>A "changes since the last scan" line.</summary>
-public sealed record ChangeRow(ChangeEntry Entry)
+/// <summary>A "changes since the last scan" line; <see cref="Index"/> is its place in the engine's list.</summary>
+public sealed record ChangeRow(ChangeEntry Entry, int Index)
 {
+    /// <summary>A folder to open for it exists in this scan (the TUI's Enter).</summary>
+    public bool CanOpen => Entry.Id > 0;
+
+    public string RevealName => $"Show {Entry.Path} in Explorer";
+
     public string Text => $"{Entry.Status} {(Entry.Delta >= 0 ? "+" : "-")}{Format.Bytes(Math.Abs(Entry.Delta))}";
 }
 
@@ -32,6 +37,19 @@ public sealed partial class AnalyzeViewModel(IEngineClient engine, IAppHost host
 
     [ObservableProperty]
     public partial string Path { get; set; } = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+
+    /// <summary>Choices for <see cref="Since"/>; any value <c>du analyze --since</c> accepts also works.</summary>
+    public static IReadOnlyList<string> SinceChoices { get; } = [PreviousScan, "24h", "7d", "2w", "30d"];
+
+    public const string PreviousScan = "Previous scan";
+
+    /// <summary>Compare with a scan at least this old (<c>--since</c>), or the previous one.</summary>
+    [ObservableProperty]
+    public partial string Since { get; set; } = PreviousScan;
+
+    /// <summary>Neither compare with nor save a snapshot (<c>--no-history</c>).</summary>
+    [ObservableProperty]
+    public partial bool NoHistory { get; set; }
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(RecycleCommand), nameof(BrowseCommand))]
@@ -75,10 +93,15 @@ public sealed partial class AnalyzeViewModel(IEngineClient engine, IAppHost host
             Status = $"Scanning… {p.Files:N0} files, {Format.Bytes(p.Bytes)} so far");
         try
         {
-            var result = await engine.AnalyzeAsync(Path.Trim(), progress, ct);
+            var since = Since.Trim() is var s && !s.Equals(PreviousScan, StringComparison.OrdinalIgnoreCase) ? s : "";
+            var result = await engine.AnalyzeAsync(Path.Trim(), since, NoHistory, progress, ct);
             Trail.Clear();
             Show(result.Root);
             ShowChanges(result.Changes);
+            if (NoHistory)
+            {
+                ChangesSummary = "History was off for this scan: nothing was compared or saved.";
+            }
             Status = $"{Format.Bytes(result.Root.Size)} in {result.Files:N0} files and {result.Dirs:N0} folders." +
                      (result.HistoryNotes.Count > 0 ? " " + string.Join(" ", result.HistoryNotes) : "");
         }
@@ -126,6 +149,29 @@ public sealed partial class AnalyzeViewModel(IEngineClient engine, IAppHost host
         });
     }
 
+    /// <summary>Opens the folder a change is in, with the breadcrumb from the scanned folder.</summary>
+    [RelayCommand]
+    private Task OpenChangeAsync(ChangeRow row) => !row.CanOpen || IsBusy || IsScanning
+        ? Task.CompletedTask
+        : RunAsync(async () =>
+        {
+            var folder = await engine.AnalyzeChildrenAsync(row.Entry.Id);
+            Trail.Clear();
+            foreach (var crumb in folder.Trail)
+            {
+                Trail.Add(new AnalyzeFolder { Id = crumb.Id, Path = crumb.Path });
+            }
+            Show(folder);
+        });
+
+    /// <summary>Shows a scanned item in Explorer (the engine opens it; the GUI starts nothing).</summary>
+    [RelayCommand]
+    private Task RevealAsync(AnalyzeRow row) => RunAsync(() => engine.CallAsync(Calls.Reveal(row.Item.Id)));
+
+    /// <summary>Shows a change's nearest existing folder in Explorer (it may be gone).</summary>
+    [RelayCommand]
+    private Task RevealChangeAsync(ChangeRow row) => RunAsync(() => engine.CallAsync(Calls.Reveal(0, row.Index + 1)));
+
     [RelayCommand(CanExecute = nameof(CanRecycle))]
     private async Task RecycleAsync()
     {
@@ -170,9 +216,9 @@ public sealed partial class AnalyzeViewModel(IEngineClient engine, IAppHost host
             ChangesSummary = "First scan of this folder: the next scan will show what changed.";
             return;
         }
-        foreach (var entry in report.Entries)
+        for (var i = 0; i < report.Entries.Count; i++)
         {
-            Changes.Add(new ChangeRow(entry));
+            Changes.Add(new ChangeRow(report.Entries[i], i));
         }
         ChangesSummary = $"{(report.Delta >= 0 ? "Grew" : "Shrank")} by {Format.Bytes(Math.Abs(report.Delta))} since {report.Since.LocalDateTime:g}.";
     }

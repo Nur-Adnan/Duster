@@ -33,6 +33,18 @@ public sealed partial class RestorePage : Page
         }
     }
 
+    // Which view is showing is view state only; the activity log loads when first shown.
+    private void Views_SelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
+    {
+        var activity = sender.SelectedItem == ActivityView;
+        KeptPanel.Visibility = KeptButtons.Visibility = Ui.Visible(!activity);
+        ActivityPanel.Visibility = Ui.Visible(activity);
+        if (activity && ViewModel.Activity.Count == 0)
+        {
+            ViewModel.LoadActivityCommand.Execute(null);
+        }
+    }
+
     private void RestoreItem_Click(object sender, RoutedEventArgs e)
     {
         if (sender is FrameworkElement { Tag: RestoreItem item })

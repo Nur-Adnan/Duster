@@ -11,7 +11,7 @@ Nothing here deletes your files except where a step says so, and those steps use
 
 ## 1. Automated gate
 
-- [ ] **3. Smoke test.** From the repo root: `powershell -ExecutionPolicy Bypass -File gui\smoke.ps1` (ARM64 PC: add `-Platform ARM64`). It covers items 4-8 and 24-25 and prints a PASS summary. Save the full output.
+- [ ] **3. Smoke test.** From the repo root: `powershell -ExecutionPolicy Bypass -File gui\smoke.ps1` (ARM64 PC: add `-Platform ARM64`). It covers items 4-8 and 24-25, opens every page once (a page that fails to load fails the run), and prints a PASS summary. Save the full output.
   - 4. Restore: `dotnet` restores every project.
   - 5. Build and XAML compile: `Duster.App` builds with warnings as errors.
   - 6. Unit and integration tests: all `Duster.Tests` pass against the real `du.exe` (0 skipped expected on Windows, except the symlink test when Developer Mode is off and the `/bin/cat` test).
@@ -50,8 +50,27 @@ Start `%TEMP%\duster-smoke\release-layout\Duster.exe` for the manual part.
 - [ ] **29. Security.** While using every page, Process Explorer or `Get-CimInstance Win32_Process -Filter "ParentProcessId=<Duster pid>"` shows only `du.exe` (from Duster's folder), never `cmd.exe` or `powershell.exe`; the only UAC prompt is the one you asked for; replacing `du.exe` with a symbolic link (`mklink`, admin) makes the GUI refuse to start it; Clean with nothing confirmed deletes nothing.
 - [ ] **30. Performance.** Cold start to Home showing data (stopwatch, or `Measure-Command { Start-Process ... }` plus the footer turning to Engine): record it; above 1.5 s, try Native AOT (task 7.3). Working set of `Duster.exe` idle on Home and after an Analyze of a large folder (Task Manager, Details). The UI never freezes during a scan of `C:\`.
 
-## 5. Final
+## 5. Parity pages (OpenSpec expand-windows-gui-cli-parity)
 
-- [ ] **31. Final smoke.** After any fixes, run `gui\smoke.ps1` again (both architectures if you ship ARM64) and all of section 2 that the fixes touched.
+Compare each page with the CLI command named, on the same PC. Use test folders and a portable test copy of Duster for anything destructive.
+
+- [ ] **32. Navigation.** Groups Cleanup, Storage, Recovery, System, Automation; Settings in the footer; all 13 pages open, keep their state, and are reachable by keyboard.
+- [ ] **33. Home dashboard** vs `du status`: CPU (cores, busiest), temperature (or N/A), memory, drives, disk activity, network, battery, uptime, health. Live refreshes every 2 s only while Home is open (switch pages: `du.exe` CPU in Task Manager drops to idle). Sample now lists processes; Copy report pastes the same numbers.
+- [ ] **34. Diagnostics** vs `du doctor`, `du verify`, `du benchmark`: same checks and results; the privilege warning offers Restart as administrator; Copy report.
+- [ ] **35. System**: Startup apps match the `du` menu's Startup view and Task Manager > Startup apps; Disable then Enable one entry (Task Manager agrees each time); Remove disabled entries asks first and removes only disabled ones; machine-wide entries show a shield unelevated. Security matches the menu's Security view; Drivers lists drivers (the PowerShell query is a child of `du.exe`, never of `Duster.exe`).
+- [ ] **36. Developer artifacts** vs `du purge`: a test project (`package.json` + `node_modules`); Keep (then Restore lists it), Recycle Bin, and Delete permanently (dialog says it cannot be restored) each do what they say; Stop during a multi-folder run reports what finished.
+- [ ] **37. Old installers** vs `du installer`: a large .exe in Downloads dated more than 7 days back is listed, a new one is not; Minimum size filters; Remove keeps it (Restore lists it).
+- [ ] **38. Apps** vs `du uninstall`: search; a protected system component cannot be uninstalled; uninstall a small test app: its own uninstaller runs, then leftovers appear unselected and only ticked ones are kept. While elevated, a per-user app is refused with the reason.
+- [ ] **39. Virtual disks** vs `du vdisk` (skip without WSL or Docker): disks and block reasons listed; unelevated shows the administrator bar; elevated, Compact warns about `wsl --shutdown` and returns space; Stop leaves WSL starting normally.
+- [ ] **40. Optimize** vs `du optimize`: Preview changes nothing; DNS flush and Delivery Optimization run after the confirm; TRIM and the component store need administrator rights and the component store is never preselected; the reclaim report shows Windows.old and the hibernation file with advice.
+- [ ] **41. Schedule** vs `du schedule`: Preview lists what a run would clean; Turn on registers the task (Task Scheduler and `du schedule` agree); edit and save; Turn off asks and removes it.
+- [ ] **42. Settings** vs `du update`, `du remove` (portable test copy only): versions and folders are right; Check for updates; Reinstall repairs a deleted `duw.exe`; Restart Duster starts the new one; a setup install shows the Installed apps link; Remove Duster (test copy) asks, removes everything `du remove` does, and closes.
+- [ ] **43. Analyze additions** vs `du analyze --since 7d`, `--no-history`: Compare with, Don't save this scan (Changes says history was off), clicking a change opens its folder with the breadcrumb, Show in Explorer for an item and for a change.
+- [ ] **44. Restore additions** vs `du restore --dry-run`: Preview moves nothing; Activity log matches `%LOCALAPPDATA%\Duster\operations.log`, newest first; an expired session is removed on listing, as `du restore` does.
+- [ ] **45. Security across the new pages**: `Duster.exe` only ever starts `du.exe` (plus itself for Restart as administrator or Restart Duster); every destructive action asked first with Cancel as the default.
+
+## 6. Final
+
+- [ ] **31. Final smoke.** After any fixes, run `gui\smoke.ps1` again (both architectures if you ship ARM64) and all of sections 2 and 5 that the fixes touched.
 
 Record: Windows version, architecture, .NET SDK, the smoke summary, and PASS/FAIL per item. Only after every item passes can Milestone 2-7 Windows verification be ticked in `openspec/changes/add-windows-gui/tasks.md`.

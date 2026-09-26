@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="Duster.App.Views.SchedulePage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:Duster.App"
+    xmlns:vm="using:Duster.Core.ViewModels">
+
+    <Page.Resources>
+        <DataTemplate x:Key="StatTemplate" x:DataType="vm:StatRow">
+            <Grid Padding="0,2" ColumnSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="180" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Style="{StaticResource SecondaryTextStyle}" Text="{x:Bind Label}" />
+                <TextBlock Grid.Column="1" Text="{x:Bind Value}" TextWrapping="Wrap" />
+            </Grid>
+        </DataTemplate>
+    </Page.Resources>
+
+    <ScrollViewer>
+        <StackPanel MaxWidth="960" Padding="{StaticResource PagePadding}" HorizontalAlignment="Stretch" Spacing="12">
+            <StackPanel>
+                <TextBlock Style="{StaticResource PageTitleStyle}" Text="Schedule" />
+                <TextBlock Style="{StaticResource SecondaryTextStyle}" Text="Windows Task Scheduler checks once a day at your time. Duster cleans when the interval has passed, or sooner when the system drive runs low. It never runs as administrator, skips runs on battery, and deletes what it cleans for good." />
+            </StackPanel>
+
+            <Border Style="{StaticResource SectionPanelStyle}">
+                <ItemsControl ItemTemplate="{StaticResource StatTemplate}" ItemsSource="{x:Bind ViewModel.State}" AutomationProperties.Name="Schedule status" />
+            </Border>
+            <InfoBar
+                Title="Notes"
+                IsClosable="False"
+                IsOpen="{x:Bind local:Ui.HasText(ViewModel.Warnings), Mode=OneWay}"
+                Message="{x:Bind ViewModel.Warnings, Mode=OneWay}"
+                Severity="Warning"
+                AutomationProperties.AutomationId="ScheduleWarnings" />
+
+            <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Settings" />
+            <Border Style="{StaticResource SectionPanelStyle}">
+                <StackPanel Spacing="16">
+                    <RadioButtons Header="How often" MaxColumns="3" SelectedIndex="{x:Bind ViewModel.EveryIndex, Mode=TwoWay}" AutomationProperties.AutomationId="ScheduleEvery">
+                        <x:String>Daily</x:String>
+                        <x:String>Weekly</x:String>
+                        <x:String>Monthly</x:String>
+                    </RadioButtons>
+                    <StackPanel Orientation="Horizontal" Spacing="24">
+                        <TimePicker Header="Daily check time" ClockIdentifier="24HourClock" Time="{x:Bind ViewModel.At, Mode=TwoWay}" AutomationProperties.AutomationId="ScheduleAt" />
+                        <NumberBox
+                            Header="Clean early below (% free, 0 = off)"
+                            Maximum="50"
+                            Minimum="0"
+                            SpinButtonPlacementMode="Compact"
+                            Value="{x:Bind ViewModel.LowSpacePercent, Mode=TwoWay}"
+                            AutomationProperties.AutomationId="ScheduleLowSpace" />
+                    </StackPanel>
+                    <StackPanel Spacing="4">
+                        <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Always cleaned" />
+                        <TextBlock Style="{StaticResource SecondaryTextStyle}" Text="{x:Bind ViewModel.AlwaysCleans, Mode=OneWay}" />
+                    </StackPanel>
+                    <StackPanel Spacing="4">
+                        <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Also clean (downloaded again when needed)" />
+                        <ItemsControl ItemsSource="{x:Bind ViewModel.OptIn}" AutomationProperties.Name="Optional categories">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="vm:ChoiceRow">
+                                    <CheckBox Content="{x:Bind Choice.Name}" IsChecked="{x:Bind IsSelected, Mode=TwoWay}" AutomationProperties.AutomationId="{x:Bind Choice.Id}" />
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Command="{x:Bind ViewModel.PreviewCommand}" Content="Preview" AutomationProperties.AutomationId="SchedulePreview" />
+                <Button Command="{x:Bind ViewModel.TurnOnCommand}" Content="{x:Bind ViewModel.TurnOnLabel, Mode=OneWay}" Style="{StaticResource AccentButtonStyle}" AutomationProperties.AutomationId="ScheduleOn" />
+                <Button Command="{x:Bind ViewModel.TurnOffCommand}" Content="Turn off…" Visibility="{x:Bind local:Ui.Visible(ViewModel.IsOn), Mode=OneWay}" AutomationProperties.AutomationId="ScheduleOff" />
+            </StackPanel>
+            <ProgressBar IsIndeterminate="True" Visibility="{x:Bind local:Ui.Visible(ViewModel.IsBusy), Mode=OneWay}" AutomationProperties.Name="Working" />
+            <TextBlock Style="{StaticResource SecondaryTextStyle}" Text="{x:Bind ViewModel.Status, Mode=OneWay}" AutomationProperties.AutomationId="ScheduleStatus" AutomationProperties.LiveSetting="Polite" />
+            <ItemsControl ItemTemplate="{StaticResource StatTemplate}" ItemsSource="{x:Bind ViewModel.WouldClean}" AutomationProperties.Name="What a run now would clean" />
+        </StackPanel>
+    </ScrollViewer>
+</Page>

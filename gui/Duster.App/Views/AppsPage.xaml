@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="Duster.App.Views.AppsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:Duster.App"
+    xmlns:vm="using:Duster.Core.ViewModels">
+
+    <Grid Padding="{StaticResource PagePadding}" RowSpacing="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <StackPanel>
+            <TextBlock Style="{StaticResource PageTitleStyle}" Text="Apps" />
+            <TextBlock Style="{StaticResource SecondaryTextStyle}" Text="Duster runs an app's own uninstaller and waits for it. Afterwards it offers the folders the app left behind; they are matched by name, so none are selected until you choose, and removed ones are kept for 7 days." />
+        </StackPanel>
+
+        <Grid Grid.Row="1" ColumnSpacing="8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBox Header="Search installed apps" PlaceholderText="Name or publisher" Text="{x:Bind ViewModel.Search, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.AutomationId="AppsSearch" />
+            <Button Grid.Column="1" VerticalAlignment="Bottom" Command="{x:Bind ViewModel.LoadCommand}" ToolTipService.ToolTip="Refresh" AutomationProperties.Name="Refresh" AutomationProperties.AutomationId="AppsRefresh">
+                <FontIcon FontSize="14" Glyph="&#xE72C;" />
+            </Button>
+            <Button Grid.Column="2" VerticalAlignment="Bottom" Command="{x:Bind ViewModel.UninstallCommand}" Content="Uninstall…" Style="{StaticResource AccentButtonStyle}" AutomationProperties.AutomationId="AppsUninstall" />
+        </Grid>
+
+        <StackPanel Grid.Row="2" Spacing="4">
+            <ProgressBar IsIndeterminate="True" Visibility="{x:Bind local:Ui.Visible(ViewModel.IsBusy), Mode=OneWay}" AutomationProperties.Name="Working" />
+            <TextBlock Style="{StaticResource SecondaryTextStyle}" Text="{x:Bind ViewModel.Status, Mode=OneWay}" AutomationProperties.AutomationId="AppsStatus" AutomationProperties.LiveSetting="Polite" />
+        </StackPanel>
+
+        <ListView
+            x:Name="AppList"
+            Grid.Row="3"
+            ItemsSource="{x:Bind ViewModel.Apps}"
+            SelectionChanged="AppList_SelectionChanged"
+            SelectionMode="Single"
+            AutomationProperties.AutomationId="AppsList"
+            AutomationProperties.Name="Installed apps">
+            <ListView.ItemTemplate>
+                <DataTemplate x:DataType="vm:AppRow">
+                    <StackPanel Padding="0,6" AutomationProperties.Name="{x:Bind App.Name}">
+                        <TextBlock Text="{x:Bind App.Name}" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind Detail}" TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                </DataTemplate>
+            </ListView.ItemTemplate>
+        </ListView>
+
+        <Border Grid.Row="4" Style="{StaticResource SectionPanelStyle}" Visibility="{x:Bind local:Ui.Visible(ViewModel.HasLeftovers), Mode=OneWay}">
+            <Grid RowSpacing="8">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Leftover folders (none selected: tick the ones that belong to the app)" />
+                <ListView
+                    Grid.Row="1"
+                    MaxHeight="240"
+                    ItemsSource="{x:Bind ViewModel.Leftovers}"
+                    SelectionMode="None"
+                    AutomationProperties.AutomationId="AppsLeftovers"
+                    AutomationProperties.Name="Leftover folders">
+                    <ListView.ItemTemplate>
+                        <DataTemplate x:DataType="vm:LeftoverRow">
+                            <Grid ColumnSpacing="16">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="90" />
+                                </Grid.ColumnDefinitions>
+                                <CheckBox IsChecked="{x:Bind IsSelected, Mode=TwoWay}" AutomationProperties.Name="{x:Bind Leftover.Path}">
+                                    <TextBlock Text="{x:Bind Leftover.Path}" TextTrimming="CharacterEllipsis" ToolTipService.ToolTip="{x:Bind Leftover.Path}" />
+                                </CheckBox>
+                                <TextBlock Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center" Text="{x:Bind SizeText}" />
+                            </Grid>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+                <StackPanel Grid.Row="2" HorizontalAlignment="Right" Orientation="Horizontal" Spacing="12">
+                    <TextBlock VerticalAlignment="Center" Style="{StaticResource SecondaryTextStyle}" Text="{x:Bind ViewModel.LeftoverText, Mode=OneWay}" />
+                    <Button Command="{x:Bind ViewModel.KeepLeftoversCommand}" Content="Remove selected leftovers…" AutomationProperties.AutomationId="AppsRemoveLeftovers" />
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</Page>

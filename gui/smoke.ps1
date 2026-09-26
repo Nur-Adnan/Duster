@@ -5,8 +5,11 @@
 # engine, then for both the Debug build and the release layout (single-file
 # Duster.exe beside du.exe and duw.exe, as the zip and installer ship it):
 # launches, checks the engine child is alive (a failed handshake stops it),
-# closes the window, and checks no du.exe is left behind. Read-only: nothing
-# here cleans or deletes anything outside its own temp folders.
+# opens every page through UI Automation (a page whose XAML fails to load
+# crashes the app), closes the window, and checks no du.exe is left behind.
+# Opening a page only runs its read-only listing; the one exception is
+# Restore, which, like `du restore`, lets go of kept items past their 7 days.
+# Nothing else here cleans or deletes anything outside its own temp folders.
 param([ValidateSet('x64', 'ARM64')][string]$Platform = 'x64')
 $ErrorActionPreference = 'Stop'
 
@@ -23,7 +26,29 @@ function Step($name, [scriptblock]$body) {
     $results[$name] = 'PASS'
 }
 
-# Launch, check the engine child, close, check for an orphan.
+Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+
+# Selects each navigation item (MainWindow navigates on SelectionChanged) and
+# checks the app survives loading that page.
+function Open-EveryPage($app) {
+    $ae = [Windows.Automation.AutomationElement]
+    $byPid = New-Object Windows.Automation.PropertyCondition($ae::ProcessIdProperty, $app.Id)
+    $window = $ae::RootElement.FindFirst([Windows.Automation.TreeScope]::Children, $byPid)
+    if (-not $window) { throw 'Duster window not found through UI Automation' }
+    $pages = 'NavClean', 'NavPurge', 'NavInstallers', 'NavApps', 'NavAnalyze', 'NavVirtualDisks', 'NavRestore',
+        'NavOptimize', 'NavSystem', 'NavDiagnostics', 'NavSchedule', 'NavSettings', 'NavHome'
+    foreach ($id in $pages) {
+        $byId = New-Object Windows.Automation.PropertyCondition($ae::AutomationIdProperty, $id)
+        $item = $window.FindFirst([Windows.Automation.TreeScope]::Descendants, $byId)
+        if (-not $item) { throw "navigation item $id not found" }
+        $item.GetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern).Select()
+        Start-Sleep -Seconds 2
+        if ($app.HasExited) { throw "Duster.exe exited after opening $id (code $($app.ExitCode)): that page failed to load" }
+        Write-Host "opened $id"
+    }
+}
+
+# Launch, check the engine child, open every page, close, check for an orphan.
 function Test-Lifecycle($exe) {
     $app = Start-Process $exe -PassThru
     Start-Sleep -Seconds 6
@@ -35,6 +60,7 @@ function Test-Lifecycle($exe) {
     $others = Get-CimInstance Win32_Process -Filter "ParentProcessId=$($app.Id)" | Where-Object { $_.Name -ne 'du.exe' }
     if ($others) { throw "Duster.exe started unexpected processes: $($others.Name -join ', ')" }
     Write-Host "engine pid $($child.ProcessId) ($($child.ExecutablePath)) under Duster pid $($app.Id)"
+    Open-EveryPage $app
 
     [void]$app.CloseMainWindow()
     if (-not $app.WaitForExit(15000)) { throw 'Duster.exe did not exit within 15 s of closing its window' }
@@ -68,7 +94,7 @@ Step 'dotnet build Duster.App (Debug)' {
     dotnet build (Join-Path $repo 'gui\Duster.App') -c Debug -p:Platform=$Platform
 }
 
-Step 'Debug build: launch + handshake + close + no orphan' {
+Step 'Debug build: launch + handshake + every page + close + no orphan' {
     $exe = Get-ChildItem (Join-Path $repo "gui\Duster.App\bin\$Platform\Debug") -Recurse -Filter Duster.exe |
         Where-Object { $_.DirectoryName -like "*$rid*" } | Select-Object -First 1
     if (-not $exe) { throw "Duster.exe not found under gui\Duster.App\bin\$Platform\Debug" }
@@ -89,7 +115,7 @@ Step 'dotnet publish (single-file, as released)' {
     Write-Host ("Duster.exe {0:N1} MB" -f ((Get-Item (Join-Path $layout 'Duster.exe')).Length / 1MB))
 }
 
-Step 'release layout: launch + handshake + close + no orphan' {
+Step 'release layout: launch + handshake + every page + close + no orphan' {
     Test-Lifecycle (Join-Path $layout 'Duster.exe')
 }
 

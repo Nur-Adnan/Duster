@@ -1,0 +1,47 @@
+using System.Text.Json.Serialization;
+
+namespace Duster.Core;
+
+// Source-generated so the GUI stays trim- and AOT-ready. In Core so an
+// EngineCall can name its result type and a ViewModel can read a partial
+// result after a cancel.
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.SnakeCaseLower)]
+[JsonSerializable(typeof(EngineHello))]
+[JsonSerializable(typeof(SystemStats))]
+[JsonSerializable(typeof(DoctorSnapshot))]
+[JsonSerializable(typeof(CleanResult))]
+[JsonSerializable(typeof(CleanProgress))]
+[JsonSerializable(typeof(RestoreSessionList))]
+[JsonSerializable(typeof(RestoreRunResult))]
+[JsonSerializable(typeof(RestoreEmptyResult))]
+[JsonSerializable(typeof(AnalyzeResult))]
+[JsonSerializable(typeof(AnalyzeFolder))]
+[JsonSerializable(typeof(AnalyzeProgress))]
+[JsonSerializable(typeof(RecycleResult))]
+[JsonSerializable(typeof(ItemProgress))]
+[JsonSerializable(typeof(VerifyReport))]
+[JsonSerializable(typeof(BenchmarkMetrics))]
+[JsonSerializable(typeof(SecurityReport))]
+[JsonSerializable(typeof(DriverList))]
+[JsonSerializable(typeof(OplogList))]
+[JsonSerializable(typeof(StartupList))]
+[JsonSerializable(typeof(StartupToggleResult))]
+[JsonSerializable(typeof(StartupRemoveResult))]
+[JsonSerializable(typeof(PurgeScan))]
+[JsonSerializable(typeof(PurgeResult))]
+[JsonSerializable(typeof(InstallerScan))]
+[JsonSerializable(typeof(KeepResult))]
+[JsonSerializable(typeof(AppList))]
+[JsonSerializable(typeof(UninstallResult))]
+[JsonSerializable(typeof(OptimizeList))]
+[JsonSerializable(typeof(OptimizeResult))]
+[JsonSerializable(typeof(VirtualDiskList))]
+[JsonSerializable(typeof(VirtualDiskResult))]
+[JsonSerializable(typeof(ScheduleInfo))]
+[JsonSerializable(typeof(ScheduleStatus))]
+[JsonSerializable(typeof(ScheduleOffResult))]
+[JsonSerializable(typeof(UpdateInfo))]
+[JsonSerializable(typeof(UpdateInstallResult))]
+[JsonSerializable(typeof(RemovePlan))]
+[JsonSerializable(typeof(Empty))]
+public sealed partial class EngineJson : JsonSerializerContext;

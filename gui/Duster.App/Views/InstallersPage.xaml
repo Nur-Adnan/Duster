@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="Duster.App.Views.InstallersPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:Duster.App"
+    xmlns:vm="using:Duster.Core.ViewModels">
+
+    <Grid Padding="{StaticResource PagePadding}" RowSpacing="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <StackPanel>
+            <TextBlock Style="{StaticResource PageTitleStyle}" Text="Old installers" />
+            <TextBlock Style="{StaticResource SecondaryTextStyle}" Text="Setup files (.exe, .msi, .msix, .appx) in your Downloads folder that are at least 7 days old. Removed ones are kept for 7 days." />
+        </StackPanel>
+
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8">
+            <NumberBox
+                Header="Minimum size (MB)"
+                Minimum="1"
+                SmallChange="10"
+                SpinButtonPlacementMode="Compact"
+                Value="{x:Bind ViewModel.MinSizeMb, Mode=TwoWay}"
+                AutomationProperties.AutomationId="InstallersMinSize" />
+            <Button VerticalAlignment="Bottom" Command="{x:Bind ViewModel.ScanCommand}" Content="Scan" Style="{StaticResource AccentButtonStyle}" AutomationProperties.AutomationId="InstallersScan" />
+        </StackPanel>
+
+        <StackPanel Grid.Row="2" Spacing="4">
+            <ProgressBar IsIndeterminate="True" Visibility="{x:Bind local:Ui.Visible(ViewModel.IsBusy), Mode=OneWay}" AutomationProperties.Name="Working" />
+            <TextBlock Style="{StaticResource SecondaryTextStyle}" Text="{x:Bind ViewModel.Status, Mode=OneWay}" AutomationProperties.AutomationId="InstallersStatus" AutomationProperties.LiveSetting="Polite" />
+        </StackPanel>
+
+        <ListView
+            Grid.Row="3"
+            ItemsSource="{x:Bind ViewModel.Items}"
+            SelectionMode="None"
+            AutomationProperties.AutomationId="InstallersItems"
+            AutomationProperties.Name="Old installers">
+            <ListView.ItemTemplate>
+                <DataTemplate x:DataType="vm:InstallerRow">
+                    <Grid Padding="0,4" ColumnSpacing="16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="90" />
+                        </Grid.ColumnDefinitions>
+                        <CheckBox IsChecked="{x:Bind IsSelected, Mode=TwoWay}" AutomationProperties.Name="{x:Bind Item.Name}">
+                            <StackPanel>
+                                <TextBlock Text="{x:Bind Item.Name}" TextTrimming="CharacterEllipsis" ToolTipService.ToolTip="{x:Bind Item.Path}" />
+                                <TextBlock Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind Detail}" />
+                            </StackPanel>
+                        </CheckBox>
+                        <TextBlock Grid.Column="1" VerticalAlignment="Center" Style="{StaticResource SecondaryTextStyle}" Text="{x:Bind Outcome, Mode=OneWay}" />
+                        <TextBlock Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center" Text="{x:Bind SizeText}" />
+                    </Grid>
+                </DataTemplate>
+            </ListView.ItemTemplate>
+        </ListView>
+
+        <Grid Grid.Row="4" ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <HyperlinkButton Command="{x:Bind ViewModel.SelectAllCommand}" Content="Select all" AutomationProperties.AutomationId="InstallersSelectAll" />
+                <HyperlinkButton Command="{x:Bind ViewModel.SelectNoneCommand}" Content="Select none" AutomationProperties.AutomationId="InstallersSelectNone" />
+            </StackPanel>
+            <TextBlock Grid.Column="2" VerticalAlignment="Center" Style="{StaticResource SecondaryTextStyle}" Text="{x:Bind ViewModel.SelectedText, Mode=OneWay}" />
+            <Button Grid.Column="3" Command="{x:Bind ViewModel.KeepCommand}" Content="Remove selected…" Style="{StaticResource AccentButtonStyle}" AutomationProperties.AutomationId="InstallersRun" />
+        </Grid>
+    </Grid>
+</Page>
