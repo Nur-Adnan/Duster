@@ -2,7 +2,7 @@
 
 Source of truth: the CLI in `cmd/` and `main.go`. Machine-readable inventory: `openspec/changes/expand-windows-gui-cli-parity/cli-inventory.json`. OpenSpec change: `expand-windows-gui-cli-parity`.
 
-**State:** implemented and macOS-tested. The GUI pages build and run only on Windows, so every row is **Windows verification pending** (docs/gui-windows-verification.md).
+**State:** implemented. The engine methods (Go tests), the ViewModels and the client (.NET tests with a fake engine and against the real `du engine`) are tested on macOS. The WinUI pages compile and run only on Windows and have not been built yet, so every row is **Windows verification pending** (docs/gui-windows-verification.md, items 32-45).
 
 Statuses: **FULL** (same capability in the GUI), **GUI-NATIVE-EQUIVALENT** (same outcome through a GUI control instead of the CLI mechanism), **CLI-ONLY** (scripting or terminal mode with no user value in a window), **WINDOWS-ONLY** (Windows' own UI does it), **NOT-APPLICABLE** (internal; nothing to expose), **PARTIAL** (some of it; none left).
 
